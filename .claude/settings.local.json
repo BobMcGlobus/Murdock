@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(docker --version)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)",
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); [print\\(f\"\"{d[''''type'''']:<5} {d[''''name'''']}\"\"\\) for d in data]\")",
+      "Bash(python -m py_compile voiceid/config.py voiceid/__init__.py voiceid/core/audio.py voiceid/core/fbank.py voiceid/core/embeddings.py voiceid/core/vad.py voiceid/core/db.py voiceid/core/speaker_store.py voiceid/core/unknown_store.py voiceid/core/liveness.py voiceid/core/ha_integration.py voiceid/core/context.py voiceid/core/__init__.py)",
+      "Bash(python -m py_compile voiceid/api/app.py voiceid/api/deps.py voiceid/api/routes_speakers.py voiceid/api/routes_unknown.py voiceid/api/routes_settings.py voiceid/api/__init__.py wyoming_voiceid/__init__.py wyoming_voiceid/handler.py wyoming_voiceid/__main__.py scripts/enroll.py)",
+      "Bash(python -m py_compile voiceid/core/vad.py voiceid/core/speaker_store.py)",
+      "Bash(docker ps:*)",
+      "Bash(docker images:*)",
+      "WebSearch",
+      "Bash(curl -sIL \"https://huggingface.co/model-scope/CosyVoice-300M/resolve/main/campplus.onnx\")",
+      "Bash(curl -sIL \"https://huggingface.co/funasr/campplus/resolve/main/campplus_cn_common.onnx\")",
+      "Bash(curl -sIL \"https://huggingface.co/funasr/campplus/resolve/main/campplus.onnx\")",
+      "Bash(curl -sL \"https://huggingface.co/api/models/funasr/campplus\")",
+      "Bash(python -c \"import json, sys; d=json.load\\(sys.stdin\\); [print\\(s[''''rfilename'''']\\) for s in d.get\\(''''siblings'''', []\\)]\")",
+      "Bash(python -m py_compile voiceid/core/speaker_store.py)",
+      "Bash(python -m py_compile voiceid/core/vad.py voiceid/api/routes_speakers.py)",
+      "Bash(python -m py_compile voiceid/api/routes_speakers.py voiceid/api/routes_unknown.py voiceid/core/speaker_store.py scripts/enroll.py)",
+      "Bash(node --check voiceid/ui/static/app.js)",
+      "Bash(python -m py_compile voiceid/core/audio.py voiceid/api/routes_speakers.py voiceid/api/routes_unknown.py scripts/enroll.py)",
+      "Bash(python -m py_compile voiceid/core/audio.py)",
+      "Bash(python -m py_compile wyoming_voiceid/handler.py voiceid/config.py voiceid/core/context.py voiceid/api/routes_settings.py)",
+      "Bash(python -m py_compile wyoming_voiceid/handler.py wyoming_voiceid/__main__.py voiceid/config.py voiceid/core/context.py voiceid/api/routes_settings.py)",
+      "Bash(python -m py_compile voiceid/config.py voiceid/core/info_cache.py wyoming_voiceid/__main__.py wyoming_voiceid/handler.py)",
+      "Bash(docker run:*)",
+      "Bash(docker compose:*)",
+      "Bash(python -c \"import py_compile; [py_compile.compile\\(f, doraise=True\\) for f in ['voiceid/config.py', 'voiceid/core/context.py', 'voiceid/core/recognition_log.py', 'voiceid/core/speaker_store.py', 'voiceid/api/routes_settings.py', 'wyoming_voiceid/handler.py']]\")",
+      "Bash(node -c voiceid/ui/static/i18n.js)",
+      "Bash(node -c voiceid/ui/static/app.js)",
+      "Bash(git add:*)"
+    ]
+  }
+}

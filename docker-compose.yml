@@ -1,0 +1,51 @@
+services:
+  voiceid:
+    build: .
+    container_name: voiceid
+    ports:
+      - "10350:10350"   # Wyoming proxy
+      - "8099:8099"     # Web UI
+    volumes:
+      - ./data:/app/data
+      # Persist ONNX models across rebuilds and let you pre-populate
+      # them from the host if Hugging Face is rate-limiting. If this
+      # directory is empty on first start the container will try to
+      # download the models itself.
+      - ./models:/app/models
+    environment:
+      - LISTEN_URI=tcp://0.0.0.0:10350
+      # IMPORTANT: UPSTREAM_URI must point to a host VoiceID can actually
+      # reach from inside its container. Common options:
+      #   * tcp://host.docker.internal:10300  (STT runs on the host)
+      #   * tcp://<container_name>:10300      (STT runs in the same Docker network — see networks: below)
+      #   * tcp://<lan_ip>:10300              (STT runs on another machine)
+      - UPSTREAM_URI=${UPSTREAM_URI:-tcp://host.docker.internal:10300}
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8099
+      - VERIFY_THRESHOLD=0.30
+      - TV_THRESHOLD_BOOST=0.05
+      - UNKNOWN_LOGGING=true
+      - UNKNOWN_TTL_HOURS=48
+      - REQUIRE_SPEAKER_MATCH=true
+      # Optional fallback if the upstream is slow to advertise its
+      # languages; you can also set this via the Settings UI now.
+      - ADVERTISED_LANGUAGES=${ADVERTISED_LANGUAGES:-}
+      - HA_URL=${HA_URL:-}
+      - HA_TOKEN=${HA_TOKEN:-}
+      - HA_INPUT_TEXT_ENTITY=input_text.current_speaker
+      - HA_TV_ENTITY=${HA_TV_ENTITY:-}
+      - LOG_LEVEL=info
+    extra_hosts:
+      # Lets `host.docker.internal` resolve on Linux hosts too (Docker
+      # Desktop on Windows/macOS adds this automatically).
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    # If your faster-whisper container is on a specific Docker network,
+    # uncomment the block below and set the network name to match:
+    # networks:
+    #   - wyoming
+
+# networks:
+#   wyoming:
+#     external: true
+#     name: <name_of_the_network_faster-whisper_is_on>

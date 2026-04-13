@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Models (downloaded at build time)
+models/*.onnx
+!models/.gitkeep
+
+# Runtime data (persistent volume)
+data/*
+!data/.gitkeep
+
+# Reference snapshot (local exploration only)
+reference/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+
+# Logs
+*.log

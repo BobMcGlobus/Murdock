@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VoiceID</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>VoiceID</h1>
+        <nav>
+            <button data-tab="speakers" class="tab-btn active" data-i18n="nav.speakers">Speakers</button>
+            <button data-tab="verify" class="tab-btn" data-i18n="nav.verify">Verify</button>
+            <button data-tab="recognition" class="tab-btn" data-i18n="nav.recognition">Recognition log</button>
+            <button data-tab="unknown" class="tab-btn" data-i18n="nav.unknown">Unknown</button>
+            <button data-tab="settings" class="tab-btn" data-i18n="nav.settings">Settings</button>
+        </nav>
+        <select id="lang-selector" class="lang-selector">
+            <option value="auto">Auto</option>
+            <option value="en">EN</option>
+            <option value="de">DE</option>
+        </select>
+        <div id="status" class="status"></div>
+    </header>
+
+    <main>
+        <!-- Speakers tab -->
+        <section id="tab-speakers" class="tab active">
+            <div class="card">
+                <h2 data-i18n="speakers.enroll_title">Enroll speaker</h2>
+                <form id="enroll-form">
+                    <label>
+                        <span data-i18n="speakers.add_to_existing">Add sample to existing speaker</span>
+                        <select id="enroll-existing">
+                            <option value="" data-i18n="speakers.new_speaker">— new speaker —</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span data-i18n="speakers.name">Name</span>
+                        <input type="text" name="name" required data-i18n-ph="speakers.ph_name" placeholder="e.g. jonas">
+                    </label>
+                    <label>
+                        <span data-i18n="speakers.ha_user_id">HA user ID (optional — only applied to new speakers)</span>
+                        <input type="text" name="ha_user_id" data-i18n-ph="speakers.ph_ha_id" placeholder="uuid from Home Assistant">
+                    </label>
+                    <label>
+                        <span data-i18n="speakers.role">Role (optional — only applied to new speakers)</span>
+                        <select name="role" id="enroll-role">
+                            <option value="" data-i18n="speakers.none">— none —</option>
+                        </select>
+                    </label>
+                    <div class="recorder">
+                        <button type="button" id="record-btn" data-i18n="speakers.start_recording">Start recording</button>
+                        <span id="record-status" data-i18n="speakers.idle">Idle</span>
+                        <audio id="record-playback" controls hidden></audio>
+                    </div>
+                    <label>
+                        <span data-i18n="speakers.or_upload">…or upload an audio file (WAV, MP3, MP4/M4A, OGG, FLAC, WebM)</span>
+                        <input type="file" id="upload-file" accept="audio/*,.wav,.mp3,.mp4,.m4a,.ogg,.flac,.webm">
+                    </label>
+                    <button type="submit" data-i18n="speakers.enroll_btn">Enroll</button>
+                </form>
+                <div id="enroll-feedback"></div>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="speakers.enrolled_title">Enrolled speakers</h2>
+                <div id="speaker-list" class="list"></div>
+            </div>
+        </section>
+
+        <!-- Verify tab -->
+        <section id="tab-verify" class="tab">
+            <div class="card">
+                <h2 data-i18n="verify.title">Verify a sample</h2>
+                <p class="meta" data-i18n="verify.description">
+                    Upload a WAV (or record one in the Speakers tab first) to
+                    score it against every enrolled speaker. Useful for tuning
+                    the verify threshold.
+                </p>
+                <form id="verify-form">
+                    <label>
+                        <span data-i18n="verify.audio_file">Audio file (WAV, MP3, MP4/M4A, OGG, FLAC, WebM)</span>
+                        <input type="file" id="verify-file" accept="audio/*,.wav,.mp3,.mp4,.m4a,.ogg,.flac,.webm" required>
+                    </label>
+                    <button type="submit" data-i18n="verify.btn">Verify</button>
+                </form>
+                <div id="verify-result"></div>
+            </div>
+        </section>
+
+        <!-- Recognition log tab -->
+        <section id="tab-recognition" class="tab">
+            <div class="card">
+                <h2 data-i18n="rec.title">Recognition log</h2>
+                <p class="meta" data-i18n="rec.description">
+                    Every completed Wyoming session is logged here so you
+                    can see which voice was recognised when, what was
+                    said, and which gate path the session took.
+                </p>
+                <div class="toolbar">
+                    <label>
+                        <span data-i18n="rec.outcome_filter">Outcome</span>
+                        <select id="rec-filter-outcome">
+                            <option value="" data-i18n="rec.all">— all —</option>
+                            <option value="match" data-i18n="outcome.match">Match</option>
+                            <option value="unknown-forwarded" data-i18n="outcome.unknown-forwarded">Unknown (forwarded)</option>
+                            <option value="blocked-no-match" data-i18n="outcome.blocked-no-match">Blocked — no match</option>
+                            <option value="blocked-no-speakers" data-i18n="outcome.blocked-no-speakers">Blocked — no speakers</option>
+                            <option value="blocked-embed-failed" data-i18n="outcome.blocked-embed-failed">Blocked — embed failed</option>
+                            <option value="blocked-tv-noise" data-i18n="outcome.blocked-tv-noise">Blocked — TV/noise</option>
+                            <option value="passthrough-short" data-i18n="outcome.passthrough-short">Passthrough — short</option>
+                            <option value="passthrough-no-speakers" data-i18n="outcome.passthrough-no-speakers">Passthrough — no speakers</option>
+                            <option value="empty" data-i18n="outcome.empty">Empty</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span data-i18n="rec.limit">Limit</span>
+                        <select id="rec-filter-limit">
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="250">250</option>
+                            <option value="500">500</option>
+                        </select>
+                    </label>
+                    <button id="refresh-rec" data-i18n="rec.refresh">Refresh</button>
+                    <button id="test-rec" class="secondary" data-i18n="rec.insert_test">Insert test entry</button>
+                    <button id="clear-rec" class="danger" data-i18n="rec.clear_log">Clear log</button>
+                </div>
+                <div id="rec-stats" class="meta"></div>
+                <div id="rec-list" class="list"></div>
+            </div>
+        </section>
+
+        <!-- Unknown tab -->
+        <section id="tab-unknown" class="tab">
+            <div class="card">
+                <h2 data-i18n="unknown.title">Unknown samples</h2>
+                <div class="toolbar">
+                    <label><input type="checkbox" id="include-tagged"> <span data-i18n="unknown.include_tagged">Include tagged</span></label>
+                    <button id="refresh-unknown" data-i18n="unknown.refresh">Refresh</button>
+                    <button id="cleanup-unknown" data-i18n="unknown.cleanup">Cleanup expired</button>
+                </div>
+                <div id="unknown-list" class="list"></div>
+            </div>
+        </section>
+
+        <!-- Settings tab -->
+        <section id="tab-settings" class="tab">
+            <div class="card">
+                <h2 data-i18n="settings.title">Runtime settings</h2>
+                <form id="settings-form">
+                    <label>
+                        <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
+                        <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
+                        <small id="upstream-hint" class="meta"></small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.threshold">Verify threshold (cosine distance, 0 = identical)</span>
+                        <input type="number" step="0.01" min="0" max="2" name="verify_threshold">
+                    </label>
+                    <label>
+                        <span data-i18n="settings.skip_leading">Skip leading seconds (trim satellite chime before embedding)</span>
+                        <input type="number" step="0.1" min="0" max="5" name="skip_leading_seconds">
+                        <small class="meta" data-i18n="settings.skip_hint">STT still receives the full audio. Typical value: 1.0 s for ESPHome/Wyoming satellites.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.min_liveness">Min liveness score (reject TV/background noise)</span>
+                        <input type="number" step="0.01" min="0" max="1" name="min_liveness_score">
+                        <small class="meta" data-i18n="settings.min_liveness_hint">Voices below this score are classified as TV/noise and blocked. Set to 0 to disable. Default: 0.35.</small>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="unknown_logging">
+                        <span data-i18n="settings.unknown_logging">Log unknown voices</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="require_speaker_match">
+                        <span data-i18n="settings.require_match">Require speaker match (block unknowns)</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="passthrough_when_no_speakers">
+                        <span data-i18n="settings.passthrough_empty">Passthrough when zero speakers enrolled</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="auto_enroll">
+                        <span data-i18n="settings.auto_enroll">Auto-enroll on match (aging/re-training)</span>
+                        <small class="meta" data-i18n="settings.auto_enroll_hint">Automatically add fresh embeddings when a known speaker is recognized, so the model adapts over time.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
+                        <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">
+                        <small id="lang-hint" class="meta"></small>
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="settings.save">Save</button>
+                        <button type="button" id="refresh-langs-btn" data-i18n="settings.refresh_langs">Refresh from upstream</button>
+                        <button type="button" id="ping-upstream-btn" class="secondary" data-i18n="settings.ping">Ping upstream</button>
+                    </div>
+                </form>
+                <div id="settings-info"></div>
+                <div id="ping-result" class="meta"></div>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="service.title">Service</h2>
+                <p class="meta" data-i18n="service.description">
+                    Restart the VoiceID process. Docker will bring it back up
+                    automatically. Use this after changing the upstream URI or
+                    advertised languages if you're not sure the change has
+                    taken effect.
+                </p>
+                <button type="button" id="restart-btn" class="danger" data-i18n="service.restart_btn">Restart VoiceID</button>
+                <div id="restart-feedback" class="meta"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/i18n.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
