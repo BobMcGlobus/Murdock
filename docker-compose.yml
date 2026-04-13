@@ -22,19 +22,10 @@ services:
       - UPSTREAM_URI=${UPSTREAM_URI:-tcp://host.docker.internal:10300}
       - WEB_HOST=0.0.0.0
       - WEB_PORT=8099
-      - VERIFY_THRESHOLD=0.30
-      - TV_THRESHOLD_BOOST=0.05
-      - UNKNOWN_LOGGING=true
-      - UNKNOWN_TTL_HOURS=48
-      - REQUIRE_SPEAKER_MATCH=true
-      # Optional fallback if the upstream is slow to advertise its
-      # languages; you can also set this via the Settings UI now.
-      - ADVERTISED_LANGUAGES=${ADVERTISED_LANGUAGES:-}
-      - HA_URL=${HA_URL:-}
-      - HA_TOKEN=${HA_TOKEN:-}
-      - HA_INPUT_TEXT_ENTITY=input_text.current_speaker
-      - HA_TV_ENTITY=${HA_TV_ENTITY:-}
       - LOG_LEVEL=info
+      # All other settings (threshold, HA integration, languages, …)
+      # are configured via the web UI at http://localhost:8099 and
+      # persisted in the database. No .env file needed.
     extra_hosts:
       # Lets `host.docker.internal` resolve on Linux hosts too (Docker
       # Desktop on Windows/macOS adds this automatically).

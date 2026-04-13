@@ -203,6 +203,68 @@
             </div>
 
             <div class="card">
+                <h2 data-i18n="ha.title">Home Assistant</h2>
+                <p class="meta" data-i18n="ha.description">
+                    Connect VoiceID to your Home Assistant instance to push
+                    speaker recognition results. Leave URL and token empty
+                    to disable the integration.
+                </p>
+                <form id="ha-settings-form">
+                    <label>
+                        <span data-i18n="ha.url">Home Assistant URL</span>
+                        <input type="url" name="ha_url" data-i18n-ph="ha.ph_url" placeholder="http://192.168.1.100:8123">
+                    </label>
+                    <label>
+                        <span data-i18n="ha.token">Long-lived access token</span>
+                        <input type="password" name="ha_token" data-i18n-ph="ha.ph_token" placeholder="paste token here" autocomplete="off">
+                        <small id="ha-token-hint" class="meta"></small>
+                    </label>
+                    <label>
+                        <span data-i18n="ha.input_entity">Speaker entity (input_text)</span>
+                        <input type="text" name="ha_input_text_entity" data-i18n-ph="ha.ph_entity" placeholder="input_text.current_speaker">
+                    </label>
+                    <label>
+                        <span data-i18n="ha.tv_entity">TV entity (optional — for TV-noise detection)</span>
+                        <input type="text" name="ha_tv_entity" data-i18n-ph="ha.ph_tv" placeholder="media_player.living_room_tv">
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="ha.save">Save</button>
+                        <button type="button" id="ha-test-btn" class="secondary" data-i18n="ha.test">Test connection</button>
+                    </div>
+                </form>
+                <div id="ha-feedback" class="meta"></div>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="backup.title">Backup &amp; Restore</h2>
+                <p class="meta" data-i18n="backup.description">
+                    Export all enrolled speakers and their audio samples as a
+                    ZIP file, or restore from a previous backup.
+                </p>
+                <div class="row">
+                    <button type="button" id="backup-export-btn" data-i18n="backup.export">Download backup</button>
+                    <label class="file-upload secondary">
+                        <input type="file" id="backup-file" accept=".zip" hidden>
+                        <button type="button" id="backup-pick-btn" class="secondary" data-i18n="backup.pick_file">Choose backup file</button>
+                    </label>
+                </div>
+                <div id="backup-restore-panel" hidden>
+                    <p id="backup-file-name" class="meta"></p>
+                    <div class="row">
+                        <label>
+                            <span data-i18n="backup.mode">Restore mode</span>
+                            <select id="backup-mode">
+                                <option value="merge" data-i18n="backup.mode_merge">Merge (keep existing)</option>
+                                <option value="replace" data-i18n="backup.mode_replace">Replace (delete all first)</option>
+                            </select>
+                        </label>
+                        <button type="button" id="backup-restore-btn" class="danger" data-i18n="backup.restore">Restore</button>
+                    </div>
+                </div>
+                <div id="backup-feedback" class="meta"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="service.title">Service</h2>
                 <p class="meta" data-i18n="service.description">
                     Restart the VoiceID process. Docker will bring it back up

@@ -34,6 +34,10 @@ class SettingsOut(BaseModel):
     upstream_uri_source: str  # "env" | "override"
     listen_uri: str
     ha_configured: bool
+    ha_url: str = ""
+    ha_token_set: bool = False
+    ha_input_text_entity: str = "input_text.current_speaker"
+    ha_tv_entity: str = ""
     advertised_languages: List[str] = Field(default_factory=list)
     advertised_languages_source: str = "auto"  # "auto" | "override"
 
@@ -54,6 +58,11 @@ class SettingsPatch(BaseModel):
     # []    → clear override, fall back to upstream auto-detect
     # [...] → hard override
     advertised_languages: Optional[List[str]] = None
+    # Home Assistant fields (None = not touched, "" = clear)
+    ha_url: Optional[str] = None
+    ha_token: Optional[str] = None
+    ha_input_text_entity: Optional[str] = None
+    ha_tv_entity: Optional[str] = None
 
 
 class RestartResponse(BaseModel):
@@ -87,6 +96,10 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         upstream_uri_source=ctx.get_upstream_uri_source(),
         listen_uri=ctx.settings.listen_uri,
         ha_configured=ctx.ha.configured,
+        ha_url=ctx.get_ha_url(),
+        ha_token_set=ctx.has_ha_token(),
+        ha_input_text_entity=ctx.get_ha_input_text_entity(),
+        ha_tv_entity=ctx.get_ha_tv_entity(),
         advertised_languages=languages,
         advertised_languages_source=source,
     )
@@ -127,6 +140,22 @@ async def patch_settings(
         # An empty list means "clear override" — fall through to
         # upstream auto-detect. A non-empty list is a hard override.
         ctx.set_advertised_languages(body.advertised_languages or None)
+    # Home Assistant settings — reconfigure the live client when changed.
+    ha_changed = False
+    if body.ha_url is not None:
+        ctx.set_ha_url(body.ha_url)
+        ha_changed = True
+    if body.ha_token is not None:
+        ctx.set_ha_token(body.ha_token)
+        ha_changed = True
+    if body.ha_input_text_entity is not None:
+        ctx.set_ha_input_text_entity(body.ha_input_text_entity)
+        ha_changed = True
+    if body.ha_tv_entity is not None:
+        ctx.set_ha_tv_entity(body.ha_tv_entity)
+        ha_changed = True
+    if ha_changed:
+        await ctx.apply_ha_settings()
     return _build_settings_out(ctx)
 
 
@@ -209,6 +238,34 @@ async def refresh_languages(ctx: AppContext = Depends(get_context)):
             status_code=502, detail=f"upstream refresh failed: {exc}"
         ) from exc
     return _build_settings_out(ctx)
+
+
+class HATestOut(BaseModel):
+    ok: bool
+    error: Optional[str] = None
+
+
+@router.post("/test-ha", response_model=HATestOut)
+async def test_ha(ctx: AppContext = Depends(get_context)):
+    """Quick connectivity check against the configured HA instance."""
+    if not ctx.ha.configured:
+        return HATestOut(ok=False, error="not configured (URL or token missing)")
+    try:
+        import httpx
+        async with httpx.AsyncClient(
+            base_url=ctx.ha.base_url or "",
+            headers={
+                "Authorization": f"Bearer {ctx.ha.token or ''}",
+                "Content-Type": "application/json",
+            },
+            timeout=5.0,
+        ) as client:
+            resp = await client.get("/api/")
+            if resp.status_code == 200:
+                return HATestOut(ok=True)
+            return HATestOut(ok=False, error=f"HTTP {resp.status_code}")
+    except Exception as exc:
+        return HATestOut(ok=False, error=str(exc))
 
 
 @router.post("/restart", response_model=RestartResponse)

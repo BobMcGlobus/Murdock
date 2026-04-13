@@ -147,6 +147,63 @@ class AppContext:
         set_setting(self.db, "auto_enroll", "true" if enabled else "false")
 
     # ------------------------------------------------------------------
+    # Home Assistant integration (live-editable, persisted in DB)
+    # ------------------------------------------------------------------
+
+    def get_ha_url(self) -> str:
+        override = get_setting(self.db, "ha_url")
+        if override is not None:
+            return override
+        return self.settings.ha_url or ""
+
+    def set_ha_url(self, value: str) -> None:
+        set_setting(self.db, "ha_url", (value or "").strip())
+
+    def get_ha_token(self) -> str:
+        override = get_setting(self.db, "ha_token")
+        if override is not None:
+            return override
+        return self.settings.ha_token or ""
+
+    def has_ha_token(self) -> bool:
+        return bool(self.get_ha_token())
+
+    def set_ha_token(self, value: str) -> None:
+        set_setting(self.db, "ha_token", value or "")
+
+    def get_ha_input_text_entity(self) -> str:
+        override = get_setting(self.db, "ha_input_text_entity")
+        if override is not None and override:
+            return override
+        return self.settings.ha_input_text_entity
+
+    def set_ha_input_text_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_input_text_entity", (value or "").strip())
+
+    def get_ha_tv_entity(self) -> str:
+        override = get_setting(self.db, "ha_tv_entity")
+        if override is not None:
+            return override
+        return self.settings.ha_tv_entity or ""
+
+    def set_ha_tv_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_tv_entity", (value or "").strip())
+
+    async def apply_ha_settings(self) -> None:
+        """Push current HA settings into the live client."""
+        await self.ha.reconfigure(
+            base_url=self.get_ha_url() or None,
+            token=self.get_ha_token() or None,
+            input_text_entity=self.get_ha_input_text_entity(),
+            tv_entity=self.get_ha_tv_entity() or None,
+        )
+        _LOGGER.info(
+            "HA client reconfigured: url=%s configured=%s",
+            self.get_ha_url() or "(none)",
+            self.ha.configured,
+        )
+
+    # ------------------------------------------------------------------
     # Advertised languages (Wyoming Info)
     # ------------------------------------------------------------------
     #
@@ -265,11 +322,16 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
 
     recognition = RecognitionLog(conn=db)
 
+    # HA client: check DB overrides first, fall back to env.
+    _ha_url = get_setting(db, "ha_url")
+    _ha_token = get_setting(db, "ha_token")
+    _ha_entity = get_setting(db, "ha_input_text_entity")
+    _ha_tv = get_setting(db, "ha_tv_entity")
     ha = HomeAssistantClient(
-        base_url=settings.ha_url,
-        token=settings.ha_token,
-        input_text_entity=settings.ha_input_text_entity,
-        tv_entity=settings.ha_tv_entity,
+        base_url=_ha_url if _ha_url is not None else settings.ha_url,
+        token=_ha_token if _ha_token is not None else settings.ha_token,
+        input_text_entity=(_ha_entity or None) if _ha_entity is not None else settings.ha_input_text_entity,
+        tv_entity=_ha_tv if _ha_tv is not None else settings.ha_tv_entity,
     )
 
     _CONTEXT = AppContext(

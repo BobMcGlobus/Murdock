@@ -38,6 +38,26 @@ class HomeAssistantClient:
     def configured(self) -> bool:
         return bool(self.base_url and self.token)
 
+    async def reconfigure(
+        self,
+        base_url: Optional[str] = None,
+        token: Optional[str] = None,
+        input_text_entity: Optional[str] = None,
+        tv_entity: Optional[str] = None,
+    ) -> None:
+        """Update connection parameters live and drop the cached client."""
+        if base_url is not None:
+            self.base_url = base_url.rstrip("/") if base_url else None
+        if token is not None:
+            self.token = token or None
+        if input_text_entity is not None:
+            self.input_text_entity = input_text_entity
+        if tv_entity is not None:
+            self.tv_entity = tv_entity if tv_entity else None
+        # Drop the cached httpx client so the next call picks up the new
+        # base_url / token.
+        await self.close()
+
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
             self._client = httpx.AsyncClient(

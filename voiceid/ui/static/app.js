@@ -682,6 +682,18 @@ async function loadSettings() {
                 ${escapeHtml(t("settings.ttl", { h: s.unknown_ttl_hours }))} · ${escapeHtml(s.ha_configured ? t("settings.ha_yes") : t("settings.ha_no"))}
             </p>
         `;
+        // Populate HA settings form
+        const haForm = $("#ha-settings-form");
+        if (haForm) {
+            haForm.ha_url.value = s.ha_url || "";
+            haForm.ha_token.value = "";
+            haForm.ha_input_text_entity.value = s.ha_input_text_entity || "input_text.current_speaker";
+            haForm.ha_tv_entity.value = s.ha_tv_entity || "";
+            const hint = $("#ha-token-hint");
+            if (hint) {
+                hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
+            }
+        }
     } catch (err) {
         $("#settings-info").innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
     }
@@ -803,6 +815,125 @@ $("#restart-btn").addEventListener("click", async () => {
         feedback.textContent = t("service.triggered");
         setStatus(t("service.restarting"), "warn");
         setTimeout(() => window.location.reload(), 5000);
+    }
+});
+
+// --- HA settings ----------------------------------------------------------
+
+$("#ha-settings-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {
+        ha_url: form.ha_url.value.trim(),
+        ha_input_text_entity: form.ha_input_text_entity.value.trim(),
+        ha_tv_entity: form.ha_tv_entity.value.trim(),
+    };
+    // Only send token if the user actually typed something.
+    const tokenVal = form.ha_token.value;
+    if (tokenVal) {
+        body.ha_token = tokenVal;
+    }
+    try {
+        const s = await api("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        form.ha_token.value = "";
+        const hint = $("#ha-token-hint");
+        if (hint) {
+            hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
+        }
+        setStatus(t("ha.saved"), "ok");
+    } catch (err) {
+        setStatus(t("generic.error", { err: err.message }), "err");
+    }
+});
+
+$("#ha-test-btn").addEventListener("click", async () => {
+    const btn = $("#ha-test-btn");
+    const feedback = $("#ha-feedback");
+    btn.disabled = true;
+    btn.textContent = t("ha.testing");
+    feedback.innerHTML = "";
+    try {
+        const res = await api("/api/settings/test-ha", { method: "POST" });
+        if (res.ok) {
+            feedback.innerHTML = `<span class="feedback ok">${escapeHtml(t("ha.test_ok"))}</span>`;
+            setStatus(t("ha.test_ok"), "ok");
+        } else {
+            feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("ha.test_fail", { err: res.error }))}</span>`;
+            setStatus(t("ha.test_fail", { err: res.error }), "err");
+        }
+    } catch (err) {
+        feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("ha.test_fail", { err: err.message }))}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = t("ha.test");
+    }
+});
+
+// --- Backup & Restore -----------------------------------------------------
+
+$("#backup-export-btn").addEventListener("click", () => {
+    window.location.href = "/api/backup";
+});
+
+$("#backup-pick-btn").addEventListener("click", () => {
+    $("#backup-file").click();
+});
+
+$("#backup-file").addEventListener("change", () => {
+    const file = $("#backup-file").files[0];
+    const panel = $("#backup-restore-panel");
+    if (file) {
+        $("#backup-file-name").textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+        panel.hidden = false;
+    } else {
+        panel.hidden = true;
+    }
+});
+
+$("#backup-restore-btn").addEventListener("click", async () => {
+    const file = $("#backup-file").files[0];
+    if (!file) return;
+    const mode = $("#backup-mode").value;
+    if (mode === "replace" && !confirm(t("backup.confirm_replace"))) return;
+
+    const btn = $("#backup-restore-btn");
+    const feedback = $("#backup-feedback");
+    btn.disabled = true;
+    btn.textContent = t("backup.restoring");
+    feedback.innerHTML = "";
+
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+        const res = await api(`/api/backup/restore?mode=${mode}`, {
+            method: "POST",
+            body: form,
+        });
+        const parts = [
+            t("backup.result_created", { n: res.speakers_created }),
+            t("backup.result_skipped", { n: res.speakers_skipped }),
+            t("backup.result_samples", { n: res.samples_imported }),
+        ];
+        if (res.errors && res.errors.length) {
+            parts.push(t("backup.result_errors", { n: res.errors.length }));
+        }
+        feedback.innerHTML = `<span class="feedback ok">${escapeHtml(parts.join(" · "))}</span>`;
+        setStatus(t("backup.restored"), "ok");
+        // Reset file input
+        $("#backup-file").value = "";
+        $("#backup-restore-panel").hidden = true;
+        // Refresh speaker list if visible
+        loadSpeakers();
+    } catch (err) {
+        feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("generic.error", { err: err.message }))}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = t("backup.restore");
     }
 });
 
