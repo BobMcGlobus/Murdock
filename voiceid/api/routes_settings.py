@@ -38,6 +38,10 @@ class SettingsOut(BaseModel):
     ha_token_set: bool = False
     ha_input_text_entity: str = "input_text.current_speaker"
     ha_tv_entity: str = ""
+    ha_confidence_entity: str = ""
+    ha_distance_entity: str = ""
+    ha_nearest_entity: str = ""
+    ha_role_entity: str = ""
     advertised_languages: List[str] = Field(default_factory=list)
     advertised_languages_source: str = "auto"  # "auto" | "override"
 
@@ -63,6 +67,10 @@ class SettingsPatch(BaseModel):
     ha_token: Optional[str] = None
     ha_input_text_entity: Optional[str] = None
     ha_tv_entity: Optional[str] = None
+    ha_confidence_entity: Optional[str] = None
+    ha_distance_entity: Optional[str] = None
+    ha_nearest_entity: Optional[str] = None
+    ha_role_entity: Optional[str] = None
 
 
 class RestartResponse(BaseModel):
@@ -100,6 +108,10 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         ha_token_set=ctx.has_ha_token(),
         ha_input_text_entity=ctx.get_ha_input_text_entity(),
         ha_tv_entity=ctx.get_ha_tv_entity(),
+        ha_confidence_entity=ctx.get_ha_confidence_entity(),
+        ha_distance_entity=ctx.get_ha_distance_entity(),
+        ha_nearest_entity=ctx.get_ha_nearest_entity(),
+        ha_role_entity=ctx.get_ha_role_entity(),
         advertised_languages=languages,
         advertised_languages_source=source,
     )
@@ -153,6 +165,18 @@ async def patch_settings(
         ha_changed = True
     if body.ha_tv_entity is not None:
         ctx.set_ha_tv_entity(body.ha_tv_entity)
+        ha_changed = True
+    if body.ha_confidence_entity is not None:
+        ctx.set_ha_confidence_entity(body.ha_confidence_entity)
+        ha_changed = True
+    if body.ha_distance_entity is not None:
+        ctx.set_ha_distance_entity(body.ha_distance_entity)
+        ha_changed = True
+    if body.ha_nearest_entity is not None:
+        ctx.set_ha_nearest_entity(body.ha_nearest_entity)
+        ha_changed = True
+    if body.ha_role_entity is not None:
+        ctx.set_ha_role_entity(body.ha_role_entity)
         ha_changed = True
     if ha_changed:
         await ctx.apply_ha_settings()

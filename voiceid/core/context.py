@@ -189,6 +189,30 @@ class AppContext:
     def set_ha_tv_entity(self, value: str) -> None:
         set_setting(self.db, "ha_tv_entity", (value or "").strip())
 
+    def get_ha_confidence_entity(self) -> str:
+        return get_setting(self.db, "ha_confidence_entity") or ""
+
+    def set_ha_confidence_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_confidence_entity", (value or "").strip())
+
+    def get_ha_distance_entity(self) -> str:
+        return get_setting(self.db, "ha_distance_entity") or ""
+
+    def set_ha_distance_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_distance_entity", (value or "").strip())
+
+    def get_ha_nearest_entity(self) -> str:
+        return get_setting(self.db, "ha_nearest_entity") or ""
+
+    def set_ha_nearest_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_nearest_entity", (value or "").strip())
+
+    def get_ha_role_entity(self) -> str:
+        return get_setting(self.db, "ha_role_entity") or ""
+
+    def set_ha_role_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_role_entity", (value or "").strip())
+
     async def apply_ha_settings(self) -> None:
         """Push current HA settings into the live client."""
         await self.ha.reconfigure(
@@ -196,6 +220,10 @@ class AppContext:
             token=self.get_ha_token() or None,
             input_text_entity=self.get_ha_input_text_entity(),
             tv_entity=self.get_ha_tv_entity() or None,
+            confidence_entity=self.get_ha_confidence_entity() or None,
+            distance_entity=self.get_ha_distance_entity() or None,
+            nearest_entity=self.get_ha_nearest_entity() or None,
+            role_entity=self.get_ha_role_entity() or None,
         )
         _LOGGER.info(
             "HA client reconfigured: url=%s configured=%s",
@@ -332,6 +360,10 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         token=_ha_token if _ha_token is not None else settings.ha_token,
         input_text_entity=(_ha_entity or None) if _ha_entity is not None else settings.ha_input_text_entity,
         tv_entity=_ha_tv if _ha_tv is not None else settings.ha_tv_entity,
+        confidence_entity=get_setting(db, "ha_confidence_entity") or None,
+        distance_entity=get_setting(db, "ha_distance_entity") or None,
+        nearest_entity=get_setting(db, "ha_nearest_entity") or None,
+        role_entity=get_setting(db, "ha_role_entity") or None,
     )
 
     _CONTEXT = AppContext(

@@ -317,3 +317,40 @@ table.distances tr.ok td {
     color: var(--success);
     font-weight: 600;
 }
+
+#ha-template-preview {
+    margin-top: 1.2rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+}
+#ha-template-preview pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+#ha-template-preview h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 0.9rem;
+    color: var(--muted);
+}
+#ha-copy-feedback {
+    font-size: 0.85rem;
+    margin-left: 0.5rem;
+}
+
+input[type="url"],
+input[type="password"] {
+    background: var(--card-alt);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    font: inherit;
+}

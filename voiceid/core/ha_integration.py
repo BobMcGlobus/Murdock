@@ -25,12 +25,20 @@ class HomeAssistantClient:
         token: Optional[str],
         input_text_entity: str = "input_text.current_speaker",
         tv_entity: Optional[str] = None,
+        confidence_entity: Optional[str] = None,
+        distance_entity: Optional[str] = None,
+        nearest_entity: Optional[str] = None,
+        role_entity: Optional[str] = None,
         timeout: float = 3.0,
     ) -> None:
         self.base_url = base_url.rstrip("/") if base_url else None
         self.token = token
         self.input_text_entity = input_text_entity
         self.tv_entity = tv_entity
+        self.confidence_entity = confidence_entity
+        self.distance_entity = distance_entity
+        self.nearest_entity = nearest_entity
+        self.role_entity = role_entity
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -44,6 +52,10 @@ class HomeAssistantClient:
         token: Optional[str] = None,
         input_text_entity: Optional[str] = None,
         tv_entity: Optional[str] = None,
+        confidence_entity: Optional[str] = None,
+        distance_entity: Optional[str] = None,
+        nearest_entity: Optional[str] = None,
+        role_entity: Optional[str] = None,
     ) -> None:
         """Update connection parameters live and drop the cached client."""
         if base_url is not None:
@@ -54,6 +66,14 @@ class HomeAssistantClient:
             self.input_text_entity = input_text_entity
         if tv_entity is not None:
             self.tv_entity = tv_entity if tv_entity else None
+        if confidence_entity is not None:
+            self.confidence_entity = confidence_entity or None
+        if distance_entity is not None:
+            self.distance_entity = distance_entity or None
+        if nearest_entity is not None:
+            self.nearest_entity = nearest_entity or None
+        if role_entity is not None:
+            self.role_entity = role_entity or None
         # Drop the cached httpx client so the next call picks up the new
         # base_url / token.
         await self.close()
@@ -98,19 +118,32 @@ class HomeAssistantClient:
         confidence: float,
         satellite_id: Optional[str],
         is_known: bool,
+        distance: Optional[float] = None,
+        threshold: Optional[float] = None,
+        nearest_speaker: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> None:
         if not self.configured:
             return
         try:
             client = self._get_client()
+            payload = {
+                "speaker": speaker,
+                "confidence": round(confidence, 4),
+                "satellite_id": satellite_id,
+                "is_known": is_known,
+            }
+            if distance is not None:
+                payload["distance"] = round(distance, 4)
+            if threshold is not None:
+                payload["threshold"] = round(threshold, 4)
+            if nearest_speaker is not None:
+                payload["nearest_speaker"] = nearest_speaker
+            if role is not None:
+                payload["role"] = role
             response = await client.post(
                 "/api/events/speaker_recognition_detected",
-                json={
-                    "speaker": speaker,
-                    "confidence": confidence,
-                    "satellite_id": satellite_id,
-                    "is_known": is_known,
-                },
+                json=payload,
             )
             if response.status_code >= 400:
                 _LOGGER.warning(
@@ -119,6 +152,83 @@ class HomeAssistantClient:
                 )
         except Exception as exc:
             _LOGGER.warning("Could not fire speaker event in HA: %s", exc)
+
+    async def _set_input_number(self, entity_id: str, value: float) -> None:
+        """Set an input_number helper in HA."""
+        if not self.configured or not entity_id:
+            return
+        try:
+            client = self._get_client()
+            response = await client.post(
+                "/api/services/input_number/set_value",
+                json={"entity_id": entity_id, "value": round(value, 4)},
+            )
+            if response.status_code >= 400:
+                _LOGGER.warning(
+                    "HA input_number set failed (%d): %s",
+                    response.status_code, response.text[:200],
+                )
+        except Exception as exc:
+            _LOGGER.warning("Could not set %s in HA: %s", entity_id, exc)
+
+    async def _set_input_text(self, entity_id: str, value: str) -> None:
+        """Set an input_text helper in HA."""
+        if not self.configured or not entity_id:
+            return
+        try:
+            client = self._get_client()
+            response = await client.post(
+                "/api/services/input_text/set_value",
+                json={"entity_id": entity_id, "value": value or ""},
+            )
+            if response.status_code >= 400:
+                _LOGGER.warning(
+                    "HA input_text set failed (%d): %s",
+                    response.status_code, response.text[:200],
+                )
+        except Exception as exc:
+            _LOGGER.warning("Could not set %s in HA: %s", entity_id, exc)
+
+    async def push_recognition(
+        self,
+        speaker: str,
+        confidence: float,
+        satellite_id: Optional[str],
+        is_known: bool,
+        distance: Optional[float] = None,
+        threshold: Optional[float] = None,
+        nearest_speaker: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> None:
+        """Push all recognition data to HA in one go.
+
+        Sets input_text/input_number entities and fires the event.
+        All calls are fire-and-forget so they don't block the pipeline.
+        """
+        if not self.configured:
+            return
+        # Speaker name
+        await self.set_current_speaker(speaker)
+        # Optional entity pushes
+        if self.confidence_entity:
+            await self._set_input_number(self.confidence_entity, confidence)
+        if self.distance_entity and distance is not None:
+            await self._set_input_number(self.distance_entity, distance)
+        if self.nearest_entity:
+            await self._set_input_text(self.nearest_entity, nearest_speaker or "")
+        if self.role_entity:
+            await self._set_input_text(self.role_entity, role or "")
+        # Event with full payload
+        await self.fire_speaker_event(
+            speaker=speaker,
+            confidence=confidence,
+            satellite_id=satellite_id,
+            is_known=is_known,
+            distance=distance,
+            threshold=threshold,
+            nearest_speaker=nearest_speaker,
+            role=role,
+        )
 
     async def is_tv_playing(self) -> bool:
         """Return True if the configured media player entity is in 'playing' state."""

@@ -689,6 +689,11 @@ async function loadSettings() {
             haForm.ha_token.value = "";
             haForm.ha_input_text_entity.value = s.ha_input_text_entity || "input_text.current_speaker";
             haForm.ha_tv_entity.value = s.ha_tv_entity || "";
+            haForm.ha_confidence_entity.value = s.ha_confidence_entity || "";
+            haForm.ha_distance_entity.value = s.ha_distance_entity || "";
+            haForm.ha_nearest_entity.value = s.ha_nearest_entity || "";
+            haForm.ha_role_entity.value = s.ha_role_entity || "";
+            updateHaTemplatePreview();
             const hint = $("#ha-token-hint");
             if (hint) {
                 hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
@@ -827,6 +832,10 @@ $("#ha-settings-form").addEventListener("submit", async (e) => {
         ha_url: form.ha_url.value.trim(),
         ha_input_text_entity: form.ha_input_text_entity.value.trim(),
         ha_tv_entity: form.ha_tv_entity.value.trim(),
+        ha_confidence_entity: form.ha_confidence_entity.value.trim(),
+        ha_distance_entity: form.ha_distance_entity.value.trim(),
+        ha_nearest_entity: form.ha_nearest_entity.value.trim(),
+        ha_role_entity: form.ha_role_entity.value.trim(),
     };
     // Only send token if the user actually typed something.
     const tokenVal = form.ha_token.value;
@@ -844,6 +853,7 @@ $("#ha-settings-form").addEventListener("submit", async (e) => {
         if (hint) {
             hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
         }
+        updateHaTemplatePreview();
         setStatus(t("ha.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");
@@ -870,6 +880,116 @@ $("#ha-test-btn").addEventListener("click", async () => {
     } finally {
         btn.disabled = false;
         btn.textContent = t("ha.test");
+    }
+});
+
+// --- HA template preview ---------------------------------------------------
+
+function buildHaTemplate() {
+    const form = $("#ha-settings-form");
+    if (!form) return "";
+    const speaker = form.ha_input_text_entity.value.trim() || "input_text.current_speaker";
+    const conf = form.ha_confidence_entity.value.trim();
+    const dist = form.ha_distance_entity.value.trim();
+    const nearest = form.ha_nearest_entity.value.trim();
+    const role = form.ha_role_entity.value.trim();
+
+    const isDE = I18N.locale() === "de";
+    const lines = [];
+
+    lines.push(`{# VoiceID – ${isDE ? "in den System-Prompt deines HA-Konversationsagenten einfügen" : "paste into your HA conversation agent system prompt"} #}`);
+    lines.push("");
+
+    if (isDE) {
+        lines.push(`{% set speaker = states('${speaker}') %}`);
+        lines.push(`{% if speaker and speaker not in ['unknown', 'unavailable', ''] %}`);
+        lines.push(`Der aktuelle Sprecher ist "{{ speaker }}".`);
+    } else {
+        lines.push(`{% set speaker = states('${speaker}') %}`);
+        lines.push(`{% if speaker and speaker not in ['unknown', 'unavailable', ''] %}`);
+        lines.push(`The current speaker is "{{ speaker }}".`);
+    }
+
+    if (role) {
+        lines.push(`{% set role = states('${role}') %}`);
+        lines.push(`{% if role and role not in ['unknown', 'unavailable', ''] %}`);
+        lines.push(isDE
+            ? `Rolle: {{ role }}.`
+            : `Role: {{ role }}.`);
+        lines.push(`{% endif %}`);
+    }
+
+    if (conf) {
+        lines.push(`{% set conf = states('${conf}') | float(0) %}`);
+        lines.push(`{% if conf > 0 %}`);
+        lines.push(isDE
+            ? `Erkennungs-Sicherheit: {{ (conf * 100) | round(1) }}%.`
+            : `Recognition confidence: {{ (conf * 100) | round(1) }}%.`);
+        lines.push(`{% endif %}`);
+    }
+
+    if (isDE) {
+        lines.push(`{% else %}`);
+        lines.push(`Der Sprecher ist unbekannt.`);
+    } else {
+        lines.push(`{% else %}`);
+        lines.push(`The speaker is unknown.`);
+    }
+
+    if (nearest) {
+        lines.push(`{% set nearest = states('${nearest}') %}`);
+        lines.push(`{% if nearest and nearest not in ['unknown', 'unavailable', ''] %}`);
+        lines.push(isDE
+            ? `Nächster bekannter Sprecher: {{ nearest }}.`
+            : `Closest known speaker: {{ nearest }}.`);
+        lines.push(`{% endif %}`);
+    }
+
+    if (dist) {
+        lines.push(`{% set dist = states('${dist}') | float(-1) %}`);
+        lines.push(`{% if dist >= 0 %}`);
+        lines.push(isDE
+            ? `Distanz: {{ dist | round(3) }} (Schwelle ~0.35, kleiner = ähnlicher).`
+            : `Distance: {{ dist | round(3) }} (threshold ~0.35, lower = more similar).`);
+        lines.push(`{% endif %}`);
+    }
+
+    lines.push(`{% endif %}`);
+
+    return lines.join("\n");
+}
+
+function updateHaTemplatePreview() {
+    const code = $("#ha-template-code");
+    if (!code) return;
+    code.textContent = buildHaTemplate();
+}
+
+// Update preview when any HA entity field changes.
+document.querySelectorAll("#ha-settings-form input[name^='ha_']").forEach((el) => {
+    el.addEventListener("input", updateHaTemplatePreview);
+});
+
+$("#ha-copy-template").addEventListener("click", async () => {
+    const text = buildHaTemplate();
+    try {
+        await navigator.clipboard.writeText(text);
+        const fb = $("#ha-copy-feedback");
+        fb.textContent = t("ha.copied");
+        fb.className = "feedback ok";
+        setTimeout(() => { fb.textContent = ""; fb.className = ""; }, 2000);
+    } catch {
+        // Fallback for non-HTTPS contexts.
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        const fb = $("#ha-copy-feedback");
+        fb.textContent = t("ha.copied");
+        fb.className = "feedback ok";
+        setTimeout(() => { fb.textContent = ""; fb.className = ""; }, 2000);
     }
 });
 

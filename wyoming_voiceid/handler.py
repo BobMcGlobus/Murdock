@@ -377,16 +377,18 @@ class VoiceIDHandler(AsyncEventHandler):
                     "[%s] EARLY MATCH: %s (d=%.4f, early_th=%.3f)",
                     sid, result.matched_speaker, result.distance, early_threshold,
                 )
-                # Fire HA events immediately.
+                # Push all recognition data to HA immediately.
+                spk = self.context.speakers.get_speaker(result.matched_speaker_id)
                 self.context.ha.publish_async(
-                    self.context.ha.set_current_speaker(result.matched_speaker)
-                )
-                self.context.ha.publish_async(
-                    self.context.ha.fire_speaker_event(
+                    self.context.ha.push_recognition(
                         speaker=result.matched_speaker,
                         confidence=1.0 - result.distance,
                         satellite_id=self._satellite_id,
                         is_known=True,
+                        distance=result.distance,
+                        threshold=result.threshold,
+                        nearest_speaker=result.matched_speaker,
+                        role=spk.role if spk else None,
                     )
                 )
             else:
@@ -529,10 +531,7 @@ class VoiceIDHandler(AsyncEventHandler):
                         sid, liveness.score, min_liveness,
                     )
                     self.context.ha.publish_async(
-                        self.context.ha.set_current_speaker("tv-noise")
-                    )
-                    self.context.ha.publish_async(
-                        self.context.ha.fire_speaker_event(
+                        self.context.ha.push_recognition(
                             speaker="tv-noise",
                             confidence=0.0,
                             satellite_id=self._satellite_id,
@@ -635,15 +634,17 @@ class VoiceIDHandler(AsyncEventHandler):
                 sid, result.matched_speaker, result.distance,
                 result.threshold, verify_ms,
             )
+            spk = self.context.speakers.get_speaker(result.matched_speaker_id)
             self.context.ha.publish_async(
-                self.context.ha.set_current_speaker(result.matched_speaker)
-            )
-            self.context.ha.publish_async(
-                self.context.ha.fire_speaker_event(
+                self.context.ha.push_recognition(
                     speaker=result.matched_speaker,
                     confidence=1.0 - result.distance,
                     satellite_id=self._satellite_id,
                     is_known=True,
+                    distance=result.distance,
+                    threshold=result.threshold,
+                    nearest_speaker=result.matched_speaker,
+                    role=spk.role if spk else None,
                 )
             )
             transcript = await self._wait_for_upstream_transcript()
@@ -680,21 +681,21 @@ class VoiceIDHandler(AsyncEventHandler):
         if self.context.get_unknown_logging() and embedding is not None:
             await self._log_unknown(verify_audio, embedding, result, duration)
 
+        best_speaker = None
+        if result.all_distances:
+            best_speaker = next(iter(result.all_distances))
+
         self.context.ha.publish_async(
-            self.context.ha.set_current_speaker("unknown")
-        )
-        self.context.ha.publish_async(
-            self.context.ha.fire_speaker_event(
+            self.context.ha.push_recognition(
                 speaker="unknown",
                 confidence=max(0.0, 1.0 - result.distance),
                 satellite_id=self._satellite_id,
                 is_known=False,
+                distance=result.distance,
+                threshold=result.threshold,
+                nearest_speaker=best_speaker,
             )
         )
-
-        best_speaker = None
-        if result.all_distances:
-            best_speaker = next(iter(result.all_distances))
 
         if not require_match:
             _LOGGER.info("[%s] require_match=false → forwarding anyway", sid)

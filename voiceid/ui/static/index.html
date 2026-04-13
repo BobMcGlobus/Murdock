@@ -227,12 +227,41 @@
                         <span data-i18n="ha.tv_entity">TV entity (optional — for TV-noise detection)</span>
                         <input type="text" name="ha_tv_entity" data-i18n-ph="ha.ph_tv" placeholder="media_player.living_room_tv">
                     </label>
+                    <h3 data-i18n="ha.extra_entities">Additional entities (optional)</h3>
+                    <p class="meta" data-i18n="ha.extra_hint">Create these helpers in HA first, then enter their entity IDs here. Leave empty to skip.</p>
+                    <label>
+                        <span data-i18n="ha.confidence_entity">Confidence (input_number, 0–1)</span>
+                        <input type="text" name="ha_confidence_entity" data-i18n-ph="ha.ph_confidence" placeholder="input_number.speaker_confidence">
+                    </label>
+                    <label>
+                        <span data-i18n="ha.distance_entity">Distance (input_number, 0–2)</span>
+                        <input type="text" name="ha_distance_entity" data-i18n-ph="ha.ph_distance" placeholder="input_number.speaker_distance">
+                    </label>
+                    <label>
+                        <span data-i18n="ha.nearest_entity">Nearest speaker (input_text)</span>
+                        <input type="text" name="ha_nearest_entity" data-i18n-ph="ha.ph_nearest" placeholder="input_text.nearest_speaker">
+                    </label>
+                    <label>
+                        <span data-i18n="ha.role_entity">Role (input_text)</span>
+                        <input type="text" name="ha_role_entity" data-i18n-ph="ha.ph_role" placeholder="input_text.speaker_role">
+                    </label>
                     <div class="row">
                         <button type="submit" data-i18n="ha.save">Save</button>
                         <button type="button" id="ha-test-btn" class="secondary" data-i18n="ha.test">Test connection</button>
                     </div>
                 </form>
                 <div id="ha-feedback" class="meta"></div>
+                <div id="ha-template-preview">
+                    <h3 data-i18n="ha.template_title">LLM prompt template</h3>
+                    <p class="meta" data-i18n="ha.template_hint">
+                        Copy this Jinja2 snippet into your Home Assistant conversation
+                        agent's system prompt so the LLM knows who is speaking.
+                        It adapts to the entities you configured above.
+                    </p>
+                    <pre><code id="ha-template-code"></code></pre>
+                    <button type="button" id="ha-copy-template" class="secondary" data-i18n="ha.copy_template">Copy to clipboard</button>
+                    <span id="ha-copy-feedback"></span>
+                </div>
             </div>
 
             <div class="card">
