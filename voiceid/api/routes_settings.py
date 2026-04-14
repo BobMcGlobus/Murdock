@@ -44,6 +44,8 @@ class SettingsOut(BaseModel):
     ha_role_entity: str = ""
     advertised_languages: List[str] = Field(default_factory=list)
     advertised_languages_source: str = "auto"  # "auto" | "override"
+    quality_weights: dict = Field(default_factory=dict)
+    quality_weights_source: str = "default"  # "default" | "override"
 
 
 class SettingsPatch(BaseModel):
@@ -71,6 +73,7 @@ class SettingsPatch(BaseModel):
     ha_distance_entity: Optional[str] = None
     ha_nearest_entity: Optional[str] = None
     ha_role_entity: Optional[str] = None
+    quality_weights: Optional[dict] = None  # {"speech_ratio":0.25,...} — pass {} to reset
 
 
 class RestartResponse(BaseModel):
@@ -114,6 +117,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         ha_role_entity=ctx.get_ha_role_entity(),
         advertised_languages=languages,
         advertised_languages_source=source,
+        quality_weights=ctx.get_quality_weights(),
+        quality_weights_source=ctx.get_quality_weights_source(),
     )
 
 
@@ -180,6 +185,12 @@ async def patch_settings(
         ha_changed = True
     if ha_changed:
         await ctx.apply_ha_settings()
+    if body.quality_weights is not None:
+        # Empty dict resets to defaults.
+        if body.quality_weights == {}:
+            ctx.set_quality_weights(None)
+        else:
+            ctx.set_quality_weights(body.quality_weights)
     return _build_settings_out(ctx)
 
 

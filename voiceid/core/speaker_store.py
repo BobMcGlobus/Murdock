@@ -14,6 +14,7 @@ import numpy as np
 
 from .audio import encode_wav
 from .embeddings import CAMPPlusEmbedder
+from .sample_quality import QualityBreakdown, score_sample, speaker_training_quality
 from .vad import SileroVAD, VADResult
 
 _LOGGER = logging.getLogger("voiceid.speaker_store")
@@ -76,6 +77,7 @@ class EnrollmentResult:
     total_samples: int
     vad: Optional[VADResult]
     warnings: List[str]
+    quality: Optional[QualityBreakdown] = None
 
 
 class SpeakerStore:
@@ -103,6 +105,7 @@ class SpeakerStore:
         self.threshold = threshold
         self.min_enrollment_speech_ratio = min_enrollment_speech_ratio
         self._lock = RLock()
+        self._quality_weights: Optional[Dict[str, float]] = None  # None = defaults
 
     # ------------------------------------------------------------------
     # Speaker CRUD
@@ -170,7 +173,8 @@ class SpeakerStore:
     def list_samples(self, speaker_id: int) -> List[Dict]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT id, duration_sec, source, filename, created_at "
+                "SELECT id, duration_sec, source, filename, created_at, "
+                "quality_score, satellite_id "
                 "FROM speaker_samples WHERE speaker_id = ? "
                 "ORDER BY created_at DESC",
                 (speaker_id,),
@@ -278,6 +282,7 @@ class SpeakerStore:
         source: Optional[str] = None,
         filename: Optional[str] = None,
         skip_vad: bool = False,
+        satellite_id: Optional[str] = None,
     ) -> EnrollmentResult:
         """Add a new sample for ``speaker_name`` and (re)compute its centroid.
 
@@ -331,6 +336,10 @@ class SpeakerStore:
         wav_bytes = encode_wav(pcm_bytes)
         now = time.time()
 
+        # Quality scoring — get existing centroid if speaker exists
+        quality: Optional[QualityBreakdown] = None
+        existing_centroid: Optional[np.ndarray] = None
+
         with self._lock:
             row = self.conn.execute(
                 "SELECT id FROM speakers WHERE name = ?", (speaker_name,)
@@ -358,12 +367,34 @@ class SpeakerStore:
                         "UPDATE speakers SET role = COALESCE(role, ?) WHERE id = ?",
                         (role, speaker_id),
                     )
+                # Fetch existing centroid for quality scoring
+                try:
+                    existing_centroid = self._get_centroid(speaker_id)
+                except Exception:
+                    pass
 
+        # Compute quality score (outside lock — may be slow)
+        try:
+            quality = score_sample(
+                pcm_bytes,
+                embedder=self.embedder,
+                vad=self.vad,
+                centroid=existing_centroid,
+                weights=self._quality_weights,
+            )
+        except Exception as exc:
+            _LOGGER.warning("Quality scoring failed: %s", exc)
+
+        quality_value = quality.composite if quality else None
+
+        with self._lock:
             cur = self.conn.execute(
                 "INSERT INTO speaker_samples("
-                "speaker_id, audio, duration_sec, source, filename, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?)",
-                (speaker_id, wav_bytes, duration_sec, source, filename, now),
+                "speaker_id, audio, duration_sec, source, filename, created_at, "
+                "quality_score, satellite_id) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                (speaker_id, wav_bytes, duration_sec, source, filename, now,
+                 quality_value, satellite_id),
             )
             sample_id = int(cur.lastrowid)
 
@@ -377,8 +408,9 @@ class SpeakerStore:
             self.conn.commit()
 
         _LOGGER.info(
-            "Enrolled '%s' (id=%d, sample=%d, total=%d)",
+            "Enrolled '%s' (id=%d, sample=%d, total=%d, quality=%.3f)",
             speaker_name, speaker_id, sample_id, sample_count,
+            quality_value or 0.0,
         )
         _ = embedding  # kept for potential diagnostics
         return EnrollmentResult(
@@ -388,6 +420,7 @@ class SpeakerStore:
             total_samples=sample_count,
             vad=vad_result,
             warnings=warnings,
+            quality=quality,
         )
 
     # ------------------------------------------------------------------
@@ -401,37 +434,81 @@ class SpeakerStore:
         audio_16k: bytes,
         duration_sec: float,
         max_auto_samples: int = 20,
+        satellite_id: Optional[str] = None,
     ) -> bool:
         """Add a fresh embedding as an 'auto' sample to an existing speaker.
 
-        Trims oldest auto-enrolled samples to stay under *max_auto_samples*.
-        Recomputes the centroid so subsequent verifications benefit from
-        the updated profile. Returns True if a sample was actually added.
+        Smart replacement: if at the cap, only replace the worst-scoring
+        auto sample when the new sample scores higher.  Recomputes the
+        centroid so subsequent verifications benefit from the updated
+        profile.  Returns True if a sample was actually added.
         """
         now = time.time()
         wav_bytes = encode_wav(audio_16k)
+
+        # Score the new sample (outside lock — may be slow)
+        new_quality: Optional[float] = None
+        try:
+            centroid_for_score: Optional[np.ndarray] = None
+            with self._lock:
+                centroid_for_score = self._get_centroid(speaker_id)
+            q = score_sample(
+                audio_16k,
+                embedder=self.embedder,
+                vad=self.vad,
+                centroid=centroid_for_score,
+                weights=self._quality_weights,
+            )
+            new_quality = q.composite
+        except Exception as exc:
+            _LOGGER.warning("Quality scoring failed for auto-enroll: %s", exc)
+
         with self._lock:
-            # Trim oldest auto samples if at the cap.
             auto_samples = self.conn.execute(
-                "SELECT id FROM speaker_samples "
+                "SELECT id, quality_score FROM speaker_samples "
                 "WHERE speaker_id = ? AND source = 'auto' "
                 "ORDER BY created_at ASC",
                 (speaker_id,),
             ).fetchall()
-            excess = len(auto_samples) - max_auto_samples + 1
-            if excess > 0:
-                ids_to_delete = [r["id"] for r in auto_samples[:excess]]
-                self.conn.execute(
-                    f"DELETE FROM speaker_samples WHERE id IN "
-                    f"({','.join('?' * len(ids_to_delete))})",
-                    ids_to_delete,
-                )
+
+            if len(auto_samples) >= max_auto_samples:
+                # Smart replacement: find the worst-scoring auto sample
+                if new_quality is not None:
+                    worst_id = None
+                    worst_score = new_quality  # Only replace if we're better
+                    for row in auto_samples:
+                        s = row["quality_score"]
+                        if s is None or s < worst_score:
+                            worst_score = s if s is not None else -1.0
+                            worst_id = row["id"]
+                    if worst_id is None:
+                        _LOGGER.debug(
+                            "Auto-enroll skipped for speaker_id=%d: "
+                            "new sample (%.3f) not better than worst existing",
+                            speaker_id, new_quality,
+                        )
+                        return False
+                    self.conn.execute(
+                        "DELETE FROM speaker_samples WHERE id = ?",
+                        (worst_id,),
+                    )
+                else:
+                    # No quality score — fall back to oldest-delete
+                    excess = len(auto_samples) - max_auto_samples + 1
+                    if excess > 0:
+                        ids_to_delete = [r["id"] for r in auto_samples[:excess]]
+                        self.conn.execute(
+                            f"DELETE FROM speaker_samples WHERE id IN "
+                            f"({','.join('?' * len(ids_to_delete))})",
+                            ids_to_delete,
+                        )
 
             self.conn.execute(
                 "INSERT INTO speaker_samples("
-                "speaker_id, audio, duration_sec, source, filename, created_at) "
-                "VALUES(?, ?, ?, 'auto', NULL, ?)",
-                (speaker_id, wav_bytes, duration_sec, now),
+                "speaker_id, audio, duration_sec, source, filename, created_at, "
+                "quality_score, satellite_id) "
+                "VALUES(?, ?, ?, 'auto', NULL, ?, ?, ?)",
+                (speaker_id, wav_bytes, duration_sec, now, new_quality, satellite_id),
             )
 
             centroid, sample_count = self._compute_centroid(speaker_id)
@@ -444,8 +521,9 @@ class SpeakerStore:
 
         _LOGGER.info(
             "Auto-enrolled fresh embedding for speaker_id=%d "
-            "(%.2fs, total=%d, auto_cap=%d)",
-            speaker_id, duration_sec, sample_count, max_auto_samples,
+            "(%.2fs, quality=%.3f, total=%d, auto_cap=%d)",
+            speaker_id, duration_sec, new_quality or 0.0,
+            sample_count, max_auto_samples,
         )
         return True
 
@@ -516,6 +594,69 @@ class SpeakerStore:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _get_centroid(self, speaker_id: int) -> Optional[np.ndarray]:
+        """Read the current centroid from speaker_embeddings, or None."""
+        row = self.conn.execute(
+            "SELECT embedding FROM speaker_embeddings WHERE speaker_id = ?",
+            (speaker_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return _blob_to_embedding(bytes(row["embedding"]))
+
+    def set_quality_weights(self, weights: Optional[Dict[str, float]]) -> None:
+        """Set custom quality scoring weights (None = defaults)."""
+        self._quality_weights = weights
+
+    def get_speaker_training_quality(self, speaker_id: int) -> float:
+        """Compute aggregate training quality for a speaker."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT quality_score FROM speaker_samples "
+                "WHERE speaker_id = ? AND quality_score IS NOT NULL",
+                (speaker_id,),
+            ).fetchall()
+        scores = [float(r["quality_score"]) for r in rows]
+        return speaker_training_quality(scores)
+
+    def rescore_all_samples(self, speaker_id: int) -> int:
+        """Recompute quality scores for all samples of a speaker.
+
+        Returns the number of samples rescored.
+        """
+        with self._lock:
+            centroid = self._get_centroid(speaker_id)
+            rows = self.conn.execute(
+                "SELECT id, audio FROM speaker_samples WHERE speaker_id = ? ORDER BY id",
+                (speaker_id,),
+            ).fetchall()
+
+        count = 0
+        for row in rows:
+            try:
+                from .audio import decode_wav, to_mono_16k_pcm
+                pcm, rate, width, channels = decode_wav(bytes(row["audio"]))
+                pcm = to_mono_16k_pcm(pcm, rate, width, channels)
+                q = score_sample(
+                    pcm,
+                    embedder=self.embedder,
+                    vad=self.vad,
+                    centroid=centroid,
+                    weights=self._quality_weights,
+                )
+                with self._lock:
+                    self.conn.execute(
+                        "UPDATE speaker_samples SET quality_score = ? WHERE id = ?",
+                        (q.composite, row["id"]),
+                    )
+                count += 1
+            except Exception as exc:
+                _LOGGER.warning("Failed to rescore sample %d: %s", row["id"], exc)
+
+        with self._lock:
+            self.conn.commit()
+        return count
 
     def _compute_centroid(self, speaker_id: int) -> tuple[np.ndarray, int]:
         rows = self.conn.execute(

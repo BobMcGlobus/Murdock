@@ -55,6 +55,7 @@ async def export_backup(ctx: AppContext = Depends(get_context)):
                     "source": src,
                     "duration_sec": sample["duration_sec"],
                     "original_filename": sample.get("filename"),
+                    "satellite_id": sample.get("satellite_id"),
                 })
                 total_samples += 1
 
@@ -194,6 +195,7 @@ async def restore_backup(
                     role=sp_meta.get("role") if first_sample else None,
                     source=sample_info.get("source", "upload"),
                     filename=sample_info.get("original_filename"),
+                    satellite_id=sample_info.get("satellite_id"),
                     skip_vad=True,
                 )
                 result.samples_imported += 1

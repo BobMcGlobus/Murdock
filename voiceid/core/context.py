@@ -134,6 +134,52 @@ class AppContext:
         set_setting(self.db, "min_liveness_score", f"{max(0.0, float(value)):.3f}")
 
     # ------------------------------------------------------------------
+    # Sample-quality scoring weights (advanced tuning)
+    # ------------------------------------------------------------------
+
+    _QUALITY_WEIGHT_KEYS: tuple = (
+        "speech_ratio", "snr", "liveness", "consistency", "centroid_distance",
+    )
+
+    def get_quality_weights(self) -> dict:
+        """Return the effective weights dict (defaults if not overridden)."""
+        from .sample_quality import DEFAULT_WEIGHTS
+        result = dict(DEFAULT_WEIGHTS)
+        for key in self._QUALITY_WEIGHT_KEYS:
+            raw = get_setting(self.db, f"quality_weight_{key}")
+            if raw is not None:
+                try:
+                    result[key] = max(0.0, float(raw))
+                except ValueError:
+                    pass
+        # Normalize to sum to 1.0 so composition is stable.
+        total = sum(result.values())
+        if total > 1e-6:
+            result = {k: v / total for k, v in result.items()}
+        return result
+
+    def get_quality_weights_source(self) -> str:
+        """'override' if any weight is persisted, else 'default'."""
+        for key in self._QUALITY_WEIGHT_KEYS:
+            if get_setting(self.db, f"quality_weight_{key}") is not None:
+                return "override"
+        return "default"
+
+    def set_quality_weights(self, weights: Optional[dict]) -> None:
+        """Persist weights override (or clear when None)."""
+        if weights is None:
+            for key in self._QUALITY_WEIGHT_KEYS:
+                set_setting(self.db, f"quality_weight_{key}", "")
+            self.speakers.set_quality_weights(None)
+            return
+        for key in self._QUALITY_WEIGHT_KEYS:
+            if key in weights:
+                set_setting(
+                    self.db, f"quality_weight_{key}", f"{max(0.0, float(weights[key])):.4f}"
+                )
+        self.speakers.set_quality_weights(self.get_quality_weights())
+
+    # ------------------------------------------------------------------
     # Auto-enroll / aging
     # ------------------------------------------------------------------
 
@@ -378,6 +424,9 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
     )
     # Apply the persisted threshold override, if any.
     _CONTEXT.speakers.threshold = _CONTEXT.get_verify_threshold()
+    # Apply persisted quality-weight override, if any.
+    if _CONTEXT.get_quality_weights_source() == "override":
+        _CONTEXT.speakers.set_quality_weights(_CONTEXT.get_quality_weights())
     return _CONTEXT
 
 

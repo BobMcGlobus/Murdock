@@ -96,6 +96,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "filename" not in sample_cols:
         conn.execute("ALTER TABLE speaker_samples ADD COLUMN filename TEXT")
         _LOGGER.info("Migration: speaker_samples.filename added")
+    if "quality_score" not in sample_cols:
+        conn.execute("ALTER TABLE speaker_samples ADD COLUMN quality_score REAL")
+        _LOGGER.info("Migration: speaker_samples.quality_score added")
+    if "satellite_id" not in sample_cols:
+        conn.execute("ALTER TABLE speaker_samples ADD COLUMN satellite_id TEXT")
+        _LOGGER.info("Migration: speaker_samples.satellite_id added")
 
     conn.commit()
 

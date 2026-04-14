@@ -294,6 +294,50 @@
             </div>
 
             <div class="card">
+                <h2 data-i18n="quality.title">Sample quality (advanced)</h2>
+                <p class="meta" data-i18n="quality.description">
+                    Adjust how sample quality is scored. Scores drive the smart
+                    auto-enroll replacement logic (worst sample is only replaced
+                    when a better one comes in) and the per-speaker training
+                    quality indicator. Weights are normalized automatically.
+                </p>
+                <form id="quality-form">
+                    <label>
+                        <span data-i18n="quality.w_speech_ratio">Speech ratio weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="speech_ratio">
+                        <small class="meta" data-i18n="quality.w_speech_ratio_hint">VAD-detected speech vs total duration.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_snr">SNR weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="snr">
+                        <small class="meta" data-i18n="quality.w_snr_hint">Speech-to-noise ratio estimate (dB).</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_liveness">Liveness weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="liveness">
+                        <small class="meta" data-i18n="quality.w_liveness_hint">Spectral TV/broadcast heuristics.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_consistency">Consistency weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="consistency">
+                        <small class="meta" data-i18n="quality.w_consistency_hint">Embedding stability across windows (detects multiple voices).</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_centroid_distance">Centroid fit weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="centroid_distance">
+                        <small class="meta" data-i18n="quality.w_centroid_distance_hint">How close the sample is to the existing speaker profile.</small>
+                    </label>
+                    <div id="quality-weights-info" class="meta"></div>
+                    <div class="row">
+                        <button type="submit" data-i18n="quality.save">Save weights</button>
+                        <button type="button" id="quality-reset-btn" class="secondary" data-i18n="quality.reset">Reset to defaults</button>
+                        <button type="button" id="quality-rescore-btn" class="secondary" data-i18n="quality.rescore_all">Re-evaluate all samples</button>
+                    </div>
+                </form>
+                <div id="quality-feedback" class="meta"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="service.title">Service</h2>
                 <p class="meta" data-i18n="service.description">
                     Restart the VoiceID process. Docker will bring it back up

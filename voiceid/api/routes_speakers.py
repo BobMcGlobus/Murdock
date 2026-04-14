@@ -36,6 +36,22 @@ class SampleOut(BaseModel):
     source: Optional[str] = None
     filename: Optional[str] = None
     created_at: float
+    quality_score: Optional[float] = None
+    satellite_id: Optional[str] = None
+
+
+class QualityBreakdownOut(BaseModel):
+    composite: float
+    speech_ratio_score: float
+    snr_score: float
+    liveness_score: float
+    consistency_score: float
+    centroid_distance_score: float
+    speech_ratio: float
+    snr_db: float
+    liveness_raw: float
+    consistency_std: float
+    centroid_distance: Optional[float] = None
 
 
 class EnrollResponse(BaseModel):
@@ -46,6 +62,20 @@ class EnrollResponse(BaseModel):
     vad_speech_seconds: Optional[float] = None
     vad_speech_ratio: Optional[float] = None
     warnings: List[str] = []
+    quality: Optional[QualityBreakdownOut] = None
+
+
+class TrainingQualityOut(BaseModel):
+    speaker_id: int
+    training_quality: float
+    sample_count: int
+    scored_count: int
+    avg_sample_score: Optional[float] = None
+
+
+class RescoreResponse(BaseModel):
+    speaker_id: int
+    rescored: int
 
 
 class SpeakerPatch(BaseModel):
@@ -144,6 +174,7 @@ async def enroll(
     role: Optional[str] = Form(None),
     source: Optional[str] = Form(None),
     filename: Optional[str] = Form(None),
+    satellite_id: Optional[str] = Form(None),
     audio: UploadFile = File(...),
     ctx: AppContext = Depends(get_context),
 ):
@@ -185,12 +216,30 @@ async def enroll(
             role=role,
             source=source,
             filename=effective_filename,
+            satellite_id=satellite_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         _LOGGER.exception("Enrollment failed")
         raise HTTPException(status_code=500, detail=str(exc))
+
+    quality_out: Optional[QualityBreakdownOut] = None
+    if result.quality is not None:
+        q = result.quality
+        quality_out = QualityBreakdownOut(
+            composite=q.composite,
+            speech_ratio_score=q.speech_ratio_score,
+            snr_score=q.snr_score,
+            liveness_score=q.liveness_score,
+            consistency_score=q.consistency_score,
+            centroid_distance_score=q.centroid_distance_score,
+            speech_ratio=q.speech_ratio,
+            snr_db=q.snr_db,
+            liveness_raw=q.liveness_raw,
+            consistency_std=q.consistency_std,
+            centroid_distance=q.centroid_distance,
+        )
 
     return EnrollResponse(
         speaker_id=result.speaker_id,
@@ -200,7 +249,51 @@ async def enroll(
         vad_speech_seconds=result.vad.speech_seconds if result.vad else None,
         vad_speech_ratio=result.vad.speech_ratio if result.vad else None,
         warnings=result.warnings,
+        quality=quality_out,
     )
+
+
+@router.get("/{speaker_id}/quality", response_model=TrainingQualityOut)
+async def speaker_quality(speaker_id: int, ctx: AppContext = Depends(get_context)):
+    """Return aggregate training quality for a speaker."""
+    speaker = ctx.speakers.get_speaker(speaker_id)
+    if not speaker:
+        raise HTTPException(status_code=404, detail="Speaker not found")
+    samples = ctx.speakers.list_samples(speaker_id)
+    scored = [s["quality_score"] for s in samples if s.get("quality_score") is not None]
+    training = ctx.speakers.get_speaker_training_quality(speaker_id)
+    avg = float(sum(scored) / len(scored)) if scored else None
+    return TrainingQualityOut(
+        speaker_id=speaker_id,
+        training_quality=training,
+        sample_count=len(samples),
+        scored_count=len(scored),
+        avg_sample_score=avg,
+    )
+
+
+@router.post("/{speaker_id}/rescore", response_model=RescoreResponse)
+async def rescore_speaker(speaker_id: int, ctx: AppContext = Depends(get_context)):
+    """Recompute quality scores for all samples of this speaker."""
+    speaker = ctx.speakers.get_speaker(speaker_id)
+    if not speaker:
+        raise HTTPException(status_code=404, detail="Speaker not found")
+    import asyncio
+    count = await asyncio.to_thread(ctx.speakers.rescore_all_samples, speaker_id)
+    return RescoreResponse(speaker_id=speaker_id, rescored=count)
+
+
+@router.post("/rescore-all", response_model=List[RescoreResponse])
+async def rescore_all(ctx: AppContext = Depends(get_context)):
+    """Recompute quality scores for all samples of all speakers."""
+    import asyncio
+    results: List[RescoreResponse] = []
+    for speaker in ctx.speakers.list_speakers():
+        count = await asyncio.to_thread(
+            ctx.speakers.rescore_all_samples, speaker.id
+        )
+        results.append(RescoreResponse(speaker_id=speaker.id, rescored=count))
+    return results
 
 
 @router.post("/verify")

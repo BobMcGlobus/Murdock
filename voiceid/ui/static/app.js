@@ -323,6 +323,42 @@ function populateExistingSpeakerDropdown(speakers) {
     }
 }
 
+// --- Quality helpers -----------------------------------------------------
+
+function qualityClass(score) {
+    if (score == null || isNaN(score)) return "unknown";
+    if (score >= 0.75) return "good";
+    if (score >= 0.50) return "medium";
+    return "poor";
+}
+
+function qualityLabel(score) {
+    if (score == null || isNaN(score)) return t("quality.unknown");
+    return `${Math.round(score * 100)}%`;
+}
+
+async function fetchSpeakerQuality(speakerId) {
+    const badge = document.querySelector(`[data-quality-for="${speakerId}"]`);
+    if (!badge) return;
+    try {
+        const q = await api("/api/speakers/" + speakerId + "/quality");
+        const label = qualityLabel(q.training_quality);
+        badge.textContent = t("quality.training", { pct: label });
+        badge.classList.remove("good", "medium", "poor", "unknown");
+        badge.classList.add(qualityClass(q.training_quality));
+        const avg = q.avg_sample_score != null
+            ? `${Math.round(q.avg_sample_score * 100)}%`
+            : "—";
+        badge.title = t("quality.training_tooltip", {
+            scored: q.scored_count,
+            total: q.sample_count,
+            avg: avg,
+        });
+    } catch {
+        badge.textContent = "?";
+    }
+}
+
 async function loadSpeakers() {
     await loadRoles();
     const list = $("#speaker-list");
@@ -344,18 +380,22 @@ async function loadSpeakers() {
                 <div class="row">
                     <h3>${escapeHtml(s.name)}</h3>
                     <span class="badge">${s.enrollment_count} ${escapeHtml(t("speakers.samples"))}</span>
+                    <span class="badge quality" data-quality-for="${s.id}" title="${escapeHtml(t("quality.training_label"))}">…</span>
                     ${s.role ? `<span class="badge role">${escapeHtml(s.role)}</span>` : ""}
                     ${s.ha_user_id ? `<span class="meta">HA: ${escapeHtml(s.ha_user_id)}</span>` : ""}
                 </div>
                 <div class="row">
                     <button class="secondary" data-view="${s.id}">${escapeHtml(t("speakers.view_samples"))}</button>
                     <button class="secondary" data-edit="${s.id}">${escapeHtml(t("speakers.edit"))}</button>
+                    <button class="secondary" data-rescore="${s.id}">${escapeHtml(t("quality.rescore_one"))}</button>
                     <button class="danger" data-del="${s.id}">${escapeHtml(t("speakers.delete_speaker"))}</button>
                 </div>
                 <div class="edit-panel" hidden></div>
                 <div class="samples" hidden></div>
             `;
             list.appendChild(item);
+            // Fire-and-forget per-speaker quality fetch
+            fetchSpeakerQuality(s.id);
         }
         list.querySelectorAll("button[data-del]").forEach((btn) =>
             btn.addEventListener("click", async () => {
@@ -366,6 +406,33 @@ async function loadSpeakers() {
         );
         list.querySelectorAll("button[data-view]").forEach((btn) =>
             btn.addEventListener("click", () => toggleSamples(btn))
+        );
+        list.querySelectorAll("button[data-rescore]").forEach((btn) =>
+            btn.addEventListener("click", async () => {
+                btn.disabled = true;
+                btn.textContent = t("quality.rescoring");
+                try {
+                    const res = await api(
+                        "/api/speakers/" + btn.dataset.rescore + "/rescore",
+                        { method: "POST" }
+                    );
+                    setStatus(t("quality.rescored", { n: res.rescored }), "ok");
+                    fetchSpeakerQuality(btn.dataset.rescore);
+                    // Refresh samples panel if open
+                    const item = btn.closest(".list-item");
+                    const panel = item.querySelector(".samples");
+                    if (panel && !panel.hidden) {
+                        const viewBtn = item.querySelector("button[data-view]");
+                        toggleSamples(viewBtn);
+                        toggleSamples(viewBtn);
+                    }
+                } catch (err) {
+                    setStatus(err.message, "err");
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = t("quality.rescore_one");
+                }
+            })
         );
         list.querySelectorAll("button[data-edit]").forEach((btn) =>
             btn.addEventListener("click", () =>
@@ -475,17 +542,31 @@ async function toggleSamples(btn) {
             const sourceBadge = s.source
                 ? `<span class="badge source-${escapeHtml(s.source)}">${escapeHtml(s.source)}</span>`
                 : "";
+            const satelliteBadge = s.satellite_id
+                ? `<span class="badge satellite" title="${escapeHtml(t("speakers.satellite_tooltip"))}">📡 ${escapeHtml(s.satellite_id)}</span>`
+                : "";
             const filename = s.filename
                 ? `<span class="filename">${escapeHtml(s.filename)}</span>`
                 : `<span class="filename meta">${escapeHtml(t("speakers.no_filename"))}</span>`;
+            const qClass = qualityClass(s.quality_score);
+            const qLabel = qualityLabel(s.quality_score);
+            const qPct = s.quality_score != null ? Math.round(s.quality_score * 100) : 0;
+            const qualityHtml = `
+                <div class="quality-bar" title="${escapeHtml(t("quality.sample_tooltip"))}">
+                    <span class="badge quality ${qClass}">${escapeHtml(t("quality.sample", { pct: qLabel }))}</span>
+                    <div class="quality-bar-track"><div class="quality-bar-fill ${qClass}" style="width:${qPct}%"></div></div>
+                </div>
+            `;
             row.innerHTML = `
                 <div class="row">
                     ${filename}
                     ${sourceBadge}
+                    ${satelliteBadge}
                     <span class="meta">${s.duration_sec.toFixed(1)}s · ${new Date(
                         s.created_at * 1000
                     ).toLocaleString()}</span>
                 </div>
+                ${qualityHtml}
                 <div class="row">
                     <audio controls src="/api/speakers/samples/${s.id}/audio"></audio>
                     <button class="danger" data-del-sample="${s.id}">${escapeHtml(t("speakers.delete_sample"))}</button>
@@ -697,6 +778,21 @@ async function loadSettings() {
             const hint = $("#ha-token-hint");
             if (hint) {
                 hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
+            }
+        }
+        // Populate quality weights form
+        const qForm = $("#quality-form");
+        if (qForm && s.quality_weights) {
+            for (const k of ["speech_ratio", "snr", "liveness", "consistency", "centroid_distance"]) {
+                if (qForm[k]) {
+                    qForm[k].value = (s.quality_weights[k] ?? 0).toFixed(3);
+                }
+            }
+            const info = $("#quality-weights-info");
+            if (info) {
+                info.textContent = s.quality_weights_source === "override"
+                    ? t("quality.source_override")
+                    : t("quality.source_default");
             }
         }
     } catch (err) {
@@ -1199,6 +1295,101 @@ $("#test-rec").addEventListener("click", async () => {
         setStatus(t("generic.error", { err: err.message }), "err");
     }
 });
+
+// --- Quality weight form handlers -----------------------------------------
+
+const qualityForm = $("#quality-form");
+if (qualityForm) {
+    qualityForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const weights = {};
+        for (const k of ["speech_ratio", "snr", "liveness", "consistency", "centroid_distance"]) {
+            const v = parseFloat(qualityForm[k].value);
+            weights[k] = isNaN(v) ? 0 : v;
+        }
+        const total = Object.values(weights).reduce((a, b) => a + b, 0);
+        if (total <= 0) {
+            $("#quality-feedback").className = "meta feedback err";
+            $("#quality-feedback").textContent = t("quality.err_zero");
+            return;
+        }
+        try {
+            $("#quality-feedback").className = "meta";
+            $("#quality-feedback").textContent = t("quality.saving");
+            const s = await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ quality_weights: weights }),
+            });
+            // Repopulate (server normalizes)
+            for (const k of ["speech_ratio", "snr", "liveness", "consistency", "centroid_distance"]) {
+                qualityForm[k].value = (s.quality_weights[k] ?? 0).toFixed(3);
+            }
+            const info = $("#quality-weights-info");
+            if (info) {
+                info.textContent = s.quality_weights_source === "override"
+                    ? t("quality.source_override")
+                    : t("quality.source_default");
+            }
+            $("#quality-feedback").className = "meta feedback ok";
+            $("#quality-feedback").textContent = t("quality.saved");
+        } catch (err) {
+            $("#quality-feedback").className = "meta feedback err";
+            $("#quality-feedback").textContent = t("generic.error", { err: err.message });
+        }
+    });
+}
+
+const qualityResetBtn = $("#quality-reset-btn");
+if (qualityResetBtn) {
+    qualityResetBtn.addEventListener("click", async () => {
+        if (!confirm(t("quality.confirm_reset"))) return;
+        try {
+            const s = await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ quality_weights: {} }),
+            });
+            const form = $("#quality-form");
+            for (const k of ["speech_ratio", "snr", "liveness", "consistency", "centroid_distance"]) {
+                form[k].value = (s.quality_weights[k] ?? 0).toFixed(3);
+            }
+            const info = $("#quality-weights-info");
+            if (info) info.textContent = t("quality.source_default");
+            $("#quality-feedback").className = "meta feedback ok";
+            $("#quality-feedback").textContent = t("quality.reset_ok");
+        } catch (err) {
+            $("#quality-feedback").className = "meta feedback err";
+            $("#quality-feedback").textContent = t("generic.error", { err: err.message });
+        }
+    });
+}
+
+const qualityRescoreBtn = $("#quality-rescore-btn");
+if (qualityRescoreBtn) {
+    qualityRescoreBtn.addEventListener("click", async () => {
+        if (!confirm(t("quality.confirm_rescore_all"))) return;
+        const fb = $("#quality-feedback");
+        try {
+            qualityRescoreBtn.disabled = true;
+            fb.className = "meta";
+            fb.textContent = t("quality.rescoring_all");
+            const results = await api("/api/speakers/rescore-all", {
+                method: "POST",
+            });
+            const total = results.reduce((a, r) => a + r.rescored, 0);
+            fb.className = "meta feedback ok";
+            fb.textContent = t("quality.rescore_all_done", {
+                n: total, s: results.length,
+            });
+        } catch (err) {
+            fb.className = "meta feedback err";
+            fb.textContent = t("generic.error", { err: err.message });
+        } finally {
+            qualityRescoreBtn.disabled = false;
+        }
+    });
+}
 
 // --- Utilities ------------------------------------------------------------
 

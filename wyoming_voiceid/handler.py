@@ -832,6 +832,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 verify_audio,
                 duration,
                 self.context.settings.auto_enroll_max_samples,
+                self._satellite_id,
             )
             _LOGGER.info(
                 "[%s] Auto-enrolled for %s (d=%.4f, min=%.3f)",

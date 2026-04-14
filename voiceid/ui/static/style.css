@@ -354,3 +354,64 @@ input[type="password"] {
     border-radius: 6px;
     font: inherit;
 }
+
+/* --- Sample quality badges / bars --- */
+.badge.quality {
+    font-variant-numeric: tabular-nums;
+}
+.badge.quality.good {
+    background: rgba(52, 211, 153, 0.2);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+.badge.quality.medium {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid #fbbf24;
+}
+.badge.quality.poor {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+.badge.quality.unknown {
+    background: var(--card-alt);
+    color: var(--muted);
+    border: 1px solid var(--border);
+}
+
+.quality-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.25rem 0;
+}
+.quality-bar-track {
+    flex: 1;
+    height: 6px;
+    background: var(--card-alt);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.quality-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.quality-bar-fill.good { background: var(--success); }
+.quality-bar-fill.medium { background: #fbbf24; }
+.quality-bar-fill.poor { background: var(--danger); }
+.quality-bar-fill.unknown { background: var(--border); }
+
+#quality-weights-info {
+    padding: 0.4rem 0;
+    font-style: italic;
+}
+
+.badge.satellite {
+    background: rgba(56, 189, 248, 0.15);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+}
