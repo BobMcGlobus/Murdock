@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, List, Optional
 from ..config import Settings, get_settings
 from .db import get_setting, open_db, set_setting
 from .embeddings import CAMPPlusEmbedder
+from .emotion import EmotionClassifier
 from .ha_integration import HomeAssistantClient
 from .recognition_log import RecognitionLog
 from .speaker_store import SpeakerStore
@@ -52,6 +53,7 @@ class AppContext:
     unknown: UnknownStore
     ha: HomeAssistantClient
     recognition: RecognitionLog
+    emotion: Optional[EmotionClassifier] = None
     info_cache: "Optional[UpstreamInfoCache]" = None
     _overrides: dict = field(default_factory=dict)
 
@@ -234,6 +236,32 @@ class AppContext:
         set_setting(self.db, "auto_enroll", "true" if enabled else "false")
 
     # ------------------------------------------------------------------
+    # Emotion detection (experimental, opt-in)
+    # ------------------------------------------------------------------
+    #
+    # The flag is honoured live (no restart needed) and guards every CPU
+    # path in the classifier. Even with the flag on, the handler skips
+    # classification whenever the model file is missing so users can
+    # safely pre-flip the switch while waiting for a model release.
+
+    def get_enable_emotion(self) -> bool:
+        override = get_setting(self.db, "enable_emotion")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_emotion
+
+    def set_enable_emotion(self, enabled: bool) -> None:
+        set_setting(self.db, "enable_emotion", "true" if enabled else "false")
+
+    def emotion_model_available(self) -> bool:
+        """Whether the on-disk model file exists and the classifier can run."""
+        return self.emotion is not None and self.emotion.is_available()
+
+    def emotion_ready(self) -> bool:
+        """True when the feature is both enabled AND a model is on disk."""
+        return self.get_enable_emotion() and self.emotion_model_available()
+
+    # ------------------------------------------------------------------
     # Home Assistant integration (live-editable, persisted in DB)
     # ------------------------------------------------------------------
 
@@ -299,6 +327,12 @@ class AppContext:
 
     def set_ha_role_entity(self, value: str) -> None:
         set_setting(self.db, "ha_role_entity", (value or "").strip())
+
+    def get_ha_emotion_entity(self) -> str:
+        return get_setting(self.db, "ha_emotion_entity") or ""
+
+    def set_ha_emotion_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_emotion_entity", (value or "").strip())
 
     async def apply_ha_settings(self) -> None:
         """Push current HA settings into the live client."""
@@ -437,6 +471,16 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
 
     recognition = RecognitionLog(conn=db)
 
+    # Emotion classifier: always constructed, never auto-loaded. The ONNX
+    # session is materialised on the first classify() call — if the model
+    # file is missing at that point we raise FileNotFoundError, which the
+    # handler catches and silently skips. Constructing it unconditionally
+    # keeps the wiring identical regardless of the feature flag.
+    emotion = EmotionClassifier(
+        settings.emotion_model_path,
+        min_duration_sec=settings.emotion_min_seconds,
+    )
+
     # HA client: check DB overrides first, fall back to env.
     _ha_url = get_setting(db, "ha_url")
     _ha_token = get_setting(db, "ha_token")
@@ -462,6 +506,7 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         unknown=unknown,
         ha=ha,
         recognition=recognition,
+        emotion=emotion,
     )
     # Apply the persisted threshold override, if any.
     _CONTEXT.speakers.threshold = _CONTEXT.get_verify_threshold()

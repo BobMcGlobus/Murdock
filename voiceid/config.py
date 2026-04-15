@@ -79,6 +79,22 @@ class Settings(BaseSettings):
     vad_min_speech_ratio: float = Field(default=0.6)
     vad_speech_threshold: float = Field(default=0.5)
 
+    # Emotion detection (experimental, disabled by default).
+    #
+    # The feature is plumbed end-to-end (DB column, handler hook, HA event
+    # field, UI toggle) but ships without a model file. A compatible ONNX
+    # checkpoint needs to be provided at ``emotion_model_path`` before the
+    # runtime will actually classify anything — with no model present the
+    # hook is a no-op even when ``enable_emotion`` is true, so users who
+    # experiment with the flag can't accidentally break recognition.
+    enable_emotion: bool = Field(default=False)
+    emotion_model_path: Optional[Path] = Field(default=None)
+    # Only classify utterances at least this long. Shorter clips produce
+    # effectively random emotion logits and would pollute the recognition
+    # log. The handler also skips classification if the utterance was
+    # rejected (unknown/blocked) so we never pay CPU for a TV sample.
+    emotion_min_seconds: float = Field(default=1.0)
+
     # Unknown logging
     unknown_logging: bool = Field(default=True)
     unknown_ttl_hours: int = Field(default=48)
@@ -103,6 +119,8 @@ class Settings(BaseSettings):
             self.cam_model_path = self.model_dir / "campplus.onnx"
         if self.vad_model_path is None:
             self.vad_model_path = self.model_dir / "silero_vad.onnx"
+        if self.emotion_model_path is None:
+            self.emotion_model_path = self.model_dir / "emotion.onnx"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "unknown").mkdir(parents=True, exist_ok=True)
         return self
