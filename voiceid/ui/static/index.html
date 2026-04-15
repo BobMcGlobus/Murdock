@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VoiceID</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="static/style.css">
+    <!-- API_BASE is rewritten by the server when running under Home
+         Assistant ingress; stays empty for direct port access. -->
+    <script>window.API_BASE = "__API_BASE__";</script>
 </head>
 <body>
     <header>
@@ -382,7 +385,7 @@
         </section>
     </main>
 
-    <script src="/static/i18n.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="static/i18n.js"></script>
+    <script src="static/app.js"></script>
 </body>
 </html>

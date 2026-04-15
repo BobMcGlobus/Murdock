@@ -9,8 +9,28 @@ function setStatus(msg, kind = "") {
     statusEl.className = "status " + kind;
 }
 
+// API base URL — normally empty (direct access). Home Assistant ingress
+// sets this to the rewritten prefix so that absolute /api/... paths
+// resolve through the ingress reverse-proxy instead of hitting HA itself.
+// The value is injected by the server into index.html via
+// <script>window.API_BASE="..."</script>.
+const API_BASE = (typeof window !== "undefined" && window.API_BASE) || "";
+
+// Resolve an absolute /api/... path against API_BASE. Leaves non-/api
+// paths and already-prefixed URLs untouched.
+function apiUrl(path) {
+    if (!path) return path;
+    if (!API_BASE) return path;
+    // Don't double-prefix if caller already passed a full ingress URL.
+    if (path.startsWith(API_BASE)) return path;
+    if (path.startsWith("/api/") || path === "/api") {
+        return API_BASE.replace(/\/+$/, "") + path;
+    }
+    return path;
+}
+
 async function api(path, options = {}) {
-    const res = await fetch(path, options);
+    const res = await fetch(apiUrl(path), options);
     if (!res.ok) {
         let detail = res.statusText;
         try {
@@ -568,7 +588,7 @@ async function toggleSamples(btn) {
                 </div>
                 ${qualityHtml}
                 <div class="row">
-                    <audio controls src="/api/speakers/samples/${s.id}/audio"></audio>
+                    <audio controls src="${apiUrl(`/api/speakers/samples/${s.id}/audio`)}"></audio>
                     <button class="danger" data-del-sample="${s.id}">${escapeHtml(t("speakers.delete_sample"))}</button>
                 </div>
             `;
@@ -643,7 +663,7 @@ async function loadUnknown() {
                     : ""
             }</span>
                 </div>
-                <audio controls src="/api/unknown/${s.id}/audio"></audio>
+                <audio controls src="${apiUrl(`/api/unknown/${s.id}/audio`)}"></audio>
                 <div class="row">
                     <input type="text" list="unknown-speaker-names" placeholder="${escapeHtml(t("unknown.assign_ph"))}" data-assign-name="${s.id}">
                     <button data-assign="${s.id}">${escapeHtml(t("unknown.assign_btn"))}</button>
@@ -781,7 +801,7 @@ async function loadClusters() {
                                 ${tagBadge}
                                 <span class="meta">${escapeHtml(when)}</span>
                             </div>
-                            <audio controls src="/api/unknown/${m.sample_id}/audio"></audio>
+                            <audio controls src="${apiUrl(`/api/unknown/${m.sample_id}/audio`)}"></audio>
                         </div>
                     `;
                 })
@@ -1373,7 +1393,7 @@ $("#ha-copy-template").addEventListener("click", async () => {
 // --- Backup & Restore -----------------------------------------------------
 
 $("#backup-export-btn").addEventListener("click", () => {
-    window.location.href = "/api/backup";
+    window.location.href = apiUrl("/api/backup");
 });
 
 $("#backup-pick-btn").addEventListener("click", () => {

@@ -1,0 +1,9 @@
+# Override HA's default BUILD_FROM to the plain python:3.11-slim image.
+#
+# HA's stock base images are Alpine-based and onnxruntime publishes no
+# musl wheels, so we short-circuit the arch-specific resolution and
+# build on Debian slim for both supported arches. The Dockerfile
+# declares the ARG so HA's builder doesn't complain.
+build_from:
+  amd64: python:3.11-slim-bookworm
+  aarch64: python:3.11-slim-bookworm

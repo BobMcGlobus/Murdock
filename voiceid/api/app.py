@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from voiceid import __version__
@@ -61,9 +61,21 @@ def create_app(context: AppContext) -> FastAPI:
             name="static",
         )
 
+        # Cache the raw HTML once — we template-replace per request, but
+        # the file itself is tiny and never changes at runtime.
+        _INDEX_HTML = (_STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
         @app.get("/", include_in_schema=False)
-        async def index() -> FileResponse:
-            return FileResponse(str(_STATIC_DIR / "index.html"))
+        async def index(request: Request) -> HTMLResponse:
+            # Home Assistant's ingress proxy forwards requests with an
+            # X-Ingress-Path header pointing at the rewritten base (e.g.
+            # ``/api/hassio_ingress/<token>``). We inject that into
+            # window.API_BASE so the SPA's absolute /api/... fetches get
+            # re-routed through ingress instead of hitting HA's own API.
+            ingress_path = request.headers.get("X-Ingress-Path", "")
+            ingress_path = ingress_path.rstrip("/")
+            html = _INDEX_HTML.replace("__API_BASE__", ingress_path)
+            return HTMLResponse(html)
     else:
         _LOGGER.warning("UI static dir not found at %s", _STATIC_DIR)
 
