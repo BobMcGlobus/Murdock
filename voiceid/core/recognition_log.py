@@ -48,6 +48,8 @@ class RecognitionEvent:
     threshold: Optional[float]
     verify_ms: Optional[float]
     transcript: Optional[str]
+    emotion: Optional[str] = None
+    emotion_confidence: Optional[float] = None
 
 
 class RecognitionLog:
@@ -79,6 +81,8 @@ class RecognitionLog:
         threshold: Optional[float] = None,
         verify_ms: Optional[float] = None,
         transcript: Optional[str] = None,
+        emotion: Optional[str] = None,
+        emotion_confidence: Optional[float] = None,
     ) -> int:
         """Insert one event row and return its id."""
         now = time.time()
@@ -93,8 +97,8 @@ class RecognitionLog:
                     "INSERT INTO recognition_events("
                     "created_at, session_id, satellite_id, duration_sec, "
                     "outcome, matched_speaker, distance, threshold, "
-                    "verify_ms, transcript) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "verify_ms, transcript, emotion, emotion_confidence) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -106,6 +110,8 @@ class RecognitionLog:
                         threshold,
                         verify_ms,
                         safe_transcript,
+                        emotion,
+                        emotion_confidence,
                     ),
                 )
                 row_id = int(cur.lastrowid)
@@ -113,9 +119,9 @@ class RecognitionLog:
                 self.conn.commit()
                 _LOGGER.info(
                     "Recorded event #%d [%s] outcome=%s speaker=%s "
-                    "duration=%.2fs transcript=%r",
+                    "duration=%.2fs emotion=%s transcript=%r",
                     row_id, session_id, outcome, matched_speaker or "-",
-                    duration_sec, (safe_transcript or "")[:60],
+                    duration_sec, emotion or "-", (safe_transcript or "")[:60],
                 )
                 return row_id
             except Exception:
@@ -156,7 +162,8 @@ class RecognitionLog:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT id, created_at, session_id, satellite_id, duration_sec, "
-                "outcome, matched_speaker, distance, threshold, verify_ms, transcript "
+                "outcome, matched_speaker, distance, threshold, verify_ms, "
+                "transcript, emotion, emotion_confidence "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -174,6 +181,8 @@ class RecognitionLog:
                 threshold=row["threshold"],
                 verify_ms=row["verify_ms"],
                 transcript=row["transcript"],
+                emotion=row["emotion"] if "emotion" in row.keys() else None,
+                emotion_confidence=row["emotion_confidence"] if "emotion_confidence" in row.keys() else None,
             )
             for row in rows
         ]

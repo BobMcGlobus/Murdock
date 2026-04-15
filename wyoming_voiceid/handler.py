@@ -576,6 +576,13 @@ class VoiceIDHandler(AsyncEventHandler):
             self._responded = True
             await self._close_upstream(send_stop=False)
             self._log_total_latency("match(early)")
+            # Emotion classification runs AFTER the transcript has been
+            # handed back to the satellite, so its latency never shows up
+            # to the user. The helper is a no-op when the feature is off
+            # or the model file is missing.
+            emotion, emotion_conf = await self._classify_emotion(
+                verify_audio, duration,
+            )
             self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
@@ -584,6 +591,8 @@ class VoiceIDHandler(AsyncEventHandler):
                 threshold=self.context.get_verify_threshold(self._satellite_id),
                 verify_ms=0.0,
                 transcript=transcript,
+                emotion=emotion,
+                emotion_confidence=emotion_conf,
             )
             # Auto-enroll on early match too.
             await self._maybe_auto_enroll(
@@ -654,6 +663,11 @@ class VoiceIDHandler(AsyncEventHandler):
             self._responded = True
             await self._close_upstream(send_stop=False)
             self._log_total_latency("match")
+            # Same pattern as the early-match path above — emotion classification
+            # is fire-and-forget relative to user-visible latency.
+            emotion, emotion_conf = await self._classify_emotion(
+                verify_audio, duration,
+            )
             self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
@@ -662,6 +676,8 @@ class VoiceIDHandler(AsyncEventHandler):
                 threshold=result.threshold,
                 verify_ms=verify_ms,
                 transcript=transcript,
+                emotion=emotion,
+                emotion_confidence=emotion_conf,
             )
             # Aging / auto-enroll: add fresh embedding if distance is
             # informative (not too close, not borderline).
@@ -844,6 +860,55 @@ class VoiceIDHandler(AsyncEventHandler):
                 exc_info=True,
             )
 
+    async def _classify_emotion(
+        self, audio_16k: bytes, duration: float,
+    ) -> tuple[Optional[str], Optional[float]]:
+        """Run the emotion classifier if ready. Never raises.
+
+        Returns ``(label, confidence)`` or ``(None, None)`` when the
+        feature is off, the model file is missing, the clip is too
+        short, or inference fails. Any failure is logged at debug level
+        and treated as "no emotion info" — we never want a classifier
+        hiccup to break the recognition path.
+        """
+        if not self.context.emotion_ready():
+            return None, None
+        classifier = self.context.emotion
+        if classifier is None:
+            return None, None
+        if duration < classifier.min_duration_sec:
+            return None, None
+        sid = self._session_id
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, classifier.classify_pcm, audio_16k,
+            )
+        except FileNotFoundError:
+            # Model file disappeared mid-session (user deleted it, or
+            # the flag was flipped before the model landed). Quiet log,
+            # no panic.
+            _LOGGER.debug("[%s] Emotion model not available", sid)
+            return None, None
+        except Exception:
+            _LOGGER.debug(
+                "[%s] Emotion classification failed", sid, exc_info=True,
+            )
+            return None, None
+        # Filter out the model's garbage classes before they reach HA /
+        # the audit log. Surfacing "unknown" as an emotion in HA is worse
+        # than surfacing nothing.
+        if not result.is_meaningful:
+            _LOGGER.debug(
+                "[%s] Emotion classifier returned non-meaningful label %r (conf=%.3f)",
+                sid, result.label, result.confidence,
+            )
+            return None, None
+        _LOGGER.info(
+            "[%s] Emotion: %s (%.2f)", sid, result.label, result.confidence,
+        )
+        return result.label, float(result.confidence)
+
     def _record_event(
         self,
         *,
@@ -854,6 +919,8 @@ class VoiceIDHandler(AsyncEventHandler):
         threshold: Optional[float] = None,
         verify_ms: Optional[float] = None,
         transcript: Optional[str] = None,
+        emotion: Optional[str] = None,
+        emotion_confidence: Optional[float] = None,
     ) -> None:
         """Persist a recognition audit row. Never raises."""
         try:
@@ -867,6 +934,8 @@ class VoiceIDHandler(AsyncEventHandler):
                 threshold=threshold,
                 verify_ms=verify_ms,
                 transcript=transcript,
+                emotion=emotion,
+                emotion_confidence=emotion_confidence,
             )
         except Exception:
             _LOGGER.debug(

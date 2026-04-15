@@ -62,7 +62,9 @@ CREATE TABLE IF NOT EXISTS recognition_events (
     distance REAL,
     threshold REAL,
     verify_ms REAL,
-    transcript TEXT
+    transcript TEXT,
+    emotion TEXT,
+    emotion_confidence REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_unknown_created ON unknown_samples(created_at);
@@ -102,6 +104,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "satellite_id" not in sample_cols:
         conn.execute("ALTER TABLE speaker_samples ADD COLUMN satellite_id TEXT")
         _LOGGER.info("Migration: speaker_samples.satellite_id added")
+
+    event_cols = _table_columns(conn, "recognition_events")
+    if "emotion" not in event_cols:
+        conn.execute("ALTER TABLE recognition_events ADD COLUMN emotion TEXT")
+        _LOGGER.info("Migration: recognition_events.emotion added")
+    if "emotion_confidence" not in event_cols:
+        conn.execute("ALTER TABLE recognition_events ADD COLUMN emotion_confidence REAL")
+        _LOGGER.info("Migration: recognition_events.emotion_confidence added")
 
     conn.commit()
 
