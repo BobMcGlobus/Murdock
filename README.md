@@ -10,7 +10,8 @@ conversation agent knows whose command it's handling.
 > Reference base: [jxlarrea/wyoming-voice-match](https://github.com/jxlarrea/wyoming-voice-match).
 > VoiceID replaces the ECAPA-TDNN embedder with WeSpeaker **CAM++ (ONNX)**,
 > adds a **Web UI**, **sqlite-vec**-backed storage, **unknown-voice logging**,
-> **liveness heuristics**, and direct **HA REST integration**.
+> **liveness heuristics**, **sample quality scoring**, **voice clustering**,
+> and direct **HA REST integration**.
 
 ## Architecture
 
@@ -20,67 +21,103 @@ Voice Satellite → Wake Word → [VoiceID Proxy] → STT Engine → HA Assist P
                                     ├─ CAM++ embedding (CPU, onnxruntime)
                                     ├─ sqlite-vec KNN (cosine distance)
                                     ├─ Silero VAD (enrollment QC)
-                                    ├─ Liveness heuristics
+                                    ├─ Liveness heuristics (TV / background rejection)
+                                    ├─ Sample quality scoring (SNR, consistency, centroid fit)
+                                    ├─ Per-satellite threshold overrides
                                     └─ HA REST (input_text + event bus)
 ```
 
 **Known speaker** → audio is forwarded to upstream STT, speaker name is
-pushed into `input_text.current_speaker`, and a
+pushed into `input_text.current_speaker` (plus optional confidence,
+distance, nearest-speaker and role entities), and a
 `speaker_recognition_detected` event is fired.
 
 **Unknown speaker** → empty transcript (command blocked). Audio is
-optionally logged to an "enrollment postbox" with TTL so you can review
-and tag the sample later.
+optionally logged to an "enrollment postbox" with TTL so you can review,
+cluster, and tag the sample later.
 
 ## Features
 
-- **Wyoming proxy** — registers itself as an ASR provider; Home Assistant
-  auto-discovers it.
+### Core recognition
+- **Wyoming proxy** — registers as an ASR provider; HA auto-discovers it.
 - **CAM++ ONNX** — 7 M params, 192-dim embeddings, <20 ms inference on
   CPU (no GPU needed).
-- **sqlite-vec** — single-file database with SIMD-accelerated KNN. No
-  more `.npy` files to manage.
-- **Web UI** — speaker enrollment (browser mic or WAV upload), sample
-  review with playback, unknown-voice review, runtime settings.
+- **sqlite-vec** — single-file database with SIMD-accelerated KNN.
 - **Silero VAD** — rejects enrollment samples with too little speech.
-- **Unknown logging** — untagged samples auto-expire after 48 h (configurable).
-- **Privacy toggle** — disable unknown logging entirely with one click.
 - **Liveness heuristic** — spectral rolloff / crest factor / HF ratio
   label samples as "likely live" or "likely TV".
-- **HA integration** — REST call to set `input_text.current_speaker`,
-  and `speaker_recognition_detected` events on the HA event bus.
+- **Auto-enroll with smart replacement** — high-confidence matches add
+  fresh embeddings to the profile, replacing the lowest-quality sample
+  when the cap is reached so the profile ages with the user's voice.
+
+### Quality & tuning
+- **Sample quality scoring** — composite 0–1 score from speech ratio,
+  SNR, liveness, embedding consistency and centroid fit. Per-speaker
+  "training quality" badge. Component weights are tunable from the UI.
+- **Per-satellite thresholds** — override the verify threshold per
+  satellite ID (e.g. a noisy kitchen vs. a quiet study) without
+  touching the global default.
+- **Voice-sample clustering** — greedy cosine clustering of untagged
+  unknown samples, with bulk-assign so labelling the same voice five
+  times is one click instead of five.
+
+### UI & operations
+- **Web UI** — speaker enrollment (browser mic or WAV/MP3/M4A/OGG/
+  FLAC/WebM upload), sample review with playback, unknown-voice
+  review, cluster review, recognition event log, runtime settings.
+- **Satellite tagging** — samples remember which satellite recorded
+  them, visible in the UI.
+- **Backup/restore** — ZIP export of all speakers, samples and
+  metadata; import with merge or replace mode.
+- **DE / EN UI** — full translation for both locales.
+
+### Deployment
+- **Home Assistant add-on** — one-click install from this repo as a
+  custom repository; Web UI served through HA ingress (no port
+  forwarding needed); supervisor token auto-wired so the HA
+  integration works out of the box without a long-lived token.
+- **docker-compose** — same image, standalone deployment.
 
 ## Quick start
+
+### Option A — Home Assistant add-on (recommended for HA users)
+
+1. **Settings → Add-ons → Add-on store → ⋮ → Repositories** and add
+   this repository's URL.
+2. Refresh, find **VoiceID**, **Install**.
+3. **Configuration** tab: set `upstream_uri` to your existing STT
+   server (e.g. `tcp://core-whisper:10300` if faster-whisper runs on
+   the same HA host).
+4. Start the addon, click **Open Web UI**.
+
+See [`addons/voiceid/DOCS.md`](addons/voiceid/DOCS.md) for details.
+
+### Option B — docker-compose
 
 ```bash
 # 1. Build
 docker compose build
 
-# 2. Configure environment
-cat > .env <<EOF
-HA_URL=http://192.168.x.x:8123
-HA_TOKEN=your_long_lived_token
-HA_TV_ENTITY=media_player.living_room_tv
-EOF
-
-# 3. Run
+# 2. Start (upstream STT config is in docker-compose.yml)
 docker compose up -d
 
-# 4. Open the Web UI
+# 3. Open the Web UI
 open http://localhost:8099
 ```
 
-Make sure your upstream ASR (e.g. `wyoming-faster-whisper`) is reachable
-at the address in `UPSTREAM_URI` in `docker-compose.yml`.
+Home Assistant URL, token and entities are configured **in the Web UI**
+(Settings → Home Assistant tab) — no `.env` file required.
 
 ### Home Assistant setup
 
 1. **Voice → Devices & Services**: Home Assistant should auto-discover
    VoiceID as a Wyoming ASR provider at `tcp://<host>:10350`.
 2. **Assist Pipeline**: select `voiceid-proxy` as the speech-to-text engine.
-3. **Helper**: create `input_text.current_speaker` (or use a different
-   entity and set `HA_INPUT_TEXT_ENTITY`).
-4. **Conversation agent**: add a template to your `extra_system_prompt`:
+3. **Web UI → Home Assistant tab**: enter your HA URL + long-lived
+   token (the add-on auto-wires this), and click **Copy HA template**
+   for a ready-made `configuration.yaml` snippet with all helper
+   entities.
+4. **Conversation agent**: add to `extra_system_prompt`:
 
    ```
    The current speaker is: {{ states('input_text.current_speaker') }}
@@ -89,7 +126,9 @@ at the address in `UPSTREAM_URI` in `docker-compose.yml`.
 ### Enrolling speakers
 
 **Web UI (recommended):** record 3–5 samples of 5 s each per speaker
-directly in your browser, or upload WAV files.
+directly in your browser, or upload audio files (WAV, MP3, M4A, OGG,
+FLAC, WebM). The quality score on each sample tells you whether the
+recording is actually training-worthy.
 
 **CLI:**
 
@@ -103,8 +142,9 @@ docker compose exec voiceid python -m scripts.enroll \
 
 ## Configuration
 
-All settings are environment variables (see `docker-compose.yml` for the
-full list). The key ones:
+**Everything except the bootstrap knobs is configured in the Web UI**
+and persisted in the database. The env vars below are only needed on
+first start (docker-compose deployment).
 
 | Variable | Default | Description |
 |---|---|---|
@@ -112,57 +152,69 @@ full list). The key ones:
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Upstream STT engine |
 | `WEB_PORT` | `8099` | Web UI port |
 | `VERIFY_THRESHOLD` | `0.30` | Max cosine distance to accept a match |
-| `TV_THRESHOLD_BOOST` | `0.05` | Tighten threshold when TV is playing |
-| `UNKNOWN_LOGGING` | `true` | Log rejected audio for later review |
-| `UNKNOWN_TTL_HOURS` | `48` | TTL for untagged unknown samples |
-| `REQUIRE_SPEAKER_MATCH` | `true` | Block unknowns (vs forward anyway) |
-| `HA_URL` | — | Base URL of your Home Assistant instance |
-| `HA_TOKEN` | — | Long-lived access token |
-| `HA_TV_ENTITY` | — | Optional media player for TV-aware thresholding |
+| `ADVERTISED_LANGUAGES` | — | Force languages in Wyoming Info (e.g. `de,en`) |
+| `LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error` |
 
-Thresholds, privacy toggle and require-match can also be changed at
-runtime from the Web UI (stored in the database).
+All runtime knobs — verify threshold (global and per-satellite), unknown
+logging, require-match, auto-enroll, quality weights, HA connection,
+TV entity — live in the UI and survive restarts.
 
 ## Project layout
 
 ```
 voiceid/
-├── Dockerfile
+├── Dockerfile                    # docker-compose image
 ├── docker-compose.yml
 ├── requirements.txt
-├── wyoming_voiceid/          # Wyoming proxy handler + entry point
+├── addons/                       # Home Assistant add-on
+│   ├── repository.yaml           # HA "Add repository" metadata
+│   └── voiceid/
+│       ├── config.yaml           # Addon options, ports, ingress
+│       ├── Dockerfile            # addon image (python:3.11-slim)
+│       ├── run.sh                # /data/options.json → env bootstrap
+│       ├── build.yaml
+│       ├── DOCS.md               # shown in HA on the Documentation tab
+│       └── README.md
+├── wyoming_voiceid/              # Wyoming proxy handler + entry point
 ├── voiceid/
-│   ├── config.py             # Env-based settings
+│   ├── config.py                 # Env-based settings
 │   ├── core/
-│   │   ├── audio.py          # PCM/WAV utilities
-│   │   ├── fbank.py          # Kaldi-compatible log-mel filterbank
-│   │   ├── embeddings.py     # CAM++ ONNX inference
-│   │   ├── vad.py            # Silero VAD wrapper
-│   │   ├── db.py             # SQLite + sqlite-vec schema
-│   │   ├── speaker_store.py  # Enrollment, verification, CRUD
-│   │   ├── unknown_store.py  # Unknown-sample logging + TTL cleanup
-│   │   ├── liveness.py       # Spectral liveness heuristic
-│   │   ├── ha_integration.py # HA REST client
-│   │   └── context.py        # Shared app context
-│   ├── api/                  # FastAPI Web UI backend
+│   │   ├── audio.py              # PCM/WAV utilities, ffmpeg decode
+│   │   ├── fbank.py              # Kaldi-compatible log-mel filterbank
+│   │   ├── embeddings.py         # CAM++ ONNX inference
+│   │   ├── vad.py                # Silero VAD wrapper
+│   │   ├── db.py                 # SQLite + sqlite-vec schema + migrations
+│   │   ├── speaker_store.py      # Enrollment, verification, CRUD
+│   │   ├── unknown_store.py      # Unknown-sample logging + TTL cleanup
+│   │   ├── unknown_cluster.py    # Greedy cosine clustering of unknowns
+│   │   ├── sample_quality.py     # Composite quality scoring
+│   │   ├── liveness.py           # Spectral liveness heuristic
+│   │   ├── ha_integration.py     # HA REST client
+│   │   ├── recognition_log.py    # Event log store
+│   │   ├── info_cache.py         # Wyoming Info cache + upstream describe
+│   │   └── context.py            # Shared app context
+│   ├── api/                      # FastAPI Web UI backend
 │   │   ├── app.py
 │   │   ├── routes_speakers.py
-│   │   ├── routes_unknown.py
-│   │   └── routes_settings.py
-│   └── ui/static/            # HTML/CSS/JS frontend
+│   │   ├── routes_unknown.py     # + clustering + bulk-assign
+│   │   ├── routes_settings.py    # + per-satellite thresholds
+│   │   ├── routes_recognition.py
+│   │   └── routes_backup.py
+│   └── ui/static/                # HTML/CSS/JS frontend (i18n: DE/EN)
 ├── scripts/
-│   ├── enroll.py             # CLI enrollment helper
-│   └── download_models.sh    # Fetch CAM++ + Silero ONNX models
-└── data/                     # Persistent volume (voiceid.db lives here)
+│   ├── enroll.py                 # CLI enrollment helper
+│   ├── entrypoint.sh             # Container entrypoint (model download)
+│   └── download_models.sh        # Fetch CAM++ + Silero ONNX models
+└── data/                         # Persistent volume (voiceid.db lives here)
 ```
 
 ## Post-MVP roadmap
 
-- Embedding-based clustering of unknown samples
+- Emotion detection on verified speech
+- Parakeet STT bridge / integration notes
 - Platt-scaling confidence calibration
-- Adaptive thresholds per speaker
+- Adaptive thresholds per speaker (beyond per-satellite)
 - ML-trained liveness classifier (using gathered TV samples)
-- Continuous learning (opt-in re-enrollment)
 - MQTT output as an alternative to HA REST
 
 ## License
