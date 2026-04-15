@@ -644,6 +644,22 @@ class VoiceIDHandler(AsyncEventHandler):
                 result.threshold, verify_ms,
             )
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
+            transcript = await self._wait_for_upstream_transcript()
+            await self._send_transcript_to_satellite(
+                transcript, label=f"match:{result.matched_speaker}"
+            )
+            self._responded = True
+            await self._close_upstream(send_stop=False)
+            self._log_total_latency("match")
+            # Emotion classification runs AFTER the transcript has been
+            # returned to the satellite, so its latency never shows up to
+            # the user. The HA push is fire-and-forget, so moving it to
+            # after classification only shifts *when* HA starts seeing
+            # the update by a few hundred ms, still faster than any
+            # automation could act on it.
+            emotion, emotion_conf = await self._classify_emotion(
+                verify_audio, duration,
+            )
             self.context.ha.publish_async(
                 self.context.ha.push_recognition(
                     speaker=result.matched_speaker,
@@ -654,19 +670,9 @@ class VoiceIDHandler(AsyncEventHandler):
                     threshold=result.threshold,
                     nearest_speaker=result.matched_speaker,
                     role=spk.role if spk else None,
+                    emotion=emotion,
+                    emotion_confidence=emotion_conf,
                 )
-            )
-            transcript = await self._wait_for_upstream_transcript()
-            await self._send_transcript_to_satellite(
-                transcript, label=f"match:{result.matched_speaker}"
-            )
-            self._responded = True
-            await self._close_upstream(send_stop=False)
-            self._log_total_latency("match")
-            # Same pattern as the early-match path above — emotion classification
-            # is fire-and-forget relative to user-visible latency.
-            emotion, emotion_conf = await self._classify_emotion(
-                verify_audio, duration,
             )
             self._record_event(
                 outcome=OUTCOME_MATCH,

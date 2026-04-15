@@ -345,6 +345,7 @@ class AppContext:
             distance_entity=self.get_ha_distance_entity() or None,
             nearest_entity=self.get_ha_nearest_entity() or None,
             role_entity=self.get_ha_role_entity() or None,
+            emotion_entity=self.get_ha_emotion_entity() or None,
         )
         _LOGGER.info(
             "HA client reconfigured: url=%s configured=%s",
@@ -495,6 +496,7 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         distance_entity=get_setting(db, "ha_distance_entity") or None,
         nearest_entity=get_setting(db, "ha_nearest_entity") or None,
         role_entity=get_setting(db, "ha_role_entity") or None,
+        emotion_entity=get_setting(db, "ha_emotion_entity") or None,
     )
 
     _CONTEXT = AppContext(

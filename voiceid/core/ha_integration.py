@@ -29,6 +29,7 @@ class HomeAssistantClient:
         distance_entity: Optional[str] = None,
         nearest_entity: Optional[str] = None,
         role_entity: Optional[str] = None,
+        emotion_entity: Optional[str] = None,
         timeout: float = 3.0,
     ) -> None:
         self.base_url = base_url.rstrip("/") if base_url else None
@@ -39,6 +40,7 @@ class HomeAssistantClient:
         self.distance_entity = distance_entity
         self.nearest_entity = nearest_entity
         self.role_entity = role_entity
+        self.emotion_entity = emotion_entity
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -56,6 +58,7 @@ class HomeAssistantClient:
         distance_entity: Optional[str] = None,
         nearest_entity: Optional[str] = None,
         role_entity: Optional[str] = None,
+        emotion_entity: Optional[str] = None,
     ) -> None:
         """Update connection parameters live and drop the cached client."""
         if base_url is not None:
@@ -74,6 +77,8 @@ class HomeAssistantClient:
             self.nearest_entity = nearest_entity or None
         if role_entity is not None:
             self.role_entity = role_entity or None
+        if emotion_entity is not None:
+            self.emotion_entity = emotion_entity or None
         # Drop the cached httpx client so the next call picks up the new
         # base_url / token.
         await self.close()
@@ -122,6 +127,8 @@ class HomeAssistantClient:
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
         role: Optional[str] = None,
+        emotion: Optional[str] = None,
+        emotion_confidence: Optional[float] = None,
     ) -> None:
         if not self.configured:
             return
@@ -141,6 +148,10 @@ class HomeAssistantClient:
                 payload["nearest_speaker"] = nearest_speaker
             if role is not None:
                 payload["role"] = role
+            if emotion is not None:
+                payload["emotion"] = emotion
+            if emotion_confidence is not None:
+                payload["emotion_confidence"] = round(emotion_confidence, 4)
             response = await client.post(
                 "/api/events/speaker_recognition_detected",
                 json=payload,
@@ -199,6 +210,8 @@ class HomeAssistantClient:
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
         role: Optional[str] = None,
+        emotion: Optional[str] = None,
+        emotion_confidence: Optional[float] = None,
     ) -> None:
         """Push all recognition data to HA in one go.
 
@@ -218,6 +231,11 @@ class HomeAssistantClient:
             await self._set_input_text(self.nearest_entity, nearest_speaker or "")
         if self.role_entity:
             await self._set_input_text(self.role_entity, role or "")
+        # Emotion gets its own optional input_text. An empty string is
+        # pushed when the classifier had no opinion, so a stale "happy"
+        # from the previous utterance doesn't linger in the dashboard.
+        if self.emotion_entity:
+            await self._set_input_text(self.emotion_entity, emotion or "")
         # Event with full payload
         await self.fire_speaker_event(
             speaker=speaker,
@@ -228,6 +246,8 @@ class HomeAssistantClient:
             threshold=threshold,
             nearest_speaker=nearest_speaker,
             role=role,
+            emotion=emotion,
+            emotion_confidence=emotion_confidence,
         )
 
     async def is_tv_playing(self) -> bool:

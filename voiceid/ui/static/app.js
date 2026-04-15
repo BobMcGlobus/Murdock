@@ -967,6 +967,9 @@ async function loadSettings() {
             haForm.ha_distance_entity.value = s.ha_distance_entity || "";
             haForm.ha_nearest_entity.value = s.ha_nearest_entity || "";
             haForm.ha_role_entity.value = s.ha_role_entity || "";
+            if (haForm.ha_emotion_entity) {
+                haForm.ha_emotion_entity.value = s.ha_emotion_entity || "";
+            }
             updateHaTemplatePreview();
             const hint = $("#ha-token-hint");
             if (hint) {
@@ -1290,6 +1293,7 @@ function buildHaTemplate() {
     const dist = form.ha_distance_entity.value.trim();
     const nearest = form.ha_nearest_entity.value.trim();
     const role = form.ha_role_entity.value.trim();
+    const emotion = form.ha_emotion_entity ? form.ha_emotion_entity.value.trim() : "";
 
     const isDE = I18N.locale() === "de";
     const lines = [];
@@ -1313,6 +1317,15 @@ function buildHaTemplate() {
         lines.push(isDE
             ? `Rolle: {{ role }}.`
             : `Role: {{ role }}.`);
+        lines.push(`{% endif %}`);
+    }
+
+    if (emotion) {
+        lines.push(`{% set emotion = states('${emotion}') %}`);
+        lines.push(`{% if emotion and emotion not in ['unknown', 'unavailable', ''] %}`);
+        lines.push(isDE
+            ? `Stimmungslage: {{ emotion }}.`
+            : `Emotional tone: {{ emotion }}.`);
         lines.push(`{% endif %}`);
     }
 
