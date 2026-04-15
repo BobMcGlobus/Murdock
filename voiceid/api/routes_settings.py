@@ -303,6 +303,91 @@ async def test_ha(ctx: AppContext = Depends(get_context)):
         return HATestOut(ok=False, error=str(exc))
 
 
+# ----------------------------------------------------------------------
+# Per-satellite verify-threshold overrides
+# ----------------------------------------------------------------------
+
+
+class SatelliteThresholdEntry(BaseModel):
+    satellite_id: str
+    threshold: Optional[float] = None  # None = no override, falls back to global
+    seen_events: int = 0               # recognition_events count (for sorting)
+    last_seen: Optional[float] = None  # epoch seconds of last event
+
+
+class SatelliteThresholdList(BaseModel):
+    default_threshold: float
+    entries: List[SatelliteThresholdEntry]
+
+
+class SatelliteThresholdPatch(BaseModel):
+    satellite_id: str
+    # null → clear the override; float → set it
+    threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+
+def _list_known_satellites(ctx: AppContext) -> list[tuple[str, int, float]]:
+    """Return ``(satellite_id, count, last_seen)`` triples from recognition_events."""
+    cur = ctx.db.execute(
+        "SELECT satellite_id, COUNT(*) AS n, MAX(created_at) AS last "
+        "FROM recognition_events "
+        "WHERE satellite_id IS NOT NULL AND satellite_id != '' "
+        "GROUP BY satellite_id "
+        "ORDER BY n DESC"
+    )
+    return [(row["satellite_id"], row["n"], row["last"]) for row in cur.fetchall()]
+
+
+@router.get("/satellite-thresholds", response_model=SatelliteThresholdList)
+async def list_satellite_thresholds(ctx: AppContext = Depends(get_context)):
+    """Return known satellites + their per-satellite threshold overrides.
+
+    The UI uses this to render one row per satellite the proxy has seen,
+    letting the admin tune a per-room threshold without having to know
+    the exact IDs in advance.
+    """
+    overrides = ctx.get_satellite_thresholds()
+    known = _list_known_satellites(ctx)
+    entries: List[SatelliteThresholdEntry] = []
+    covered: set[str] = set()
+    for sid, count, last in known:
+        entries.append(
+            SatelliteThresholdEntry(
+                satellite_id=sid,
+                threshold=overrides.get(sid),
+                seen_events=count,
+                last_seen=last,
+            )
+        )
+        covered.add(sid)
+    # Also surface overrides for satellites we have no events for yet
+    # (e.g. pre-configured manually before the first recognition).
+    for sid, th in overrides.items():
+        if sid not in covered:
+            entries.append(
+                SatelliteThresholdEntry(satellite_id=sid, threshold=th)
+            )
+    return SatelliteThresholdList(
+        default_threshold=ctx.get_verify_threshold(),
+        entries=entries,
+    )
+
+
+@router.patch("/satellite-thresholds", response_model=SatelliteThresholdList)
+async def patch_satellite_threshold(
+    body: SatelliteThresholdPatch, ctx: AppContext = Depends(get_context)
+):
+    """Set or clear a per-satellite threshold override.
+
+    ``threshold = null`` clears the override for that satellite.
+    """
+    try:
+        ctx.set_satellite_threshold(body.satellite_id, body.threshold)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return await list_satellite_thresholds(ctx)
+
+
 @router.post("/restart", response_model=RestartResponse)
 async def restart_service(ctx: AppContext = Depends(get_context)):
     """Hard-restart the VoiceID process so container supervisors (Docker,

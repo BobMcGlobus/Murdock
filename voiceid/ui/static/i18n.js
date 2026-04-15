@@ -237,6 +237,34 @@ const I18N = (() => {
             "quality.sample_tooltip": "Sample quality — combined score from VAD, SNR, liveness, consistency and centroid fit.",
             "quality.unknown": "—",
 
+            // -- Per-satellite thresholds --
+            "sat_threshold.title": "Per-satellite thresholds",
+            "sat_threshold.description": "Override the verify threshold for individual satellites (e.g. a noisy kitchen vs. a quiet study). Leave empty to fall back to the global setting above.",
+            "sat_threshold.refresh": "Refresh",
+            "sat_threshold.none": "No satellites seen yet. They'll appear here after the first recognition event.",
+            "sat_threshold.events": "{n} events",
+            "sat_threshold.last_seen": "last seen",
+            "sat_threshold.override": "Threshold override",
+            "sat_threshold.clear": "Clear",
+            "sat_threshold.invalid": "Threshold must be a number between 0 and 2.",
+            "sat_threshold.saved": "Saved override for {sid}",
+            "sat_threshold.cleared": "Cleared override for {sid}",
+
+            // -- Voice clusters --
+            "cluster.title": "Voice clusters",
+            "cluster.description": "Group untagged unknown samples by voice similarity so you can bulk-assign the same voice to a speaker in one click.",
+            "cluster.threshold": "Similarity threshold",
+            "cluster.refresh": "Compute clusters",
+            "cluster.none": "No clusters yet. Tighten the threshold or wait for more unknown samples.",
+            "cluster.invalid_threshold": "Threshold must be a number between 0 and 1.",
+            "cluster.label": "Cluster {n}",
+            "cluster.size": "{n} samples",
+            "cluster.avg_d": "avg d=",
+            "cluster.d": "d",
+            "cluster.assign_ph": "Assign cluster to speaker…",
+            "cluster.assign_btn": "Assign {n} samples",
+            "cluster.assigned": 'Assigned {n} → "{name}" ({skipped} skipped)',
+
             // -- Settings hints --
             "hint.upstream_override": "Override active → {uri}. Clear the field and save to fall back to the compose-time default {default}.",
             "hint.upstream_default": "Using compose default {uri}. Enter a new host (e.g. 192.168.2.107:10300) to override — tcp:// is added automatically.",
@@ -276,6 +304,7 @@ const I18N = (() => {
             // -- Generic --
             "generic.error": "Error: {err}",
             "generic.loading": "Loading…",
+            "generic.save": "Save",
         },
 
         de: {
@@ -505,6 +534,34 @@ const I18N = (() => {
             "quality.sample_tooltip": "Qualität der Probe — kombinierter Score aus VAD, SNR, Liveness, Konsistenz und Zentroid-Passung.",
             "quality.unknown": "—",
 
+            // -- Per-Satellite-Schwellen --
+            "sat_threshold.title": "Schwellwerte pro Satellit",
+            "sat_threshold.description": "Verify-Schwelle für einzelne Satelliten überschreiben (z.B. laute Küche vs. ruhiges Arbeitszimmer). Leer lassen für den globalen Wert oben.",
+            "sat_threshold.refresh": "Aktualisieren",
+            "sat_threshold.none": "Noch keine Satelliten gesehen. Erscheinen hier nach dem ersten Erkennungs-Event.",
+            "sat_threshold.events": "{n} Events",
+            "sat_threshold.last_seen": "zuletzt",
+            "sat_threshold.override": "Schwelle überschreiben",
+            "sat_threshold.clear": "Zurücksetzen",
+            "sat_threshold.invalid": "Schwelle muss eine Zahl zwischen 0 und 2 sein.",
+            "sat_threshold.saved": "Überschreibung für {sid} gespeichert",
+            "sat_threshold.cleared": "Überschreibung für {sid} entfernt",
+
+            // -- Stimmen-Cluster --
+            "cluster.title": "Stimmen-Cluster",
+            "cluster.description": "Untagged Unknown-Proben nach Stimmähnlichkeit gruppieren — so ordnest du dieselbe Stimme mit einem Klick einem Sprecher zu.",
+            "cluster.threshold": "Ähnlichkeitsschwelle",
+            "cluster.refresh": "Cluster berechnen",
+            "cluster.none": "Noch keine Cluster. Schwelle verschärfen oder auf weitere Unknown-Proben warten.",
+            "cluster.invalid_threshold": "Schwelle muss eine Zahl zwischen 0 und 1 sein.",
+            "cluster.label": "Cluster {n}",
+            "cluster.size": "{n} Proben",
+            "cluster.avg_d": "Ø d=",
+            "cluster.d": "d",
+            "cluster.assign_ph": "Cluster Sprecher zuordnen…",
+            "cluster.assign_btn": "{n} Proben zuordnen",
+            "cluster.assigned": '{n} zugeordnet → "{name}" ({skipped} übersprungen)',
+
             // -- Settings hints --
             "hint.upstream_override": "Überschreibung aktiv → {uri}. Feld leeren und speichern für den Compose-Standard {default}.",
             "hint.upstream_default": "Compose-Standard {uri}. Neuen Host eingeben (z.B. 192.168.2.107:10300) zum Überschreiben — tcp:// wird automatisch ergänzt.",
@@ -544,6 +601,7 @@ const I18N = (() => {
             // -- Generic --
             "generic.error": "Fehler: {err}",
             "generic.loading": "Laden…",
+            "generic.save": "Speichern",
         },
     };
 

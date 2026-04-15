@@ -59,7 +59,22 @@ class AppContext:
     # Runtime-configurable settings (persisted in the settings table)
     # ------------------------------------------------------------------
 
-    def get_verify_threshold(self) -> float:
+    def get_verify_threshold(self, satellite_id: Optional[str] = None) -> float:
+        """Return the effective verify threshold.
+
+        If ``satellite_id`` is given and a per-satellite override is set,
+        that wins over the global override, which in turn wins over the
+        env/config default. Keeping the fallback chain explicit (satellite
+        → global → env) avoids surprising behaviour when someone sets a
+        global override and then a per-satellite one from a noisy room.
+        """
+        if satellite_id:
+            sat_override = get_setting(self.db, f"threshold_sat_{satellite_id}")
+            if sat_override:
+                try:
+                    return float(sat_override)
+                except ValueError:
+                    pass
         override = get_setting(self.db, "verify_threshold")
         if override is not None:
             try:
@@ -71,6 +86,32 @@ class AppContext:
     def set_verify_threshold(self, value: float) -> None:
         set_setting(self.db, "verify_threshold", str(value))
         self.speakers.threshold = value
+
+    def get_satellite_thresholds(self) -> dict:
+        """Return ``{satellite_id: threshold}`` for all explicitly set overrides."""
+        cur = self.db.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'threshold_sat_%' AND value != ''"
+        )
+        out: dict = {}
+        for key, value in cur.fetchall():
+            sid = key[len("threshold_sat_"):]
+            if not sid or not value:
+                continue
+            try:
+                out[sid] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def set_satellite_threshold(self, satellite_id: str, value: Optional[float]) -> None:
+        """Persist (or clear) a per-satellite threshold override."""
+        sid = (satellite_id or "").strip()
+        if not sid:
+            raise ValueError("satellite_id is required")
+        if value is None:
+            set_setting(self.db, f"threshold_sat_{sid}", "")
+        else:
+            set_setting(self.db, f"threshold_sat_{sid}", f"{float(value):.4f}")
 
     def get_unknown_logging(self) -> bool:
         override = get_setting(self.db, "unknown_logging")

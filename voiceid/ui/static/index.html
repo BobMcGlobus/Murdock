@@ -144,6 +144,23 @@
                 </div>
                 <div id="unknown-list" class="list"></div>
             </div>
+
+            <div class="card">
+                <h2 data-i18n="cluster.title">Voice clusters</h2>
+                <p class="meta" data-i18n="cluster.description">
+                    Group untagged unknown samples by voice similarity so you can
+                    bulk-assign the same voice to a speaker in one click.
+                </p>
+                <div class="toolbar">
+                    <label style="flex-direction:row; align-items:center; gap:0.4rem">
+                        <span data-i18n="cluster.threshold">Similarity threshold</span>
+                        <input type="number" id="cluster-threshold" step="0.01" min="0" max="1" value="0.25" style="width:6rem">
+                    </label>
+                    <button id="cluster-refresh" class="secondary" data-i18n="cluster.refresh">Compute clusters</button>
+                </div>
+                <div id="cluster-list" class="list"></div>
+                <div id="cluster-feedback" class="feedback"></div>
+            </div>
         </section>
 
         <!-- Settings tab -->
@@ -200,6 +217,20 @@
                 </form>
                 <div id="settings-info"></div>
                 <div id="ping-result" class="meta"></div>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="sat_threshold.title">Per-satellite thresholds</h2>
+                <p class="meta" data-i18n="sat_threshold.description">
+                    Override the verify threshold for individual satellites
+                    (e.g. a noisy kitchen speaker vs. a quiet study). Leave
+                    empty to fall back to the global setting above.
+                </p>
+                <div id="sat-threshold-list" class="list"></div>
+                <div class="row" style="margin-top:0.5rem">
+                    <button type="button" id="sat-threshold-refresh" class="secondary" data-i18n="sat_threshold.refresh">Refresh</button>
+                </div>
+                <div id="sat-threshold-feedback" class="feedback"></div>
             </div>
 
             <div class="card">

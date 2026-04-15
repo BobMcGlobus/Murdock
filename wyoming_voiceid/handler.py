@@ -353,7 +353,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 if skip_bytes < len(audio_16k):
                     audio_16k = audio_16k[skip_bytes:]
 
-            threshold = self.context.get_verify_threshold()
+            threshold = self.context.get_verify_threshold(self._satellite_id)
             # Only declare early if clearly under threshold (extra margin).
             early_threshold = threshold * 0.75
 
@@ -581,7 +581,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 duration_sec=duration,
                 matched_speaker=self._early_match,
                 distance=self._early_distance,
-                threshold=self.context.get_verify_threshold(),
+                threshold=self.context.get_verify_threshold(self._satellite_id),
                 verify_ms=0.0,
                 transcript=transcript,
             )
@@ -593,7 +593,7 @@ class VoiceIDHandler(AsyncEventHandler):
             return
 
         # Gate 3: full embedder + verify (runs in parallel with STT).
-        threshold = self.context.get_verify_threshold()
+        threshold = self.context.get_verify_threshold(self._satellite_id)
         require_match = self.context.get_require_match()
         if await self.context.ha.is_tv_playing():
             threshold = max(0.0, threshold - settings.tv_threshold_boost)
@@ -815,7 +815,7 @@ class VoiceIDHandler(AsyncEventHandler):
         if speaker_id is None or distance is None:
             return
         min_d = self.context.settings.auto_enroll_min_distance
-        threshold = self.context.get_verify_threshold()
+        threshold = self.context.get_verify_threshold(self._satellite_id)
         if distance < min_d or distance > threshold:
             return
         sid = self._session_id

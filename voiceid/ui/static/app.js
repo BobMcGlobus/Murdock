@@ -595,6 +595,14 @@ async function loadUnknown() {
     const includeTagged = $("#include-tagged").checked;
     list.innerHTML = t("generic.loading");
     try {
+        // Ensure speaker cache is populated for the datalist autocomplete.
+        if (CACHED_SPEAKERS.length === 0) {
+            try {
+                CACHED_SPEAKERS = await api("/api/speakers");
+            } catch (_) {
+                /* non-fatal */
+            }
+        }
         const samples = await api(
             "/api/unknown?include_tagged=" + (includeTagged ? "true" : "false")
         );
@@ -603,6 +611,13 @@ async function loadUnknown() {
             return;
         }
         list.innerHTML = "";
+        // Shared datalist for all assign inputs on this page render.
+        const dl = document.createElement("datalist");
+        dl.id = "unknown-speaker-names";
+        dl.innerHTML = CACHED_SPEAKERS.map(
+            (sp) => `<option value="${escapeHtml(sp.name)}"></option>`
+        ).join("");
+        list.appendChild(dl);
         for (const s of samples) {
             const livenessBadge =
                 s.liveness_score == null
@@ -630,7 +645,7 @@ async function loadUnknown() {
                 </div>
                 <audio controls src="/api/unknown/${s.id}/audio"></audio>
                 <div class="row">
-                    <input type="text" placeholder="${escapeHtml(t("unknown.assign_ph"))}" data-assign-name="${s.id}">
+                    <input type="text" list="unknown-speaker-names" placeholder="${escapeHtml(t("unknown.assign_ph"))}" data-assign-name="${s.id}">
                     <button data-assign="${s.id}">${escapeHtml(t("unknown.assign_btn"))}</button>
                     <button class="secondary" data-tag-tv="${s.id}">${escapeHtml(t("unknown.tag_tv"))}</button>
                     <button class="danger" data-del-unknown="${s.id}">${escapeHtml(t("unknown.delete"))}</button>
@@ -683,6 +698,164 @@ $("#cleanup-unknown").addEventListener("click", async () => {
     setStatus(t("unknown.cleaned", { n: res.deleted }), "ok");
     loadUnknown();
 });
+
+// --- Voice clusters (bulk-assign) -----------------------------------------
+
+function setClusterFeedback(msg, cls) {
+    const el = $("#cluster-feedback");
+    if (!el) return;
+    el.className = "feedback " + (cls || "");
+    el.textContent = msg;
+    if (!msg) return;
+    setTimeout(() => {
+        if (el.textContent === msg) {
+            el.textContent = "";
+            el.className = "feedback";
+        }
+    }, 6000);
+}
+
+async function loadClusters() {
+    const list = $("#cluster-list");
+    if (!list) return;
+    const thresholdInput = $("#cluster-threshold");
+    const threshold = parseFloat(thresholdInput?.value || "0.25");
+    if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
+        setClusterFeedback(t("cluster.invalid_threshold"), "err");
+        return;
+    }
+    // Ensure speakers are cached for the assign datalist.
+    if (CACHED_SPEAKERS.length === 0) {
+        try {
+            CACHED_SPEAKERS = await api("/api/speakers");
+        } catch (_) {
+            /* non-fatal */
+        }
+    }
+    list.innerHTML = t("generic.loading");
+    try {
+        const data = await api(
+            "/api/unknown/clusters?threshold=" + encodeURIComponent(threshold)
+        );
+        if (!data.clusters || data.clusters.length === 0) {
+            list.innerHTML = `<p class="meta">${escapeHtml(t("cluster.none"))}</p>`;
+            return;
+        }
+        list.innerHTML = "";
+        // Shared datalist for all assign inputs.
+        const dl = document.createElement("datalist");
+        dl.id = "cluster-speaker-names";
+        dl.innerHTML = CACHED_SPEAKERS.map(
+            (sp) => `<option value="${escapeHtml(sp.name)}"></option>`
+        ).join("");
+        list.appendChild(dl);
+
+        for (const c of data.clusters) {
+            const item = document.createElement("div");
+            item.className = "list-item";
+            const sats = c.satellites.length
+                ? c.satellites
+                      .map(
+                          (s) =>
+                              `<span class="badge satellite">${escapeHtml(s)}</span>`
+                      )
+                      .join(" ")
+                : "";
+            const memberRows = c.members
+                .map((m) => {
+                    const when = new Date(m.created_at * 1000).toLocaleString();
+                    const d = m.distance_to_centroid.toFixed(3);
+                    const dur = m.duration_sec.toFixed(1);
+                    const tagBadge = m.tag
+                        ? `<span class="badge">${escapeHtml(m.tag)}</span>`
+                        : "";
+                    const satBadge = m.satellite_id
+                        ? `<span class="badge satellite">${escapeHtml(m.satellite_id)}</span>`
+                        : "";
+                    return `
+                        <div class="sample-row">
+                            <div class="row">
+                                <span class="filename">#${m.sample_id}</span>
+                                <span class="meta">${dur}s · ${escapeHtml(t("cluster.d"))}=${d}</span>
+                                ${satBadge}
+                                ${tagBadge}
+                                <span class="meta">${escapeHtml(when)}</span>
+                            </div>
+                            <audio controls src="/api/unknown/${m.sample_id}/audio"></audio>
+                        </div>
+                    `;
+                })
+                .join("");
+
+            item.innerHTML = `
+                <div class="row">
+                    <h3>${escapeHtml(t("cluster.label", { n: c.cluster_id }))}</h3>
+                    <span class="badge">${escapeHtml(t("cluster.size", { n: c.size }))}</span>
+                    <span class="meta">${escapeHtml(t("cluster.avg_d"))} ${c.avg_distance.toFixed(3)}</span>
+                    ${sats}
+                </div>
+                ${memberRows}
+                <div class="row">
+                    <input type="text" list="cluster-speaker-names"
+                           data-cluster-name="${c.cluster_id}"
+                           placeholder="${escapeHtml(t("cluster.assign_ph"))}">
+                    <button data-cluster-assign="${c.cluster_id}">${escapeHtml(t("cluster.assign_btn", { n: c.size }))}</button>
+                </div>
+            `;
+            // Attach member ids as data for the button.
+            list.appendChild(item);
+            const btn = item.querySelector(`button[data-cluster-assign]`);
+            btn.dataset.sampleIds = JSON.stringify(
+                c.members.map((m) => m.sample_id)
+            );
+        }
+        list.querySelectorAll("button[data-cluster-assign]").forEach((b) =>
+            b.addEventListener("click", async () => {
+                const cid = b.dataset.clusterAssign;
+                const input = list.querySelector(`input[data-cluster-name="${cid}"]`);
+                const name = (input?.value || "").trim();
+                if (!name) {
+                    setClusterFeedback(t("unknown.enter_name"), "err");
+                    return;
+                }
+                const sampleIds = JSON.parse(b.dataset.sampleIds || "[]");
+                b.disabled = true;
+                try {
+                    const res = await api("/api/unknown/bulk-assign", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            speaker_name: name,
+                            create_if_missing: true,
+                            sample_ids: sampleIds,
+                        }),
+                    });
+                    setClusterFeedback(
+                        t("cluster.assigned", {
+                            n: res.assigned,
+                            name,
+                            skipped: res.skipped,
+                        }),
+                        res.skipped ? "warn" : "ok"
+                    );
+                    loadClusters();
+                    loadUnknown();
+                } catch (err) {
+                    setClusterFeedback(err.message, "err");
+                } finally {
+                    b.disabled = false;
+                }
+            })
+        );
+    } catch (err) {
+        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+const clusterRefreshBtn = $("#cluster-refresh");
+if (clusterRefreshBtn) {
+    clusterRefreshBtn.addEventListener("click", loadClusters);
+}
 
 // --- Settings -------------------------------------------------------------
 
@@ -780,6 +953,8 @@ async function loadSettings() {
                 hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
             }
         }
+        // Per-satellite thresholds
+        loadSatelliteThresholds();
         // Populate quality weights form
         const qForm = $("#quality-form");
         if (qForm && s.quality_weights) {
@@ -798,6 +973,112 @@ async function loadSettings() {
     } catch (err) {
         $("#settings-info").innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
     }
+}
+
+// --- Per-satellite thresholds ---------------------------------------------
+
+async function loadSatelliteThresholds() {
+    const list = $("#sat-threshold-list");
+    if (!list) return;
+    list.innerHTML = t("generic.loading");
+    try {
+        const data = await api("/api/settings/satellite-thresholds");
+        if (!data.entries || data.entries.length === 0) {
+            list.innerHTML = `<p class="meta">${escapeHtml(t("sat_threshold.none"))}</p>`;
+            return;
+        }
+        const defaultTh = data.default_threshold.toFixed(3);
+        list.innerHTML = "";
+        for (const e of data.entries) {
+            const row = document.createElement("div");
+            row.className = "list-item";
+            const hasOverride = e.threshold != null;
+            const thValue = hasOverride ? e.threshold.toFixed(3) : "";
+            const lastSeen = e.last_seen
+                ? new Date(e.last_seen * 1000).toLocaleString()
+                : "–";
+            row.innerHTML = `
+                <div class="row">
+                    <span class="badge satellite">${escapeHtml(e.satellite_id)}</span>
+                    <span class="meta">${escapeHtml(t("sat_threshold.events", { n: e.seen_events }))} · ${escapeHtml(t("sat_threshold.last_seen"))} ${escapeHtml(lastSeen)}</span>
+                </div>
+                <div class="row">
+                    <label style="flex-direction:row; align-items:center; gap:0.4rem">
+                        <span>${escapeHtml(t("sat_threshold.override"))}</span>
+                        <input type="number" step="0.01" min="0" max="2"
+                               data-sat-th="${escapeHtml(e.satellite_id)}"
+                               value="${thValue}"
+                               placeholder="${defaultTh}">
+                    </label>
+                    <button class="secondary" data-sat-save="${escapeHtml(e.satellite_id)}">${escapeHtml(t("generic.save"))}</button>
+                    <button class="danger" data-sat-clear="${escapeHtml(e.satellite_id)}" ${hasOverride ? "" : "disabled"}>${escapeHtml(t("sat_threshold.clear"))}</button>
+                </div>
+            `;
+            list.appendChild(row);
+        }
+        list.querySelectorAll("button[data-sat-save]").forEach((b) =>
+            b.addEventListener("click", async () => {
+                const sid = b.dataset.satSave;
+                const input = list.querySelector(`input[data-sat-th="${CSS.escape(sid)}"]`);
+                const raw = input.value.trim();
+                const body = {
+                    satellite_id: sid,
+                    threshold: raw === "" ? null : parseFloat(raw),
+                };
+                if (raw !== "" && Number.isNaN(body.threshold)) {
+                    setSatFeedback(t("sat_threshold.invalid"), "err");
+                    return;
+                }
+                try {
+                    await api("/api/settings/satellite-thresholds", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                    });
+                    setSatFeedback(t("sat_threshold.saved", { sid }), "ok");
+                    loadSatelliteThresholds();
+                } catch (err) {
+                    setSatFeedback(err.message, "err");
+                }
+            })
+        );
+        list.querySelectorAll("button[data-sat-clear]").forEach((b) =>
+            b.addEventListener("click", async () => {
+                const sid = b.dataset.satClear;
+                try {
+                    await api("/api/settings/satellite-thresholds", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ satellite_id: sid, threshold: null }),
+                    });
+                    setSatFeedback(t("sat_threshold.cleared", { sid }), "ok");
+                    loadSatelliteThresholds();
+                } catch (err) {
+                    setSatFeedback(err.message, "err");
+                }
+            })
+        );
+    } catch (err) {
+        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+function setSatFeedback(msg, cls) {
+    const el = $("#sat-threshold-feedback");
+    if (!el) return;
+    el.className = "feedback " + (cls || "");
+    el.textContent = msg;
+    setTimeout(() => {
+        if (el.textContent === msg) {
+            el.textContent = "";
+            el.className = "feedback";
+        }
+    }, 4000);
+}
+
+const satRefreshBtn = $("#sat-threshold-refresh");
+if (satRefreshBtn) {
+    satRefreshBtn.addEventListener("click", loadSatelliteThresholds);
 }
 
 function parseLanguages(raw) {
