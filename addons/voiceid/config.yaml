@@ -53,14 +53,25 @@ ports_description:
 homeassistant_api: true
 hassio_api: false
 options:
+  stt_backend: "upstream"
   upstream_uri: "tcp://core-whisper:10300"
+  mistral_api_key: ""
+  mistral_model: "voxtral-mini-latest"
   log_level: "info"
   advertised_languages: "de,en"
 schema:
-  # Required: URL of the existing Wyoming STT server (faster-whisper,
-  # wyoming-whisper, Parakeet bridge, …). Accepts host:port too — the
-  # proxy prepends tcp:// if missing.
-  upstream_uri: str
+  # STT backend: "upstream" proxies to a Wyoming STT container,
+  # "voxtral" sends audio to the Mistral Cloud API (no local STT needed).
+  stt_backend: list(upstream|voxtral)
+  # URL of the existing Wyoming STT server (faster-whisper, wyoming-whisper,
+  # Parakeet bridge, …). Only used when stt_backend is "upstream".
+  # Accepts host:port too — the proxy prepends tcp:// if missing.
+  upstream_uri: str?
+  # Mistral API key for Voxtral transcription. Only needed when
+  # stt_backend is "voxtral". Get yours at https://console.mistral.ai
+  mistral_api_key: password?
+  # Voxtral model name. Default is fine for most users.
+  mistral_model: str?
   log_level: list(debug|info|warning|error)
   # Comma-separated language codes forced into the Wyoming info event.
   # Override only if auto-detect from the upstream doesn't surface the

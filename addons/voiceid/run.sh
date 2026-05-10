@@ -21,20 +21,33 @@ fi
 
 cfg() { jq -r ".${1} // \"\"" "$OPTIONS"; }
 
+STT_BACKEND="$(cfg stt_backend)"
 UPSTREAM_URI="$(cfg upstream_uri)"
+MISTRAL_API_KEY="$(cfg mistral_api_key)"
+MISTRAL_MODEL="$(cfg mistral_model)"
 LOG_LEVEL="$(cfg log_level)"
 ADVERTISED="$(cfg advertised_languages)"
 
-if [ -z "$UPSTREAM_URI" ]; then
-    echo "ERROR: upstream_uri is required in the addon options." >&2
+# Validate: upstream mode needs a URI, voxtral mode needs an API key.
+if [ "${STT_BACKEND:-upstream}" = "upstream" ] && [ -z "$UPSTREAM_URI" ]; then
+    echo "ERROR: upstream_uri is required when stt_backend is 'upstream'." >&2
     exit 1
 fi
 
 export LISTEN_URI="tcp://0.0.0.0:10350"
-export UPSTREAM_URI
+export STT_BACKEND="${STT_BACKEND:-upstream}"
+export UPSTREAM_URI="${UPSTREAM_URI:-tcp://localhost:10300}"
 export LOG_LEVEL="${LOG_LEVEL:-info}"
 export WEB_HOST="0.0.0.0"
 export WEB_PORT="8099"
+
+# Voxtral / Mistral Cloud settings
+if [ -n "$MISTRAL_API_KEY" ]; then
+    export MISTRAL_API_KEY
+fi
+if [ -n "$MISTRAL_MODEL" ]; then
+    export MISTRAL_MODEL
+fi
 
 # Empty means "auto-detect from upstream" — same semantics as the
 # compose deployment, so users aren't surprised moving between them.
@@ -61,8 +74,14 @@ export DATA_DIR="/data"
 export MODEL_DIR="/data/models"
 mkdir -p "$DATA_DIR" "$MODEL_DIR"
 
+log "STT backend:  $STT_BACKEND"
 log "Listen URI:   $LISTEN_URI"
-log "Upstream URI: $UPSTREAM_URI"
+if [ "$STT_BACKEND" = "upstream" ]; then
+    log "Upstream URI: $UPSTREAM_URI"
+else
+    log "Mistral model: ${MISTRAL_MODEL:-voxtral-mini-latest}"
+    log "API key:       ${MISTRAL_API_KEY:+set}"
+fi
 log "Log level:    $LOG_LEVEL"
 log "Advertise:    ${ADVERTISED_LANGUAGES:-<auto>}"
 log "Data dir:     $DATA_DIR"

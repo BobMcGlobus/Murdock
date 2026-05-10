@@ -14,12 +14,17 @@ services:
       - ./models:/app/models
     environment:
       - LISTEN_URI=tcp://0.0.0.0:10350
+      # STT backend: "upstream" (Wyoming proxy) or "voxtral" (Mistral Cloud)
+      - STT_BACKEND=${STT_BACKEND:-upstream}
       # IMPORTANT: UPSTREAM_URI must point to a host VoiceID can actually
-      # reach from inside its container. Common options:
+      # reach from inside its container (only needed for STT_BACKEND=upstream):
       #   * tcp://host.docker.internal:10300  (STT runs on the host)
-      #   * tcp://<container_name>:10300      (STT runs in the same Docker network — see networks: below)
+      #   * tcp://<container_name>:10300      (STT runs in the same Docker network)
       #   * tcp://<lan_ip>:10300              (STT runs on another machine)
       - UPSTREAM_URI=${UPSTREAM_URI:-tcp://host.docker.internal:10300}
+      # Voxtral settings (only needed for STT_BACKEND=voxtral):
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - MISTRAL_MODEL=${MISTRAL_MODEL:-voxtral-mini-latest}
       - WEB_HOST=0.0.0.0
       - WEB_PORT=8099
       - LOG_LEVEL=info

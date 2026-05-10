@@ -1,0 +1,57 @@
+## VoiceID — production deployment (e.g. Unraid, NAS, dedicated server)
+##
+## Copy this file, set your env vars below, then:
+##   docker compose -f docker-compose.prod.yml up -d
+##
+## The Web UI is at http://<host>:8099. All further configuration
+## (threshold, HA integration, STT backend choice, …) happens there.
+
+services:
+  voiceid:
+    build: .
+    container_name: voiceid
+    ports:
+      - "10350:10350"   # Wyoming — satellites connect here
+      - "8099:8099"     # Web UI
+    volumes:
+      - voiceid_data:/app/data
+      - voiceid_models:/app/models
+    environment:
+      # --- STT backend ---
+      # "upstream" = proxy to a Wyoming STT service (default)
+      # "voxtral" = transcribe via Mistral Cloud API (no local STT needed)
+      - STT_BACKEND=${STT_BACKEND:-upstream}
+
+      # --- Wyoming upstream (only used when STT_BACKEND=upstream) ---
+      # Point to your faster-whisper / whisper container.
+      - UPSTREAM_URI=${UPSTREAM_URI:-tcp://host.docker.internal:10300}
+
+      # --- Voxtral / Mistral Cloud (only used when STT_BACKEND=voxtral) ---
+      # Get your key at https://console.mistral.ai/api-keys
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
+      - MISTRAL_MODEL=${MISTRAL_MODEL:-voxtral-mini-latest}
+
+      # --- General ---
+      - LISTEN_URI=tcp://0.0.0.0:10350
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8099
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Comma-separated: "de,en". Leave empty for auto-detect from upstream.
+      - ADVERTISED_LANGUAGES=${ADVERTISED_LANGUAGES:-}
+
+      # --- Home Assistant (optional — can also configure in Web UI) ---
+      - HA_URL=${HA_URL:-}
+      - HA_TOKEN=${HA_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://127.0.0.1:8099/api/health'); r.raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  voiceid_data:
+  voiceid_models:
