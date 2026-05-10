@@ -978,6 +978,27 @@ async function loadSettings() {
         }
         // Per-satellite thresholds
         loadSatelliteThresholds();
+        // Emotion detection (experimental)
+        const emotionForm = $("#emotion-form");
+        if (emotionForm) {
+            emotionForm.enable_emotion.checked = !!s.enable_emotion;
+            const status = $("#emotion-status");
+            if (status) {
+                let msg;
+                let cls = "meta";
+                if (!s.enable_emotion) {
+                    msg = t("emotion.model_disabled");
+                } else if (s.emotion_model_available) {
+                    msg = t("emotion.model_ready");
+                    cls = "feedback ok";
+                } else {
+                    msg = t("emotion.model_missing");
+                    cls = "feedback warn";
+                }
+                status.className = cls;
+                status.textContent = msg;
+            }
+        }
         // Populate quality weights form
         const qForm = $("#quality-form");
         if (qForm && s.quality_weights) {
@@ -1102,6 +1123,42 @@ function setSatFeedback(msg, cls) {
 const satRefreshBtn = $("#sat-threshold-refresh");
 if (satRefreshBtn) {
     satRefreshBtn.addEventListener("click", loadSatelliteThresholds);
+}
+
+// --- Emotion detection toggle ---------------------------------------------
+
+const emotionForm = $("#emotion-form");
+if (emotionForm) {
+    emotionForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fb = $("#emotion-feedback");
+        try {
+            await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    enable_emotion: emotionForm.enable_emotion.checked,
+                }),
+            });
+            if (fb) {
+                fb.className = "feedback ok";
+                fb.textContent = t("emotion.saved");
+                setTimeout(() => {
+                    if (fb.textContent === t("emotion.saved")) {
+                        fb.textContent = "";
+                        fb.className = "feedback";
+                    }
+                }, 2500);
+            }
+            // Refresh status banner to reflect the new enabled-vs-model state.
+            loadSettings();
+        } catch (err) {
+            if (fb) {
+                fb.className = "feedback err";
+                fb.textContent = err.message;
+            }
+        }
+    });
 }
 
 function parseLanguages(raw) {
@@ -1236,6 +1293,7 @@ $("#ha-settings-form").addEventListener("submit", async (e) => {
         ha_distance_entity: form.ha_distance_entity.value.trim(),
         ha_nearest_entity: form.ha_nearest_entity.value.trim(),
         ha_role_entity: form.ha_role_entity.value.trim(),
+        ha_emotion_entity: form.ha_emotion_entity.value.trim(),
     };
     // Only send token if the user actually typed something.
     const tokenVal = form.ha_token.value;
@@ -1548,11 +1606,19 @@ function renderRecognitionEvent(e) {
     const sat = e.satellite_id
         ? ` · <code>${escapeHtml(e.satellite_id)}</code>`
         : "";
+    const emotionChip = e.emotion
+        ? `<span class="badge emotion">${escapeHtml(e.emotion)}${
+              e.emotion_confidence != null
+                  ? ` ${Math.round(e.emotion_confidence * 100)}%`
+                  : ""
+          }</span>`
+        : "";
     return `
         <div class="list-item">
             <div class="row">
                 <span class="${badgeCls}">${escapeHtml(meta.label)}</span>
                 <strong>${who}</strong>
+                ${emotionChip}
                 <span class="meta">${ts} · ${e.duration_sec.toFixed(2)}s${sat}</span>
             </div>
             ${transcript}

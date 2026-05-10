@@ -26,6 +26,8 @@ class RecognitionEventOut(BaseModel):
     threshold: Optional[float]
     verify_ms: Optional[float]
     transcript: Optional[str]
+    emotion: Optional[str] = None
+    emotion_confidence: Optional[float] = None
 
 
 class RecognitionListOut(BaseModel):
@@ -66,6 +68,8 @@ async def list_events(
                 threshold=e.threshold,
                 verify_ms=e.verify_ms,
                 transcript=e.transcript,
+                emotion=e.emotion,
+                emotion_confidence=e.emotion_confidence,
             )
             for e in events
         ]

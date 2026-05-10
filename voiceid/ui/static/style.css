@@ -415,3 +415,10 @@ input[type="password"] {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 0.78rem;
 }
+
+.badge.emotion {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid #a855f7;
+    font-size: 0.78rem;
+}

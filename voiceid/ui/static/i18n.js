@@ -177,6 +177,8 @@ const I18N = (() => {
             "ha.ph_nearest": "input_text.nearest_speaker",
             "ha.role_entity": "Role (input_text)",
             "ha.ph_role": "input_text.speaker_role",
+            "ha.emotion_entity": "Emotion (input_text)",
+            "ha.ph_emotion": "input_text.current_speaker_emotion",
             "ha.template_title": "LLM prompt template",
             "ha.template_hint": "Copy this Jinja2 snippet into your Home Assistant conversation agent's system prompt so the LLM knows who is speaking. It adapts to the entities you configured above.",
             "ha.copy_template": "Copy to clipboard",
@@ -236,6 +238,15 @@ const I18N = (() => {
             "quality.sample": "Q: {pct}",
             "quality.sample_tooltip": "Sample quality — combined score from VAD, SNR, liveness, consistency and centroid fit.",
             "quality.unknown": "—",
+
+            // -- Emotion detection --
+            "emotion.title": "Emotion detection (experimental)",
+            "emotion.description": "Classifies the emotional tone of verified speech (happy, sad, angry, …) and pushes it to Home Assistant. This is plumbing only — no compatible ONNX model ships with VoiceID yet. The toggle can be pre-flipped safely.",
+            "emotion.enable": "Enable emotion detection",
+            "emotion.model_missing": "No emotion model on disk — classifier is a no-op until you drop a compatible ONNX at the configured model path.",
+            "emotion.model_ready": "Emotion model loaded and ready.",
+            "emotion.model_disabled": "Emotion detection is off — recognition events will not include emotion.",
+            "emotion.saved": "Saved",
 
             // -- Per-satellite thresholds --
             "sat_threshold.title": "Per-satellite thresholds",
@@ -474,6 +485,8 @@ const I18N = (() => {
             "ha.ph_nearest": "input_text.nearest_speaker",
             "ha.role_entity": "Rolle (input_text)",
             "ha.ph_role": "input_text.speaker_role",
+            "ha.emotion_entity": "Stimmungslage (input_text)",
+            "ha.ph_emotion": "input_text.current_speaker_emotion",
             "ha.template_title": "LLM-Prompt-Vorlage",
             "ha.template_hint": "Kopiere dieses Jinja2-Snippet in den System-Prompt deines HA-Konversationsagenten, damit das LLM weiß, wer spricht. Es passt sich an die oben konfigurierten Entities an.",
             "ha.copy_template": "In Zwischenablage kopieren",
@@ -533,6 +546,15 @@ const I18N = (() => {
             "quality.sample": "Q: {pct}",
             "quality.sample_tooltip": "Qualität der Probe — kombinierter Score aus VAD, SNR, Liveness, Konsistenz und Zentroid-Passung.",
             "quality.unknown": "—",
+
+            // -- Emotionserkennung --
+            "emotion.title": "Emotionserkennung (experimentell)",
+            "emotion.description": "Klassifiziert die Stimmungslage erkannter Sprache (glücklich, traurig, wütend, …) und schiebt sie an Home Assistant. Nur Infrastruktur — bisher liefert VoiceID kein passendes ONNX-Modell mit. Der Schalter kann gefahrlos im Voraus aktiviert werden.",
+            "emotion.enable": "Emotionserkennung aktivieren",
+            "emotion.model_missing": "Kein Emotionsmodell auf der Platte — der Klassifizierer bleibt inaktiv, bis eine kompatible ONNX-Datei im konfigurierten Modellpfad liegt.",
+            "emotion.model_ready": "Emotionsmodell geladen und einsatzbereit.",
+            "emotion.model_disabled": "Emotionserkennung ist aus — Erkennungsevents enthalten keine Stimmungslage.",
+            "emotion.saved": "Gespeichert",
 
             // -- Per-Satellite-Schwellen --
             "sat_threshold.title": "Schwellwerte pro Satellit",
