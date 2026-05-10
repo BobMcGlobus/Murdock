@@ -223,6 +223,39 @@
             </div>
 
             <div class="card">
+                <h2 data-i18n="stt.title">STT Backend</h2>
+                <p class="meta" data-i18n="stt.description">
+                    Choose how VoiceID obtains transcripts: proxy to an
+                    upstream Wyoming STT service, or transcribe directly
+                    via the Mistral Cloud API (Voxtral).
+                </p>
+                <form id="stt-form">
+                    <label>
+                        <span data-i18n="stt.backend">Backend</span>
+                        <select name="stt_backend">
+                            <option value="upstream" data-i18n="stt.opt_upstream">Upstream (Wyoming proxy)</option>
+                            <option value="voxtral" data-i18n="stt.opt_voxtral">Voxtral (Mistral Cloud)</option>
+                        </select>
+                    </label>
+                    <div id="stt-voxtral-fields" hidden>
+                        <label>
+                            <span data-i18n="stt.api_key">Mistral API key</span>
+                            <input type="password" name="mistral_api_key" data-i18n-ph="stt.ph_api_key" placeholder="paste key here" autocomplete="off">
+                            <small id="stt-key-hint" class="meta"></small>
+                        </label>
+                        <label>
+                            <span data-i18n="stt.model">Model</span>
+                            <input type="text" name="mistral_model" data-i18n-ph="stt.ph_model" placeholder="voxtral-mini-latest">
+                        </label>
+                    </div>
+                    <div class="row" style="margin-top:0.5rem">
+                        <button type="submit" data-i18n="generic.save">Save</button>
+                    </div>
+                </form>
+                <div id="stt-feedback" class="feedback"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
                 <p class="meta" data-i18n="emotion.description">
                     Classifies the emotional tone of verified speech (happy,

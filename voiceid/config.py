@@ -20,6 +20,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # STT backend: "upstream" (Wyoming proxy) or "voxtral" (Mistral Cloud)
+    stt_backend: str = Field(default="upstream")
+
     # Wyoming proxy
     listen_uri: str = Field(default="tcp://0.0.0.0:10350")
     upstream_uri: str = Field(default="tcp://localhost:10300")
@@ -105,6 +108,10 @@ class Settings(BaseSettings):
     ha_token: Optional[str] = Field(default=None)
     ha_input_text_entity: str = Field(default="input_text.current_speaker")
     ha_tv_entity: Optional[str] = Field(default=None)
+
+    # Voxtral (Mistral Cloud STT)
+    mistral_api_key: Optional[str] = Field(default=None)
+    mistral_model: str = Field(default="voxtral-mini-latest")
 
     # Logging
     log_level: str = Field(default="info")

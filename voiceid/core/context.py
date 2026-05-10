@@ -354,6 +354,54 @@ class AppContext:
         )
 
     # ------------------------------------------------------------------
+    # STT backend selection (upstream Wyoming vs. Voxtral cloud)
+    # ------------------------------------------------------------------
+
+    def get_stt_backend(self) -> str:
+        """Return the active STT backend: 'upstream' or 'voxtral'."""
+        override = get_setting(self.db, "stt_backend")
+        if override and override in ("upstream", "voxtral"):
+            return override
+        return self.settings.stt_backend
+
+    def set_stt_backend(self, value: str) -> None:
+        if value not in ("upstream", "voxtral"):
+            raise ValueError(f"Invalid stt_backend: {value!r}")
+        set_setting(self.db, "stt_backend", value)
+
+    def get_mistral_api_key(self) -> str:
+        override = get_setting(self.db, "mistral_api_key")
+        if override is not None:
+            return override
+        return self.settings.mistral_api_key or ""
+
+    def has_mistral_api_key(self) -> bool:
+        return bool(self.get_mistral_api_key())
+
+    def set_mistral_api_key(self, value: str) -> None:
+        set_setting(self.db, "mistral_api_key", value or "")
+
+    def get_mistral_model(self) -> str:
+        override = get_setting(self.db, "mistral_model")
+        if override:
+            return override
+        return self.settings.mistral_model
+
+    def set_mistral_model(self, value: str) -> None:
+        set_setting(self.db, "mistral_model", (value or "").strip())
+
+    def get_voxtral_backend(self):
+        """Return a configured VoxtralBackend instance, or None if not ready."""
+        from .stt_backend import VoxtralBackend
+        api_key = self.get_mistral_api_key()
+        if not api_key:
+            return None
+        return VoxtralBackend(
+            api_key=api_key,
+            model=self.get_mistral_model(),
+        )
+
+    # ------------------------------------------------------------------
     # Advertised languages (Wyoming Info)
     # ------------------------------------------------------------------
     #

@@ -110,6 +110,11 @@ class VoiceIDHandler(AsyncEventHandler):
         it without a service restart."""
         return self.context.get_upstream_uri()
 
+    @property
+    def _is_voxtral(self) -> bool:
+        """True when the active STT backend is Voxtral (Mistral Cloud)."""
+        return self.context.get_stt_backend() == "voxtral"
+
     # ------------------------------------------------------------------
     # Wyoming event dispatch
     # ------------------------------------------------------------------
@@ -163,24 +168,27 @@ class VoiceIDHandler(AsyncEventHandler):
             self._audio_buffer.extend(chunk.audio)
 
             # Lazily open upstream on the first chunk so we know the format.
-            if self._upstream_client is None and not self._upstream_failed:
-                await self._open_upstream(chunk.rate, chunk.width, chunk.channels)
+            # When using Voxtral cloud backend, skip the upstream connection
+            # entirely — we'll transcribe the buffered audio on AudioStop.
+            if not self._is_voxtral:
+                if self._upstream_client is None and not self._upstream_failed:
+                    await self._open_upstream(chunk.rate, chunk.width, chunk.channels)
 
-            # Forward the chunk as-is to the upstream STT.
-            if self._upstream_open:
-                try:
-                    await self._upstream_client.write_event(  # type: ignore[union-attr]
-                        AudioChunk(
-                            audio=chunk.audio,
-                            rate=chunk.rate,
-                            width=chunk.width,
-                            channels=chunk.channels,
-                        ).event()
-                    )
-                except Exception:
-                    _LOGGER.exception("[%s] Upstream write failed", sid)
-                    self._upstream_failed = True
-                    self._upstream_open = False
+                # Forward the chunk as-is to the upstream STT.
+                if self._upstream_open:
+                    try:
+                        await self._upstream_client.write_event(  # type: ignore[union-attr]
+                            AudioChunk(
+                                audio=chunk.audio,
+                                rate=chunk.rate,
+                                width=chunk.width,
+                                channels=chunk.channels,
+                            ).event()
+                        )
+                    except Exception:
+                        _LOGGER.exception("[%s] Upstream write failed", sid)
+                        self._upstream_failed = True
+                        self._upstream_open = False
 
             # --- Streaming-Verify: early probe ---
             # After ~1.5 s of 16 kHz/16-bit audio (48000 bytes) we have
@@ -222,8 +230,13 @@ class VoiceIDHandler(AsyncEventHandler):
         self._early_match_id = None
         self._early_distance = None
         self._early_probed = False
-        loop = asyncio.get_running_loop()
-        self._upstream_transcript = loop.create_future()
+        # Only create an upstream transcript future for Wyoming mode.
+        # In Voxtral mode, transcription happens on-demand after AudioStop.
+        if not self._is_voxtral:
+            loop = asyncio.get_running_loop()
+            self._upstream_transcript = loop.create_future()
+        else:
+            self._upstream_transcript = None
 
     async def _open_upstream(self, rate: int, width: int, channels: int) -> None:
         """Open the upstream ASR connection and start streaming."""
@@ -428,6 +441,34 @@ class VoiceIDHandler(AsyncEventHandler):
             )
             return ""
 
+    async def _transcribe_voxtral(self, audio_16k: bytes) -> str:
+        """Transcribe audio via the Voxtral (Mistral Cloud) API.
+
+        Called instead of _wait_for_upstream_transcript when
+        stt_backend == 'voxtral'. Falls back to empty string on error.
+        """
+        sid = self._session_id
+        backend = self.context.get_voxtral_backend()
+        if backend is None:
+            _LOGGER.warning(
+                "[%s] Voxtral backend selected but no API key configured", sid
+            )
+            return ""
+        _LOGGER.info("[%s] Transcribing via Voxtral (%s)…", sid, backend.model)
+        return await backend.transcribe(
+            audio_16k,
+            rate=16000,
+            width=2,
+            channels=1,
+            language=self._language,
+        )
+
+    async def _get_transcript(self, audio_16k: bytes) -> str:
+        """Obtain the transcript from whichever backend is active."""
+        if self._is_voxtral:
+            return await self._transcribe_voxtral(audio_16k)
+        return await self._wait_for_upstream_transcript()
+
     # ------------------------------------------------------------------
     # Gate + verify
     # ------------------------------------------------------------------
@@ -448,15 +489,16 @@ class VoiceIDHandler(AsyncEventHandler):
             self._early_match,
         )
 
-        # Tell upstream that the audio stream is complete.
-        try:
-            if self._upstream_open and self._upstream_client is not None:
-                await self._upstream_client.write_event(AudioStop().event())
-                _LOGGER.debug("[%s] AudioStop sent to upstream", sid)
-        except Exception as exc:
-            _LOGGER.warning(
-                "[%s] Failed to signal AudioStop upstream: %s", sid, exc
-            )
+        # Tell upstream that the audio stream is complete (Wyoming path only).
+        if not self._is_voxtral:
+            try:
+                if self._upstream_open and self._upstream_client is not None:
+                    await self._upstream_client.write_event(AudioStop().event())
+                    _LOGGER.debug("[%s] AudioStop sent to upstream", sid)
+            except Exception as exc:
+                _LOGGER.warning(
+                    "[%s] Failed to signal AudioStop upstream: %s", sid, exc
+                )
 
         if not raw_audio:
             _LOGGER.info("[%s] Empty audio buffer → empty transcript", sid)
@@ -495,6 +537,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 reason="short",
                 outcome=OUTCOME_PASSTHROUGH_SHORT,
                 duration=duration,
+                audio_16k=audio_16k,
             )
             return
 
@@ -506,6 +549,7 @@ class VoiceIDHandler(AsyncEventHandler):
                     reason="no-speakers",
                     outcome=OUTCOME_PASSTHROUGH_NO_SPEAKERS,
                     duration=duration,
+                    audio_16k=audio_16k,
                 )
                 return
             _LOGGER.info(
@@ -569,7 +613,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 sid, self._early_match, self._early_distance or 0.0,
             )
             # HA events already fired in _run_early_probe. Just get transcript.
-            transcript = await self._wait_for_upstream_transcript()
+            transcript = await self._get_transcript(verify_audio)
             await self._send_transcript_to_satellite(
                 transcript, label=f"match:{self._early_match}"
             )
@@ -644,7 +688,7 @@ class VoiceIDHandler(AsyncEventHandler):
                 result.threshold, verify_ms,
             )
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
-            transcript = await self._wait_for_upstream_transcript()
+            transcript = await self._get_transcript(verify_audio)
             await self._send_transcript_to_satellite(
                 transcript, label=f"match:{result.matched_speaker}"
             )
@@ -721,7 +765,7 @@ class VoiceIDHandler(AsyncEventHandler):
 
         if not require_match:
             _LOGGER.info("[%s] require_match=false → forwarding anyway", sid)
-            transcript = await self._wait_for_upstream_transcript()
+            transcript = await self._get_transcript(verify_audio)
             await self._send_transcript_to_satellite(
                 transcript, label="unknown-forwarded"
             )
@@ -780,9 +824,10 @@ class VoiceIDHandler(AsyncEventHandler):
         reason: str,
         outcome: str,
         duration: float,
+        audio_16k: Optional[bytes] = None,
     ) -> None:
         """Forward upstream transcript back to the satellite unchanged."""
-        transcript = await self._wait_for_upstream_transcript()
+        transcript = await self._get_transcript(audio_16k or bytes(self._audio_buffer))
         await self._send_transcript_to_satellite(
             transcript, label=f"passthrough:{reason}"
         )

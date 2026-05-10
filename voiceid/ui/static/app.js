@@ -978,6 +978,23 @@ async function loadSettings() {
         }
         // Per-satellite thresholds
         loadSatelliteThresholds();
+        // STT backend
+        const sttForm = $("#stt-form");
+        if (sttForm) {
+            sttForm.stt_backend.value = s.stt_backend || "upstream";
+            sttForm.mistral_api_key.value = "";
+            sttForm.mistral_model.value = s.mistral_model || "voxtral-mini-latest";
+            const voxtralFields = $("#stt-voxtral-fields");
+            if (voxtralFields) {
+                voxtralFields.hidden = s.stt_backend !== "voxtral";
+            }
+            const keyHint = $("#stt-key-hint");
+            if (keyHint) {
+                keyHint.textContent = s.mistral_api_key_set
+                    ? t("stt.key_set")
+                    : t("stt.key_empty");
+            }
+        }
         // Emotion detection (experimental)
         const emotionForm = $("#emotion-form");
         if (emotionForm) {
@@ -1123,6 +1140,57 @@ function setSatFeedback(msg, cls) {
 const satRefreshBtn = $("#sat-threshold-refresh");
 if (satRefreshBtn) {
     satRefreshBtn.addEventListener("click", loadSatelliteThresholds);
+}
+
+// --- STT backend toggle ---------------------------------------------------
+
+const sttForm = $("#stt-form");
+if (sttForm) {
+    const sttSelect = sttForm.stt_backend;
+    const voxtralFields = $("#stt-voxtral-fields");
+
+    function toggleVoxtralFields() {
+        if (voxtralFields) {
+            voxtralFields.hidden = sttSelect.value !== "voxtral";
+        }
+    }
+    sttSelect.addEventListener("change", toggleVoxtralFields);
+
+    sttForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fb = $("#stt-feedback");
+        const body = { stt_backend: sttSelect.value };
+        if (sttSelect.value === "voxtral") {
+            const keyVal = sttForm.mistral_api_key.value;
+            if (keyVal) body.mistral_api_key = keyVal;
+            const modelVal = sttForm.mistral_model.value.trim();
+            if (modelVal) body.mistral_model = modelVal;
+        }
+        try {
+            await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            if (fb) {
+                fb.className = "feedback ok";
+                fb.textContent = t("stt.saved");
+                setTimeout(() => {
+                    if (fb.textContent === t("stt.saved")) {
+                        fb.textContent = "";
+                        fb.className = "feedback";
+                    }
+                }, 2500);
+            }
+            sttForm.mistral_api_key.value = "";
+            loadSettings();
+        } catch (err) {
+            if (fb) {
+                fb.className = "feedback err";
+                fb.textContent = err.message;
+            }
+        }
+    });
 }
 
 // --- Emotion detection toggle ---------------------------------------------

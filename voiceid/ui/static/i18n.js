@@ -239,6 +239,22 @@ const I18N = (() => {
             "quality.sample_tooltip": "Sample quality — combined score from VAD, SNR, liveness, consistency and centroid fit.",
             "quality.unknown": "—",
 
+            // -- STT backend --
+            "stt.title": "STT Backend",
+            "stt.description": "Choose how VoiceID obtains transcripts: proxy to an upstream Wyoming STT service, or transcribe directly via the Mistral Cloud API (Voxtral).",
+            "stt.backend": "Backend",
+            "stt.opt_upstream": "Upstream (Wyoming proxy)",
+            "stt.opt_voxtral": "Voxtral (Mistral Cloud)",
+            "stt.api_key": "Mistral API key",
+            "stt.ph_api_key": "paste key here",
+            "stt.model": "Model",
+            "stt.ph_model": "voxtral-mini-latest",
+            "stt.key_set": "API key is set. Leave empty to keep current key.",
+            "stt.key_empty": "No API key configured.",
+            "stt.saved": "STT settings saved",
+            "stt.hint_voxtral": "Voxtral active — audio is sent to Mistral Cloud for transcription. No upstream STT container needed.",
+            "stt.hint_upstream": "Wyoming proxy active — audio is forwarded to the upstream STT service.",
+
             // -- Emotion detection --
             "emotion.title": "Emotion detection (experimental)",
             "emotion.description": "Classifies the emotional tone of verified speech (happy, sad, angry, …) and pushes it to Home Assistant. This is plumbing only — no compatible ONNX model ships with VoiceID yet. The toggle can be pre-flipped safely.",
@@ -546,6 +562,22 @@ const I18N = (() => {
             "quality.sample": "Q: {pct}",
             "quality.sample_tooltip": "Qualität der Probe — kombinierter Score aus VAD, SNR, Liveness, Konsistenz und Zentroid-Passung.",
             "quality.unknown": "—",
+
+            // -- STT-Backend --
+            "stt.title": "STT-Backend",
+            "stt.description": "Wähle, wie VoiceID Transkripte erhält: Proxy zu einem Wyoming-STT-Upstream, oder direkt über die Mistral Cloud API (Voxtral) transkribieren.",
+            "stt.backend": "Backend",
+            "stt.opt_upstream": "Upstream (Wyoming-Proxy)",
+            "stt.opt_voxtral": "Voxtral (Mistral Cloud)",
+            "stt.api_key": "Mistral API-Schlüssel",
+            "stt.ph_api_key": "Schlüssel hier einfügen",
+            "stt.model": "Modell",
+            "stt.ph_model": "voxtral-mini-latest",
+            "stt.key_set": "API-Schlüssel gesetzt. Leer lassen, um den aktuellen zu behalten.",
+            "stt.key_empty": "Kein API-Schlüssel konfiguriert.",
+            "stt.saved": "STT-Einstellungen gespeichert",
+            "stt.hint_voxtral": "Voxtral aktiv — Audio wird zur Transkription an Mistral Cloud gesendet. Kein Upstream-STT-Container nötig.",
+            "stt.hint_upstream": "Wyoming-Proxy aktiv — Audio wird an den Upstream-STT-Dienst weitergeleitet.",
 
             // -- Emotionserkennung --
             "emotion.title": "Emotionserkennung (experimentell)",

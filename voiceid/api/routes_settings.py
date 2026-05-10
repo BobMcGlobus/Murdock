@@ -43,6 +43,9 @@ class SettingsOut(BaseModel):
     ha_nearest_entity: str = ""
     ha_role_entity: str = ""
     ha_emotion_entity: str = ""
+    stt_backend: str = "upstream"  # "upstream" | "voxtral"
+    mistral_api_key_set: bool = False
+    mistral_model: str = "voxtral-mini-latest"
     advertised_languages: List[str] = Field(default_factory=list)
     advertised_languages_source: str = "auto"  # "auto" | "override"
     quality_weights: dict = Field(default_factory=dict)
@@ -87,6 +90,10 @@ class SettingsPatch(BaseModel):
     # model availability before attempting inference.
     enable_emotion: Optional[bool] = None
     quality_weights: Optional[dict] = None  # {"speech_ratio":0.25,...} — pass {} to reset
+    # STT backend selection
+    stt_backend: Optional[str] = None  # "upstream" | "voxtral"
+    mistral_api_key: Optional[str] = None
+    mistral_model: Optional[str] = None
 
 
 class RestartResponse(BaseModel):
@@ -119,6 +126,9 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         upstream_uri_default=ctx.settings.upstream_uri,
         upstream_uri_source=ctx.get_upstream_uri_source(),
         listen_uri=ctx.settings.listen_uri,
+        stt_backend=ctx.get_stt_backend(),
+        mistral_api_key_set=ctx.has_mistral_api_key(),
+        mistral_model=ctx.get_mistral_model(),
         ha_configured=ctx.ha.configured,
         ha_url=ctx.get_ha_url(),
         ha_token_set=ctx.has_ha_token(),
@@ -212,6 +222,15 @@ async def patch_settings(
             ctx.set_quality_weights(None)
         else:
             ctx.set_quality_weights(body.quality_weights)
+    # STT backend selection
+    if body.stt_backend is not None:
+        if body.stt_backend not in ("upstream", "voxtral"):
+            raise HTTPException(status_code=400, detail="stt_backend must be 'upstream' or 'voxtral'")
+        ctx.set_stt_backend(body.stt_backend)
+    if body.mistral_api_key is not None:
+        ctx.set_mistral_api_key(body.mistral_api_key)
+    if body.mistral_model is not None:
+        ctx.set_mistral_model(body.mistral_model)
     return _build_settings_out(ctx)
 
 
