@@ -395,7 +395,7 @@ class MurdockHandler(AsyncEventHandler):
                 spk = self.context.speakers.get_speaker(result.matched_speaker_id)
                 self.context.publish_recognition(
                     speaker=result.matched_speaker,
-                    confidence=1.0 - result.distance,
+                    confidence=self.context.confidence_for(result.distance),
                     satellite_id=self._satellite_id,
                     is_known=True,
                     distance=result.distance,
@@ -755,7 +755,7 @@ class MurdockHandler(AsyncEventHandler):
             )
             self.context.publish_recognition(
                 speaker=result.matched_speaker,
-                confidence=1.0 - result.distance,
+                confidence=self.context.confidence_for(result.distance),
                 satellite_id=self._satellite_id,
                 is_known=True,
                 distance=result.distance,
@@ -800,7 +800,7 @@ class MurdockHandler(AsyncEventHandler):
 
         self.context.publish_recognition(
             speaker="unknown",
-            confidence=max(0.0, 1.0 - result.distance),
+            confidence=self.context.confidence_for(result.distance),
             satellite_id=self._satellite_id,
             is_known=False,
             distance=result.distance,

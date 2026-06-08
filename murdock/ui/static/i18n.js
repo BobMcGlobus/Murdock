@@ -154,6 +154,20 @@ const I18N = (() => {
             "settings.ha_yes": "HA: configured",
             "settings.ha_no": "HA: not configured",
 
+            // -- Confidence calibration --
+            "calibration.title": "Confidence calibration",
+            "calibration.description": "Maps the raw cosine distance to a calibrated probability (Platt scaling) so the confidence reported to Home Assistant is meaningful. Fitted automatically from your enrolled samples; gating still uses the distance threshold.",
+            "calibration.enabled": "Enable calibrated confidence",
+            "calibration.save": "Save",
+            "calibration.saved": "Calibration setting saved",
+            "calibration.recalibrate": "Recalibrate now",
+            "calibration.recalibrating": "Recalibrating…",
+            "calibration.status_disabled": "Calibration is disabled — confidence falls back to 1 − distance.",
+            "calibration.status_unfitted": "Not fitted yet — enroll at least two speakers, then recalibrate.",
+            "calibration.status_fitted": "Fitted from {genuine} genuine and {impostor} impostor pairs.",
+            "calibration.fit_ok": "Calibrated from {genuine} genuine / {impostor} impostor pairs.",
+            "calibration.fit_insufficient": "Not enough data — need at least two enrolled speakers with samples.",
+
             // -- MQTT --
             "mqtt.title": "MQTT (recommended)",
             "mqtt.description": "Publish speaker-recognition results over MQTT. Entities appear automatically in Home Assistant via discovery — no token, no manual helpers. Home Assistant can also push context (TV state, presence) back to Murdock on retained context topics.",
@@ -510,6 +524,20 @@ const I18N = (() => {
             "settings.ttl": "TTL: {h}h",
             "settings.ha_yes": "HA: konfiguriert",
             "settings.ha_no": "HA: nicht konfiguriert",
+
+            // -- Confidence calibration --
+            "calibration.title": "Konfidenz-Kalibrierung",
+            "calibration.description": "Bildet die rohe Kosinus-Distanz auf eine kalibrierte Wahrscheinlichkeit ab (Platt-Scaling), damit die an Home Assistant gemeldete Konfidenz aussagekräftig ist. Wird automatisch aus deinen Enrollment-Samples gefittet; das Gating nutzt weiterhin die Distanz-Schwelle.",
+            "calibration.enabled": "Kalibrierte Konfidenz aktivieren",
+            "calibration.save": "Speichern",
+            "calibration.saved": "Kalibrierungs-Einstellung gespeichert",
+            "calibration.recalibrate": "Jetzt neu kalibrieren",
+            "calibration.recalibrating": "Kalibriere…",
+            "calibration.status_disabled": "Kalibrierung deaktiviert — Konfidenz nutzt 1 − Distanz.",
+            "calibration.status_unfitted": "Noch nicht gefittet — mindestens zwei Sprecher anlernen, dann neu kalibrieren.",
+            "calibration.status_fitted": "Gefittet aus {genuine} genuine- und {impostor} impostor-Paaren.",
+            "calibration.fit_ok": "Kalibriert aus {genuine} genuine / {impostor} impostor-Paaren.",
+            "calibration.fit_insufficient": "Zu wenig Daten — mindestens zwei angelernte Sprecher mit Samples nötig.",
 
             // -- MQTT --
             "mqtt.title": "MQTT (empfohlen)",

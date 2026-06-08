@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # the embedder's minimum frame count and score unreliably.
     extraction_min_region_sec: float = Field(default=0.6)
 
+    # Confidence calibration (Platt scaling). When enabled and fitted, the
+    # confidence reported to HA/MQTT is a calibrated P(same speaker)
+    # instead of the raw 1 - cosine_distance. Gating still uses the
+    # distance threshold; calibration only shapes the reported confidence
+    # (and is the groundwork for adaptive thresholds / context fusion).
+    enable_calibration: bool = Field(default=True)
+
     # VAD
     vad_min_speech_ratio: float = Field(default=0.6)
     vad_speech_threshold: float = Field(default=0.5)

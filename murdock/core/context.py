@@ -6,12 +6,15 @@ that they share a single database connection and set of models.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import sqlite3
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
 
 from ..config import Settings, get_settings
+from .calibration import Calibrator, calibrator_from_pairs
 from .db import get_setting, open_db, set_setting
 from .embeddings import CAMPPlusEmbedder
 from .emotion import EmotionClassifier
@@ -58,6 +61,9 @@ class AppContext:
     emotion: Optional[EmotionClassifier] = None
     info_cache: "Optional[UpstreamInfoCache]" = None
     _overrides: dict = field(default_factory=dict)
+    _calibrator: Calibrator = field(default_factory=Calibrator)
+    _recalibration_task: "Optional[asyncio.Task]" = None
+    _recalibration_pending: bool = False
 
     # ------------------------------------------------------------------
     # Runtime-configurable settings (persisted in the settings table)
@@ -199,6 +205,90 @@ class AppContext:
 
     def set_extraction_min_region_sec(self, value: float) -> None:
         set_setting(self.db, "extraction_min_region_sec", f"{max(0.0, float(value)):.3f}")
+
+    # ------------------------------------------------------------------
+    # Confidence calibration (Platt scaling)
+    # ------------------------------------------------------------------
+
+    def get_enable_calibration(self) -> bool:
+        override = get_setting(self.db, "enable_calibration")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_calibration
+
+    def set_enable_calibration(self, enabled: bool) -> None:
+        set_setting(self.db, "enable_calibration", "true" if enabled else "false")
+
+    def load_calibration(self) -> None:
+        """Load persisted Platt parameters from the settings table."""
+        raw = get_setting(self.db, "calibration")
+        if raw:
+            try:
+                self._calibrator = Calibrator.from_dict(json.loads(raw))
+                return
+            except Exception:
+                _LOGGER.warning("Stored calibration is corrupt; ignoring")
+        self._calibrator = Calibrator()
+
+    def get_calibrator(self) -> Calibrator:
+        return self._calibrator
+
+    def confidence_for(self, distance: float) -> float:
+        """Return calibrated P(same speaker) if available, else 1 - distance.
+
+        This is the single source of truth for the ``confidence`` value we
+        report to HA / MQTT, so the whole pipeline reads the same number.
+        """
+        if self.get_enable_calibration() and self._calibrator.fitted:
+            prob = self._calibrator.probability(distance)
+            if prob is not None:
+                return prob
+        return max(0.0, 1.0 - float(distance))
+
+    def recalibrate(self) -> Calibrator:
+        """Re-fit the calibrator from the current enrollments (blocking).
+
+        Heavy (re-embeds every stored sample), so call it off the event
+        loop (``asyncio.to_thread``) or via :meth:`schedule_recalibration`.
+        Persists the result to the settings table.
+        """
+        distances, labels = self.speakers.collect_calibration_data()
+        calibrator = calibrator_from_pairs(distances, labels)
+        self._calibrator = calibrator
+        set_setting(self.db, "calibration", json.dumps(calibrator.to_dict()))
+        return calibrator
+
+    def schedule_recalibration(self) -> None:
+        """Fire-and-forget a recalibration on the running loop, debounced.
+
+        If a recalibration is already running, mark one as pending so a
+        single follow-up pass picks up the latest enrollments instead of
+        queueing one task per enrolment.
+        """
+        if not self.get_enable_calibration():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._recalibration_task and not self._recalibration_task.done():
+            self._recalibration_pending = True
+            return
+
+        async def _run() -> None:
+            try:
+                while True:
+                    self._recalibration_pending = False
+                    try:
+                        await asyncio.to_thread(self.recalibrate)
+                    except Exception:
+                        _LOGGER.exception("Recalibration failed")
+                    if not self._recalibration_pending:
+                        break
+            finally:
+                self._recalibration_task = None
+
+        self._recalibration_task = loop.create_task(_run())
 
     def get_skip_leading_seconds(self) -> float:
         override = get_setting(self.db, "skip_leading_seconds")
@@ -780,6 +870,9 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
     # Apply persisted quality-weight override, if any.
     if _CONTEXT.get_quality_weights_source() == "override":
         _CONTEXT.speakers.set_quality_weights(_CONTEXT.get_quality_weights())
+    # Load any persisted calibration so confidence is calibrated from the
+    # first recognition after a restart (no need to refit on every boot).
+    _CONTEXT.load_calibration()
     return _CONTEXT
 
 

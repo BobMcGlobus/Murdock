@@ -32,6 +32,11 @@ class SettingsOut(BaseModel):
     enable_extraction: bool = True
     extraction_threshold: float = 0.25
     extraction_min_region_sec: float = 0.6
+    enable_calibration: bool = True
+    calibration_fitted: bool = False
+    calibration_n_genuine: int = 0
+    calibration_n_impostor: int = 0
+    calibration_fitted_at: float = 0.0
     upstream_uri: str
     upstream_uri_default: str
     upstream_uri_source: str  # "env" | "override"
@@ -82,6 +87,7 @@ class SettingsPatch(BaseModel):
     enable_extraction: Optional[bool] = None
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
+    enable_calibration: Optional[bool] = None
     # None → field not touched
     # ""   → clear override, fall back to env default
     # "…"  → set override (host:port accepted, tcp:// auto-prefixed)
@@ -148,6 +154,11 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         enable_extraction=ctx.get_enable_extraction(),
         extraction_threshold=ctx.get_extraction_threshold(),
         extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
+        enable_calibration=ctx.get_enable_calibration(),
+        calibration_fitted=ctx.get_calibrator().fitted,
+        calibration_n_genuine=ctx.get_calibrator().n_genuine,
+        calibration_n_impostor=ctx.get_calibrator().n_impostor,
+        calibration_fitted_at=ctx.get_calibrator().fitted_at,
         upstream_uri=ctx.get_upstream_uri(),
         upstream_uri_default=ctx.settings.upstream_uri,
         upstream_uri_source=ctx.get_upstream_uri_source(),
@@ -217,6 +228,8 @@ async def patch_settings(
         ctx.set_extraction_threshold(body.extraction_threshold)
     if body.extraction_min_region_sec is not None:
         ctx.set_extraction_min_region_sec(body.extraction_min_region_sec)
+    if body.enable_calibration is not None:
+        ctx.set_enable_calibration(body.enable_calibration)
     if body.upstream_uri is not None:
         ctx.set_upstream_uri(body.upstream_uri)
     if body.advertised_languages is not None:
@@ -378,6 +391,34 @@ async def refresh_languages(ctx: AppContext = Depends(get_context)):
             status_code=502, detail=f"upstream refresh failed: {exc}"
         ) from exc
     return _build_settings_out(ctx)
+
+
+class CalibrationOut(BaseModel):
+    fitted: bool
+    n_genuine: int
+    n_impostor: int
+    fitted_at: float
+    a: float
+    b: float
+
+
+@router.post("/recalibrate", response_model=CalibrationOut)
+async def recalibrate(ctx: AppContext = Depends(get_context)):
+    """Re-fit confidence calibration from the current enrollments now.
+
+    Synchronous (the caller asked for it) but offloaded to a thread so the
+    event loop keeps serving. Re-embeds every stored sample, so it can
+    take a few seconds with many speakers.
+    """
+    calibrator = await asyncio.to_thread(ctx.recalibrate)
+    return CalibrationOut(
+        fitted=calibrator.fitted,
+        n_genuine=calibrator.n_genuine,
+        n_impostor=calibrator.n_impostor,
+        fitted_at=calibrator.fitted_at,
+        a=calibrator.a,
+        b=calibrator.b,
+    )
 
 
 class HATestOut(BaseModel):

@@ -658,6 +658,85 @@ class SpeakerStore:
             self.conn.commit()
         return count
 
+    def collect_calibration_data(self) -> tuple[List[float], List[int]]:
+        """Build (distances, labels) pairs for Platt calibration.
+
+        * genuine (label 1): each sample vs. its speaker's leave-one-out
+          centroid — honest, since the sample isn't in its own reference.
+        * impostor (label 0): each sample vs. every other speaker's full
+          centroid.
+
+        Mirrors the verify path (sample-embedding vs. centroid). Audio is
+        decoded under the lock, embedded outside it (the embedder
+        serialises internally), so a recalibration doesn't block the
+        verify path for long.
+        """
+        from .audio import decode_wav, to_mono_16k_pcm
+
+        # 1. Pull every sample's audio under the lock, grouped by speaker.
+        with self._lock:
+            speaker_rows = self.conn.execute(
+                "SELECT id FROM speakers ORDER BY id"
+            ).fetchall()
+            audio_by_speaker: Dict[int, List[bytes]] = {}
+            for srow in speaker_rows:
+                sid = int(srow["id"])
+                rows = self.conn.execute(
+                    "SELECT audio FROM speaker_samples WHERE speaker_id = ? ORDER BY id",
+                    (sid,),
+                ).fetchall()
+                audio_by_speaker[sid] = [bytes(r["audio"]) for r in rows]
+
+        # 2. Embed every sample (outside the lock).
+        emb_by_speaker: Dict[int, List[np.ndarray]] = {}
+        for sid, blobs in audio_by_speaker.items():
+            embs: List[np.ndarray] = []
+            for blob in blobs:
+                try:
+                    pcm, rate, width, channels = decode_wav(blob)
+                    pcm = to_mono_16k_pcm(pcm, rate, width, channels)
+                    embs.append(self.embedder.embed_pcm(pcm))
+                except Exception as exc:
+                    _LOGGER.debug("Calibration: skipping a sample: %s", exc)
+            if embs:
+                emb_by_speaker[sid] = embs
+
+        # 3. Full centroids per speaker (for impostor scoring).
+        centroids: Dict[int, np.ndarray] = {}
+        for sid, embs in emb_by_speaker.items():
+            try:
+                centroids[sid] = CAMPPlusEmbedder.average(embs)
+            except ValueError:
+                continue
+
+        distances: List[float] = []
+        labels: List[int] = []
+        sids = list(emb_by_speaker.keys())
+        for sid, embs in emb_by_speaker.items():
+            n = len(embs)
+            for i, e in enumerate(embs):
+                # genuine — leave-one-out centroid
+                if n >= 2:
+                    others = [embs[j] for j in range(n) if j != i]
+                    try:
+                        loo = CAMPPlusEmbedder.average(others)
+                        distances.append(
+                            CAMPPlusEmbedder.cosine_distance(e, loo)
+                        )
+                        labels.append(1)
+                    except ValueError:
+                        pass
+                # impostor — vs. other speakers' centroids
+                for osid in sids:
+                    if osid == sid or osid not in centroids:
+                        continue
+                    distances.append(
+                        CAMPPlusEmbedder.cosine_distance(e, centroids[osid])
+                    )
+                    labels.append(0)
+
+        return distances, labels
+
     def _compute_centroid(self, speaker_id: int) -> tuple[np.ndarray, int]:
         rows = self.conn.execute(
             "SELECT audio FROM speaker_samples WHERE speaker_id = ? ORDER BY id",

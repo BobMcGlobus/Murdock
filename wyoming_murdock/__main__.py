@@ -84,6 +84,14 @@ async def main() -> None:
 
     app = create_app(context)
 
+    # Fit confidence calibration if enabled and not yet fitted. Runs in the
+    # background so a slow re-embed of all samples never delays startup;
+    # until it lands, confidence falls back to 1 - distance.
+    if context.get_enable_calibration() and not context.get_calibrator().fitted:
+        if len(speakers) >= 2:
+            _LOGGER.info("Calibration not fitted yet — scheduling background fit")
+            context.schedule_recalibration()
+
     cleanup_task = asyncio.create_task(context.unknown.run_cleanup_loop())
     web_task = asyncio.create_task(
         _run_web_ui(app, settings.web_host, settings.web_port)

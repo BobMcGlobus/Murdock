@@ -306,6 +306,28 @@
             </div>
 
             <div class="card">
+                <h2 data-i18n="calibration.title">Confidence calibration</h2>
+                <p class="meta" data-i18n="calibration.description">
+                    Maps the raw cosine distance to a calibrated probability
+                    (Platt scaling) so the confidence reported to Home
+                    Assistant is meaningful. Fitted automatically from your
+                    enrolled samples; gating still uses the distance threshold.
+                </p>
+                <form id="calibration-form">
+                    <label class="switch">
+                        <input type="checkbox" name="enable_calibration">
+                        <span data-i18n="calibration.enabled">Enable calibrated confidence</span>
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="calibration.save">Save</button>
+                        <button type="button" id="recalibrate-btn" class="secondary" data-i18n="calibration.recalibrate">Recalibrate now</button>
+                    </div>
+                    <p class="meta" id="calibration-status"></p>
+                </form>
+                <div id="calibration-feedback" class="meta"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="mqtt.title">MQTT (recommended)</h2>
                 <p class="meta" data-i18n="mqtt.description">
                     Publish speaker-recognition results over MQTT. Entities

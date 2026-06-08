@@ -948,6 +948,12 @@ async function loadSettings() {
             form.extraction_min_region_sec.value =
                 (s.extraction_min_region_sec ?? 0.6).toFixed(1);
         }
+        // Confidence calibration (new section — backwards-compatible)
+        const calForm = $("#calibration-form");
+        if (calForm && calForm.enable_calibration) {
+            calForm.enable_calibration.checked = !!s.enable_calibration;
+            renderCalibrationStatus(s);
+        }
         if (s.upstream_uri_source === "override") {
             form.upstream_uri.value = s.upstream_uri || "";
         } else {
@@ -1384,6 +1390,68 @@ $("#restart-btn").addEventListener("click", async () => {
         feedback.textContent = t("service.triggered");
         setStatus(t("service.restarting"), "warn");
         setTimeout(() => window.location.reload(), 5000);
+    }
+});
+
+// --- Confidence calibration ----------------------------------------------
+
+function renderCalibrationStatus(s) {
+    const el = $("#calibration-status");
+    if (!el) return;
+    if (!s.enable_calibration) {
+        el.textContent = t("calibration.status_disabled");
+        el.className = "meta";
+        return;
+    }
+    if (s.calibration_fitted) {
+        el.textContent = t("calibration.status_fitted", {
+            genuine: s.calibration_n_genuine,
+            impostor: s.calibration_n_impostor,
+        });
+        el.className = "feedback ok";
+    } else {
+        el.textContent = t("calibration.status_unfitted");
+        el.className = "meta";
+    }
+}
+
+$("#calibration-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    try {
+        const s = await api("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enable_calibration: form.enable_calibration.checked }),
+        });
+        renderCalibrationStatus(s);
+        setStatus(t("calibration.saved"), "ok");
+    } catch (err) {
+        setStatus(t("generic.error", { err: err.message }), "err");
+    }
+});
+
+$("#recalibrate-btn").addEventListener("click", async () => {
+    const btn = $("#recalibrate-btn");
+    const feedback = $("#calibration-feedback");
+    btn.disabled = true;
+    btn.textContent = t("calibration.recalibrating");
+    feedback.innerHTML = "";
+    try {
+        const res = await api("/api/settings/recalibrate", { method: "POST" });
+        if (res.fitted) {
+            feedback.innerHTML = `<span class="feedback ok">${escapeHtml(
+                t("calibration.fit_ok", { genuine: res.n_genuine, impostor: res.n_impostor })
+            )}</span>`;
+        } else {
+            feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("calibration.fit_insufficient"))}</span>`;
+        }
+        await loadSettings();
+    } catch (err) {
+        feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("generic.error", { err: err.message }))}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = t("calibration.recalibrate");
     }
 });
 

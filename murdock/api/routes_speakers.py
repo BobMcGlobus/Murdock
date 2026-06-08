@@ -141,6 +141,8 @@ async def delete_speaker(speaker_id: int, ctx: AppContext = Depends(get_context)
     ok = ctx.speakers.delete_speaker(speaker_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Speaker not found")
+    # Enrollment set changed — refit confidence calibration in the background.
+    ctx.schedule_recalibration()
     return {"deleted": True}
 
 
@@ -164,6 +166,7 @@ async def get_sample_audio(sample_id: int, ctx: AppContext = Depends(get_context
 async def delete_sample(sample_id: int, ctx: AppContext = Depends(get_context)):
     if not ctx.speakers.delete_sample(sample_id):
         raise HTTPException(status_code=404, detail="Sample not found")
+    ctx.schedule_recalibration()
     return {"deleted": True}
 
 
@@ -240,6 +243,9 @@ async def enroll(
             consistency_std=q.consistency_std,
             centroid_distance=q.centroid_distance,
         )
+
+    # New enrollment data — refit confidence calibration in the background.
+    ctx.schedule_recalibration()
 
     return EnrollResponse(
         speaker_id=result.speaker_id,

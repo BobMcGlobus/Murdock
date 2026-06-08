@@ -60,6 +60,14 @@ cluster, and tag the sample later.
   when the cap is reached so the profile ages with the user's voice.
 
 ### Quality & tuning
+- **Confidence calibration (Platt scaling)** — maps the raw cosine
+  distance to a calibrated *probability that it's the same speaker*,
+  fitted automatically from your enrolled samples (genuine =
+  leave-one-out centroid distances, impostor = cross-speaker distances).
+  The confidence reported to HA/MQTT becomes meaningful instead of a bare
+  `1 - distance`. Refits in the background on enrollment changes; gating
+  still uses the distance threshold. Groundwork for adaptive thresholds
+  and context fusion.
 - **Sample quality scoring** — composite 0–1 score from speech ratio,
   SNR, liveness, embedding consistency and centroid fit. Per-speaker
   "training quality" badge. Component weights are tunable from the UI.
@@ -233,6 +241,7 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── sample_quality.py     # Composite quality scoring
 │   │   ├── liveness.py           # Spectral liveness heuristic
 │   │   ├── extraction.py         # Adaptive target-speaker region extraction
+│   │   ├── calibration.py        # Platt-scaling confidence calibration
 │   │   ├── ha_integration.py     # HA REST client (legacy push path)
 │   │   ├── mqtt_integration.py   # MQTT discovery + context subscribe (recommended)
 │   │   ├── recognition_log.py    # Event log store
@@ -255,10 +264,10 @@ TV entity — live in the UI and survive restarts.
 
 ## Post-MVP roadmap
 
-- Emotion detection on verified speech
+- Fold trustworthy recognition events into the calibration fit (not just
+  enrollment-derived pairs)
+- Adaptive thresholds per speaker, in calibrated-probability space
 - Parakeet STT bridge / integration notes
-- Platt-scaling confidence calibration
-- Adaptive thresholds per speaker (beyond per-satellite)
 - ML-trained liveness classifier (using gathered TV samples)
 - Multi-modal identity fusion (voice + phone presence + room + mmWave)
 
