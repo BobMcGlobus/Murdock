@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL description="VoiceID v2 — Wyoming speaker-recognition proxy for Home Assistant"
+LABEL description="Murdock v2 — Wyoming speaker-recognition proxy for Home Assistant"
 
 WORKDIR /app
 
@@ -16,8 +16,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scripts/ scripts/
-COPY voiceid/ voiceid/
-COPY wyoming_voiceid/ wyoming_voiceid/
+COPY murdock/ murdock/
+COPY wyoming_murdock/ wyoming_murdock/
 
 # Download ONNX models at build time so the runtime image is self-contained.
 # SKIP_MODEL_DOWNLOAD=1 makes the build tolerant of transient Hugging Face

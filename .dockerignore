@@ -1,5 +1,7 @@
 .git
 .gitignore
+.env
+.claude/
 .venv/
 venv/
 env/

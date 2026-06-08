@@ -1,4 +1,4 @@
-## VoiceID — production deployment (e.g. Unraid, NAS, dedicated server)
+## Murdock — production deployment (e.g. Unraid, NAS, dedicated server)
 ##
 ## Copy this file, set your env vars below, then:
 ##   docker compose -f docker-compose.prod.yml up -d
@@ -7,15 +7,15 @@
 ## (threshold, HA integration, STT backend choice, …) happens there.
 
 services:
-  voiceid:
+  murdock:
     build: .
-    container_name: voiceid
+    container_name: murdock
     ports:
       - "10350:10350"   # Wyoming — satellites connect here
       - "8099:8099"     # Web UI
     volumes:
-      - voiceid_data:/app/data
-      - voiceid_models:/app/models
+      - murdock_data:/app/data
+      - murdock_models:/app/models
     environment:
       # --- STT backend ---
       # "upstream" = proxy to a Wyoming STT service (default)
@@ -53,5 +53,5 @@ services:
       start_period: 15s
 
 volumes:
-  voiceid_data:
-  voiceid_models:
+  murdock_data:
+  murdock_models:

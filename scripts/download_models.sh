@@ -140,7 +140,7 @@ if [ "$missing" -ne 0 ]; then
     if [ "${SKIP_MODEL_DOWNLOAD:-0}" = "1" ]; then
         echo
         echo "WARNING: at least one model is missing, but SKIP_MODEL_DOWNLOAD=1" >&2
-        echo "         is set — continuing anyway. VoiceID will try to fetch" >&2
+        echo "         is set — continuing anyway. Murdock will try to fetch" >&2
         echo "         the missing files at container startup, or you can" >&2
         echo "         mount a pre-populated models directory via a volume." >&2
         exit 0

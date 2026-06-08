@@ -33,12 +33,12 @@ if [ "$need_download" -eq 1 ]; then
     if ! bash /app/scripts/download_models.sh "$MODEL_DIR"; then
         echo
         echo "====================================================================="
-        echo " ERROR: VoiceID couldn't download the required ONNX models."
+        echo " ERROR: Murdock couldn't download the required ONNX models."
         echo
         echo " Hugging Face is probably rate-limiting or down. Options:"
         echo
         echo "  1. Wait a few minutes and restart the container:"
-        echo "       docker compose restart voiceid"
+        echo "       docker compose restart murdock"
         echo
         echo "  2. Download the models on your host and mount them into"
         echo "     the container. Add this volume to docker-compose.yml:"
@@ -58,4 +58,4 @@ if [ "$need_download" -eq 1 ]; then
     fi
 fi
 
-exec python -m wyoming_voiceid "$@"
+exec python -m wyoming_murdock "$@"

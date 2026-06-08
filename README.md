@@ -1,4 +1,4 @@
-# VoiceID v2
+# Murdock v2
 
 Self-hosted **speaker-recognition Wyoming proxy** for Home Assistant. Sits
 between a voice satellite (e.g. Home Assistant Voice PE) and a downstream
@@ -8,7 +8,7 @@ audio), and injects speaker context back into Home Assistant so the
 conversation agent knows whose command it's handling.
 
 > Reference base: [jxlarrea/wyoming-voice-match](https://github.com/jxlarrea/wyoming-voice-match).
-> VoiceID replaces the ECAPA-TDNN embedder with WeSpeaker **CAM++ (ONNX)**,
+> Murdock replaces the ECAPA-TDNN embedder with WeSpeaker **CAM++ (ONNX)**,
 > adds a **Web UI**, **sqlite-vec**-backed storage, **unknown-voice logging**,
 > **liveness heuristics**, **sample quality scoring**, **voice clustering**,
 > and direct **HA REST integration**.
@@ -16,7 +16,7 @@ conversation agent knows whose command it's handling.
 ## Architecture
 
 ```
-Voice Satellite → Wake Word → [VoiceID Proxy] → STT Engine → HA Assist Pipeline
+Voice Satellite → Wake Word → [Murdock Proxy] → STT Engine → HA Assist Pipeline
                                     │
                                     ├─ CAM++ embedding (CPU, onnxruntime)
                                     ├─ sqlite-vec KNN (cosine distance)
@@ -84,13 +84,13 @@ cluster, and tag the sample later.
 
 1. **Settings → Add-ons → Add-on store → ⋮ → Repositories** and add
    this repository's URL.
-2. Refresh, find **VoiceID**, **Install**.
+2. Refresh, find **Murdock**, **Install**.
 3. **Configuration** tab: set `upstream_uri` to your existing STT
    server (e.g. `tcp://core-whisper:10300` if faster-whisper runs on
    the same HA host).
 4. Start the addon, click **Open Web UI**.
 
-See [`addons/voiceid/DOCS.md`](addons/voiceid/DOCS.md) for details.
+See [`addons/murdock/DOCS.md`](addons/murdock/DOCS.md) for details.
 
 ### Option B — docker-compose
 
@@ -111,8 +111,8 @@ Home Assistant URL, token and entities are configured **in the Web UI**
 ### Home Assistant setup
 
 1. **Voice → Devices & Services**: Home Assistant should auto-discover
-   VoiceID as a Wyoming ASR provider at `tcp://<host>:10350`.
-2. **Assist Pipeline**: select `voiceid-proxy` as the speech-to-text engine.
+   Murdock as a Wyoming ASR provider at `tcp://<host>:10350`.
+2. **Assist Pipeline**: select `murdock-proxy` as the speech-to-text engine.
 3. **Web UI → Home Assistant tab**: enter your HA URL + long-lived
    token (the add-on auto-wires this), and click **Copy HA template**
    for a ready-made `configuration.yaml` snippet with all helper
@@ -133,7 +133,7 @@ recording is actually training-worthy.
 **CLI:**
 
 ```bash
-docker compose exec voiceid python -m scripts.enroll \
+docker compose exec murdock python -m scripts.enroll \
     --speaker jonas \
     /app/data/samples/jonas_1.wav \
     /app/data/samples/jonas_2.wav \
@@ -162,21 +162,21 @@ TV entity — live in the UI and survive restarts.
 ## Project layout
 
 ```
-voiceid/
+.
 ├── Dockerfile                    # docker-compose image
 ├── docker-compose.yml
 ├── requirements.txt
 ├── addons/                       # Home Assistant add-on
 │   ├── repository.yaml           # HA "Add repository" metadata
-│   └── voiceid/
+│   └── murdock/
 │       ├── config.yaml           # Addon options, ports, ingress
 │       ├── Dockerfile            # addon image (python:3.11-slim)
 │       ├── run.sh                # /data/options.json → env bootstrap
 │       ├── build.yaml
 │       ├── DOCS.md               # shown in HA on the Documentation tab
 │       └── README.md
-├── wyoming_voiceid/              # Wyoming proxy handler + entry point
-├── voiceid/
+├── wyoming_murdock/              # Wyoming proxy handler + entry point
+├── murdock/                      # Core Python package
 │   ├── config.py                 # Env-based settings
 │   ├── core/
 │   │   ├── audio.py              # PCM/WAV utilities, ffmpeg decode
@@ -205,7 +205,7 @@ voiceid/
 │   ├── enroll.py                 # CLI enrollment helper
 │   ├── entrypoint.sh             # Container entrypoint (model download)
 │   └── download_models.sh        # Fetch CAM++ + Silero ONNX models
-└── data/                         # Persistent volume (voiceid.db lives here)
+└── data/                         # Persistent volume (murdock.db lives here)
 ```
 
 ## Post-MVP roadmap
@@ -220,5 +220,5 @@ voiceid/
 ## License
 
 TBD — the upstream reference `wyoming-voice-match` is MIT-licensed;
-VoiceID is a rewrite, not a direct fork, but borrows Wyoming plumbing
+Murdock is a rewrite, not a direct fork, but borrows Wyoming plumbing
 patterns from it.

@@ -1,0 +1,79 @@
+# Home Assistant Add-on: Murdock
+#
+# Speaker-recognition proxy that sits between your Wyoming satellites
+# and your STT engine (faster-whisper, Parakeet, …). The proxy transcribes
+# normally via the upstream but additionally identifies WHO is speaking
+# and publishes the result to Home Assistant so your automations can
+# personalise responses.
+#
+# Most runtime settings are configured via the addon's Web UI (ingress)
+# and persisted in the addon's /data volume. This config file only
+# exposes the bootstrap knobs — URL of the STT upstream, log level, and
+# optional language overrides. Everything else is editable live.
+
+name: Murdock
+version: "0.1.0"
+slug: murdock
+description: >-
+  Speaker-recognition proxy for Home Assistant (Wyoming). Identifies
+  known speakers from voice-pipeline audio and exposes the result to
+  your automations.
+url: "https://github.com/BobMcGlobus/Murdock"
+arch:
+  - amd64
+  - aarch64
+# armv7 / armhf intentionally omitted: onnxruntime wheels aren't
+# published for 32-bit ARM and building from source on a Pi Zero is
+# painful. Happy to revisit if someone tests cross-compile.
+startup: services
+boot: auto
+host_network: false
+# Persistent data — DB, unknown sample audio, ONNX models.
+# The models are downloaded on first start and re-used across updates.
+map:
+  - addon_config:rw
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:account-voice
+panel_title: Murdock
+panel_admin: true
+ports:
+  # Wyoming protocol for satellites to connect to. Must be exposed on
+  # the LAN so satellites (ESPHome, wyoming-satellite) can reach it.
+  "10350/tcp": 10350
+  # Web UI direct access — optional; ingress works without exposing it.
+  "8099/tcp": null
+ports_description:
+  "10350/tcp": "Wyoming protocol (satellites connect here)"
+  "8099/tcp": "Web UI (use ingress instead if possible)"
+# Allow the addon to reach HA's WebSocket/API so it can push recognition
+# state changes. Using the addon's injected SUPERVISOR_TOKEN is better
+# than asking the user to paste a long-lived token — but we keep both
+# options so existing users aren't disrupted.
+homeassistant_api: true
+hassio_api: false
+options:
+  stt_backend: "upstream"
+  upstream_uri: "tcp://core-whisper:10300"
+  mistral_api_key: ""
+  mistral_model: "voxtral-mini-latest"
+  log_level: "info"
+  advertised_languages: "de,en"
+schema:
+  # STT backend: "upstream" proxies to a Wyoming STT container,
+  # "voxtral" sends audio to the Mistral Cloud API (no local STT needed).
+  stt_backend: list(upstream|voxtral)
+  # URL of the existing Wyoming STT server (faster-whisper, wyoming-whisper,
+  # Parakeet bridge, …). Only used when stt_backend is "upstream".
+  # Accepts host:port too — the proxy prepends tcp:// if missing.
+  upstream_uri: str?
+  # Mistral API key for Voxtral transcription. Only needed when
+  # stt_backend is "voxtral". Get yours at https://console.mistral.ai
+  mistral_api_key: password?
+  # Voxtral model name. Default is fine for most users.
+  mistral_model: str?
+  log_level: list(debug|info|warning|error)
+  # Comma-separated language codes forced into the Wyoming info event.
+  # Override only if auto-detect from the upstream doesn't surface the
+  # languages you actually use. Empty string disables the override.
+  advertised_languages: str?

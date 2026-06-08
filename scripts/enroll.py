@@ -12,8 +12,8 @@ import logging
 import sys
 from pathlib import Path
 
-from voiceid.core.audio import decode_audio_any, to_mono_16k_pcm
-from voiceid.core.context import build_context
+from murdock.core.audio import decode_audio_any, to_mono_16k_pcm
+from murdock.core.context import build_context
 
 
 def main() -> int:

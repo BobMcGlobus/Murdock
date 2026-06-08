@@ -1,7 +1,7 @@
 services:
-  voiceid:
+  murdock:
     build: .
-    container_name: voiceid
+    container_name: murdock
     ports:
       - "10350:10350"   # Wyoming proxy
       - "8099:8099"     # Web UI
@@ -16,7 +16,7 @@ services:
       - LISTEN_URI=tcp://0.0.0.0:10350
       # STT backend: "upstream" (Wyoming proxy) or "voxtral" (Mistral Cloud)
       - STT_BACKEND=${STT_BACKEND:-upstream}
-      # IMPORTANT: UPSTREAM_URI must point to a host VoiceID can actually
+      # IMPORTANT: UPSTREAM_URI must point to a host Murdock can actually
       # reach from inside its container (only needed for STT_BACKEND=upstream):
       #   * tcp://host.docker.internal:10300  (STT runs on the host)
       #   * tcp://<container_name>:10300      (STT runs in the same Docker network)
