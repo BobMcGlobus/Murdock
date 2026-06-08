@@ -1,0 +1,20 @@
+# Normalise line endings: store text as LF in the repo, let Git decide
+# the working-copy ending. Critical for shell scripts — a CRLF shebang
+# (`#!/usr/bin/env bash\r`) breaks with "bad interpreter" inside the
+# Linux container.
+* text=auto eol=lf
+
+# Scripts and configs that MUST be LF regardless of platform.
+*.sh    text eol=lf
+*.py    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Dockerfile* text eol=lf
+
+# Binary assets — never touch.
+*.onnx  binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.zip   binary
+*.wav   binary

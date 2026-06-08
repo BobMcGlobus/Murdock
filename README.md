@@ -1,5 +1,8 @@
 # Murdock v2
 
+[![CI](https://github.com/BobMcGlobus/Murdock/actions/workflows/ci.yml/badge.svg)](https://github.com/BobMcGlobus/Murdock/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Self-hosted **speaker-recognition Wyoming proxy** for Home Assistant. Sits
 between a voice satellite (e.g. Home Assistant Voice PE) and a downstream
 STT engine (faster-whisper, Parakeet, etc.) and acts as a *gatekeeper*:
@@ -254,6 +257,6 @@ TV entity — live in the UI and survive restarts.
 
 ## License
 
-TBD — the upstream reference `wyoming-voice-match` is MIT-licensed;
-Murdock is a rewrite, not a direct fork, but borrows Wyoming plumbing
-patterns from it.
+[MIT](LICENSE) © 2026 BobMcGlobus. The upstream reference
+`wyoming-voice-match` is also MIT-licensed; Murdock is a rewrite, not a
+direct fork, but borrows Wyoming plumbing patterns from it.
