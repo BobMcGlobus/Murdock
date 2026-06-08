@@ -48,6 +48,16 @@ async def main() -> None:
         len(speakers), context.get_verify_threshold(),
     )
 
+    # Start the MQTT bridge if enabled. Non-blocking — the connection
+    # loop runs in the background and reconnects on its own, so a missing
+    # broker never delays startup.
+    if context.get_mqtt_enabled():
+        await context.apply_mqtt_settings()
+        _LOGGER.info(
+            "MQTT enabled → %s:%d (connecting in background)",
+            context.get_mqtt_host() or "(none)", context.get_mqtt_port(),
+        )
+
     # Runtime-evaluated language override: first the SQLite setting, then
     # the env var fallback. Evaluated lazily inside the cache so UI edits
     # take effect immediately without restart.
@@ -113,6 +123,7 @@ async def main() -> None:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        await context.mqtt.stop()
         await context.ha.close()
         context.db.close()
         _LOGGER.info("Murdock stopped")

@@ -41,7 +41,17 @@ services:
       # Comma-separated: "de,en". Leave empty for auto-detect from upstream.
       - ADVERTISED_LANGUAGES=${ADVERTISED_LANGUAGES:-}
 
-      # --- Home Assistant (optional — can also configure in Web UI) ---
+      # --- MQTT (recommended HA integration — no token needed) ---
+      # Set MQTT_HOST to your broker to get HA auto-discovery. Entities
+      # appear automatically; HA can push TV/presence context back on
+      # retained murdock/context/<room>/<key> topics.
+      - MQTT_ENABLED=${MQTT_ENABLED:-false}
+      - MQTT_HOST=${MQTT_HOST:-}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+
+      # --- Home Assistant REST (legacy — prefer MQTT above) ---
       - HA_URL=${HA_URL:-}
       - HA_TOKEN=${HA_TOKEN:-}
     extra_hosts:

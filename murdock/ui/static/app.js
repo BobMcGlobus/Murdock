@@ -976,6 +976,24 @@ async function loadSettings() {
                 hint.textContent = s.ha_token_set ? t("ha.token_set") : t("ha.token_empty");
             }
         }
+        // Populate MQTT settings form
+        const mqttForm = $("#mqtt-settings-form");
+        if (mqttForm) {
+            mqttForm.mqtt_enabled.checked = !!s.mqtt_enabled;
+            mqttForm.mqtt_host.value = s.mqtt_host || "";
+            mqttForm.mqtt_port.value = s.mqtt_port || 1883;
+            mqttForm.mqtt_username.value = s.mqtt_username || "";
+            mqttForm.mqtt_password.value = "";
+            mqttForm.mqtt_topic_prefix.value = s.mqtt_topic_prefix || "murdock";
+            mqttForm.mqtt_discovery_prefix.value = s.mqtt_discovery_prefix || "homeassistant";
+            const pwHint = $("#mqtt-password-hint");
+            if (pwHint) {
+                pwHint.textContent = s.mqtt_password_set
+                    ? t("mqtt.password_set") : t("mqtt.password_empty");
+            }
+            renderMqttStatus(s);
+            updateMqttContextSnippet(s);
+        }
         // Per-satellite thresholds
         loadSatelliteThresholds();
         // STT backend
@@ -1347,6 +1365,115 @@ $("#restart-btn").addEventListener("click", async () => {
         setTimeout(() => window.location.reload(), 5000);
     }
 });
+
+// --- MQTT settings --------------------------------------------------------
+
+function renderMqttStatus(s) {
+    const el = $("#mqtt-status");
+    if (!el) return;
+    if (!s.mqtt_enabled) {
+        el.textContent = t("mqtt.status_disabled");
+        el.className = "meta";
+        return;
+    }
+    if (s.mqtt_connected) {
+        el.textContent = t("mqtt.status_connected");
+        el.className = "feedback ok";
+    } else {
+        el.textContent = t("mqtt.status_disconnected");
+        el.className = "feedback err";
+    }
+}
+
+function updateMqttContextSnippet(s) {
+    const el = $("#mqtt-context-code");
+    if (!el) return;
+    const prefix = (s.mqtt_topic_prefix || "murdock").trim() || "murdock";
+    // A ready-to-paste HA automation that pushes TV state on a retained
+    // context topic. <room> should match the satellite name Murdock sees.
+    const snippet = [
+        "alias: Murdock — push TV state",
+        "trigger:",
+        "  - platform: state",
+        "    entity_id: media_player.living_room_tv",
+        "action:",
+        "  - service: mqtt.publish",
+        "    data:",
+        `      topic: ${prefix}/context/living_room/tv`,
+        "      retain: true",
+        '      payload: >-',
+        `        {{ {"playing": is_state('media_player.living_room_tv','playing')} | to_json }}`,
+        "mode: single",
+    ].join("\n");
+    el.textContent = snippet;
+}
+
+$("#mqtt-settings-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const body = {
+        mqtt_enabled: form.mqtt_enabled.checked,
+        mqtt_host: form.mqtt_host.value.trim(),
+        mqtt_port: parseInt(form.mqtt_port.value, 10) || 1883,
+        mqtt_username: form.mqtt_username.value.trim(),
+        mqtt_topic_prefix: form.mqtt_topic_prefix.value.trim() || "murdock",
+        mqtt_discovery_prefix: form.mqtt_discovery_prefix.value.trim() || "homeassistant",
+    };
+    // Only send password if the user actually typed something.
+    const pwVal = form.mqtt_password.value;
+    if (pwVal) {
+        body.mqtt_password = pwVal;
+    }
+    try {
+        const s = await api("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        form.mqtt_password.value = "";
+        const pwHint = $("#mqtt-password-hint");
+        if (pwHint) {
+            pwHint.textContent = s.mqtt_password_set
+                ? t("mqtt.password_set") : t("mqtt.password_empty");
+        }
+        renderMqttStatus(s);
+        updateMqttContextSnippet(s);
+        setStatus(t("mqtt.saved"), "ok");
+    } catch (err) {
+        setStatus(t("generic.error", { err: err.message }), "err");
+    }
+});
+
+$("#mqtt-test-btn").addEventListener("click", async () => {
+    const btn = $("#mqtt-test-btn");
+    const feedback = $("#mqtt-feedback");
+    btn.disabled = true;
+    btn.textContent = t("mqtt.testing");
+    feedback.innerHTML = "";
+    try {
+        const res = await api("/api/settings/test-mqtt", { method: "POST" });
+        if (res.ok) {
+            feedback.innerHTML = `<span class="feedback ok">${escapeHtml(t("mqtt.test_ok"))}</span>`;
+            setStatus(t("mqtt.test_ok"), "ok");
+        } else {
+            feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("mqtt.test_fail", { err: res.error }))}</span>`;
+            setStatus(t("mqtt.test_fail", { err: res.error }), "err");
+        }
+    } catch (err) {
+        feedback.innerHTML = `<span class="feedback err">${escapeHtml(t("mqtt.test_fail", { err: err.message }))}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = t("mqtt.test");
+    }
+});
+
+// Live-update the context snippet as the user edits the topic prefix.
+const _mqttPrefixInput = document.querySelector("#mqtt-settings-form input[name='mqtt_topic_prefix']");
+if (_mqttPrefixInput) {
+    _mqttPrefixInput.addEventListener("input", () => {
+        updateMqttContextSnippet({ mqtt_topic_prefix: _mqttPrefixInput.value });
+    });
+}
 
 // --- HA settings ----------------------------------------------------------
 

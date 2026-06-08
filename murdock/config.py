@@ -109,6 +109,19 @@ class Settings(BaseSettings):
     ha_input_text_entity: str = Field(default="input_text.current_speaker")
     ha_tv_entity: Optional[str] = Field(default=None)
 
+    # MQTT — recommended integration path. In the HA addon these are
+    # auto-wired from the Mosquitto service (services: mqtt:want), so the
+    # user gets working discovery without entering anything. In compose
+    # deployments set them via env. The env values seed the DB on first
+    # boot; thereafter the Web UI is the source of truth.
+    mqtt_enabled: bool = Field(default=False)
+    mqtt_host: Optional[str] = Field(default=None)
+    mqtt_port: int = Field(default=1883)
+    mqtt_username: Optional[str] = Field(default=None)
+    mqtt_password: Optional[str] = Field(default=None)
+    mqtt_topic_prefix: str = Field(default="murdock")
+    mqtt_discovery_prefix: str = Field(default="homeassistant")
+
     # Voxtral (Mistral Cloud STT)
     mistral_api_key: Optional[str] = Field(default=None)
     mistral_model: str = Field(default="voxtral-mini-latest")

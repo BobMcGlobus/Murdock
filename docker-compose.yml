@@ -30,6 +30,15 @@ services:
       - WEB_HOST=0.0.0.0
       - WEB_PORT=8099
       - LOG_LEVEL=info
+      # MQTT (recommended HA integration). Uncomment + set your broker to
+      # get auto-discovery in HA without a token. These seed the DB on
+      # first start; thereafter the Web UI (Settings → MQTT) is the
+      # source of truth.
+      # - MQTT_ENABLED=true
+      # - MQTT_HOST=192.168.1.100        # or core-mosquitto on HAOS
+      # - MQTT_PORT=1883
+      # - MQTT_USERNAME=
+      # - MQTT_PASSWORD=
       # All other settings (threshold, HA integration, languages, …)
       # are configured via the web UI at http://localhost:8099 and
       # persisted in the database. No .env file needed.

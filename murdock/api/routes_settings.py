@@ -46,6 +46,15 @@ class SettingsOut(BaseModel):
     stt_backend: str = "upstream"  # "upstream" | "voxtral"
     mistral_api_key_set: bool = False
     mistral_model: str = "voxtral-mini-latest"
+    # MQTT integration (recommended over the REST/token path)
+    mqtt_enabled: bool = False
+    mqtt_host: str = ""
+    mqtt_port: int = 1883
+    mqtt_username: str = ""
+    mqtt_password_set: bool = False
+    mqtt_topic_prefix: str = "murdock"
+    mqtt_discovery_prefix: str = "homeassistant"
+    mqtt_connected: bool = False
     advertised_languages: List[str] = Field(default_factory=list)
     advertised_languages_source: str = "auto"  # "auto" | "override"
     quality_weights: dict = Field(default_factory=dict)
@@ -94,6 +103,14 @@ class SettingsPatch(BaseModel):
     stt_backend: Optional[str] = None  # "upstream" | "voxtral"
     mistral_api_key: Optional[str] = None
     mistral_model: Optional[str] = None
+    # MQTT integration
+    mqtt_enabled: Optional[bool] = None
+    mqtt_host: Optional[str] = None
+    mqtt_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    mqtt_username: Optional[str] = None
+    mqtt_password: Optional[str] = None
+    mqtt_topic_prefix: Optional[str] = None
+    mqtt_discovery_prefix: Optional[str] = None
 
 
 class RestartResponse(BaseModel):
@@ -129,6 +146,14 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         stt_backend=ctx.get_stt_backend(),
         mistral_api_key_set=ctx.has_mistral_api_key(),
         mistral_model=ctx.get_mistral_model(),
+        mqtt_enabled=ctx.get_mqtt_enabled(),
+        mqtt_host=ctx.get_mqtt_host(),
+        mqtt_port=ctx.get_mqtt_port(),
+        mqtt_username=ctx.get_mqtt_username(),
+        mqtt_password_set=ctx.has_mqtt_password(),
+        mqtt_topic_prefix=ctx.get_mqtt_topic_prefix(),
+        mqtt_discovery_prefix=ctx.get_mqtt_discovery_prefix(),
+        mqtt_connected=ctx.mqtt.connected,
         ha_configured=ctx.ha.configured,
         ha_url=ctx.get_ha_url(),
         ha_token_set=ctx.has_ha_token(),
@@ -231,6 +256,31 @@ async def patch_settings(
         ctx.set_mistral_api_key(body.mistral_api_key)
     if body.mistral_model is not None:
         ctx.set_mistral_model(body.mistral_model)
+    # MQTT settings — restart the client when any of them change.
+    mqtt_changed = False
+    if body.mqtt_enabled is not None:
+        ctx.set_mqtt_enabled(body.mqtt_enabled)
+        mqtt_changed = True
+    if body.mqtt_host is not None:
+        ctx.set_mqtt_host(body.mqtt_host)
+        mqtt_changed = True
+    if body.mqtt_port is not None:
+        ctx.set_mqtt_port(body.mqtt_port)
+        mqtt_changed = True
+    if body.mqtt_username is not None:
+        ctx.set_mqtt_username(body.mqtt_username)
+        mqtt_changed = True
+    if body.mqtt_password is not None:
+        ctx.set_mqtt_password(body.mqtt_password)
+        mqtt_changed = True
+    if body.mqtt_topic_prefix is not None:
+        ctx.set_mqtt_topic_prefix(body.mqtt_topic_prefix)
+        mqtt_changed = True
+    if body.mqtt_discovery_prefix is not None:
+        ctx.set_mqtt_discovery_prefix(body.mqtt_discovery_prefix)
+        mqtt_changed = True
+    if mqtt_changed:
+        await ctx.apply_mqtt_settings()
     return _build_settings_out(ctx)
 
 
@@ -341,6 +391,68 @@ async def test_ha(ctx: AppContext = Depends(get_context)):
             return HATestOut(ok=False, error=f"HTTP {resp.status_code}")
     except Exception as exc:
         return HATestOut(ok=False, error=str(exc))
+
+
+class MQTTTestOut(BaseModel):
+    ok: bool
+    connected: bool = False
+    error: Optional[str] = None
+
+
+@router.post("/test-mqtt", response_model=MQTTTestOut)
+async def test_mqtt(ctx: AppContext = Depends(get_context)):
+    """Open a short-lived MQTT connection to verify broker reachability.
+
+    Independent of the live client so the user can validate creds before
+    flipping the enable switch. Uses aiomqtt directly with a timeout.
+    """
+    host = ctx.get_mqtt_host()
+    if not host:
+        return MQTTTestOut(ok=False, error="no broker host configured")
+    try:
+        import aiomqtt
+    except ImportError:
+        return MQTTTestOut(ok=False, error="aiomqtt not installed")
+    try:
+        kwargs: dict = {
+            "hostname": host,
+            "port": ctx.get_mqtt_port(),
+            "keepalive": 10,
+        }
+        if ctx.get_mqtt_username():
+            kwargs["username"] = ctx.get_mqtt_username()
+        if ctx.get_mqtt_password():
+            kwargs["password"] = ctx.get_mqtt_password()
+
+        async def _probe() -> None:
+            async with aiomqtt.Client(**kwargs):
+                return
+
+        await asyncio.wait_for(_probe(), timeout=8.0)
+        return MQTTTestOut(ok=True, connected=ctx.mqtt.connected)
+    except asyncio.TimeoutError:
+        return MQTTTestOut(ok=False, error="connection timed out")
+    except Exception as exc:
+        return MQTTTestOut(ok=False, error=str(exc))
+
+
+class MQTTContextOut(BaseModel):
+    connected: bool
+    context: dict = Field(default_factory=dict)
+
+
+@router.get("/mqtt-context", response_model=MQTTContextOut)
+async def mqtt_context(ctx: AppContext = Depends(get_context)):
+    """Return the context Murdock has received from HA over MQTT.
+
+    Shows what HA has pushed onto the retained ``context/<room>/<key>``
+    topics (TV state, presence). Useful for verifying the context-push
+    automation works without digging through broker tooling.
+    """
+    return MQTTContextOut(
+        connected=ctx.mqtt.connected,
+        context=ctx.mqtt.context_snapshot(),
+    )
 
 
 # ----------------------------------------------------------------------

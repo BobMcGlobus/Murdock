@@ -16,6 +16,7 @@ from .db import get_setting, open_db, set_setting
 from .embeddings import CAMPPlusEmbedder
 from .emotion import EmotionClassifier
 from .ha_integration import HomeAssistantClient
+from .mqtt_integration import MQTTClient
 from .recognition_log import RecognitionLog
 from .speaker_store import SpeakerStore
 from .unknown_store import UnknownStore
@@ -52,6 +53,7 @@ class AppContext:
     speakers: SpeakerStore
     unknown: UnknownStore
     ha: HomeAssistantClient
+    mqtt: MQTTClient
     recognition: RecognitionLog
     emotion: Optional[EmotionClassifier] = None
     info_cache: "Optional[UpstreamInfoCache]" = None
@@ -354,6 +356,156 @@ class AppContext:
         )
 
     # ------------------------------------------------------------------
+    # MQTT integration (auto-discovery, no token required)
+    # ------------------------------------------------------------------
+
+    def get_mqtt_enabled(self) -> bool:
+        override = get_setting(self.db, "mqtt_enabled")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.mqtt_enabled
+
+    def set_mqtt_enabled(self, enabled: bool) -> None:
+        set_setting(self.db, "mqtt_enabled", "true" if enabled else "false")
+
+    def get_mqtt_host(self) -> str:
+        override = get_setting(self.db, "mqtt_host")
+        if override is not None:
+            return override
+        return self.settings.mqtt_host or ""
+
+    def set_mqtt_host(self, value: str) -> None:
+        set_setting(self.db, "mqtt_host", (value or "").strip())
+
+    def get_mqtt_port(self) -> int:
+        raw = get_setting(self.db, "mqtt_port")
+        if raw:
+            try:
+                return int(raw)
+            except ValueError:
+                pass
+        return self.settings.mqtt_port
+
+    def set_mqtt_port(self, value: int) -> None:
+        set_setting(self.db, "mqtt_port", str(max(1, min(65535, value))))
+
+    def get_mqtt_username(self) -> str:
+        override = get_setting(self.db, "mqtt_username")
+        if override is not None:
+            return override
+        return self.settings.mqtt_username or ""
+
+    def set_mqtt_username(self, value: str) -> None:
+        set_setting(self.db, "mqtt_username", (value or "").strip())
+
+    def get_mqtt_password(self) -> str:
+        override = get_setting(self.db, "mqtt_password")
+        if override is not None:
+            return override
+        return self.settings.mqtt_password or ""
+
+    def has_mqtt_password(self) -> bool:
+        return bool(self.get_mqtt_password())
+
+    def set_mqtt_password(self, value: str) -> None:
+        set_setting(self.db, "mqtt_password", value or "")
+
+    def get_mqtt_topic_prefix(self) -> str:
+        return get_setting(self.db, "mqtt_topic_prefix") or self.settings.mqtt_topic_prefix
+
+    def set_mqtt_topic_prefix(self, value: str) -> None:
+        set_setting(self.db, "mqtt_topic_prefix", (value or "murdock").strip())
+
+    def get_mqtt_discovery_prefix(self) -> str:
+        return get_setting(self.db, "mqtt_discovery_prefix") or self.settings.mqtt_discovery_prefix
+
+    def set_mqtt_discovery_prefix(self, value: str) -> None:
+        set_setting(self.db, "mqtt_discovery_prefix", (value or "homeassistant").strip())
+
+    async def apply_mqtt_settings(self) -> None:
+        """Reconfigure and (re)start the MQTT client with current settings."""
+        if self.get_mqtt_enabled():
+            await self.mqtt.reconfigure(
+                host=self.get_mqtt_host(),
+                port=self.get_mqtt_port(),
+                username=self.get_mqtt_username(),
+                password=self.get_mqtt_password(),
+                topic_prefix=self.get_mqtt_topic_prefix(),
+                discovery_prefix=self.get_mqtt_discovery_prefix(),
+            )
+        else:
+            await self.mqtt.stop()
+        _LOGGER.info(
+            "MQTT client reconfigured: host=%s enabled=%s connected=%s",
+            self.get_mqtt_host() or "(none)",
+            self.get_mqtt_enabled(),
+            self.mqtt.connected,
+        )
+
+    # ------------------------------------------------------------------
+    # Unified recognition output + context lookups (HA REST + MQTT)
+    # ------------------------------------------------------------------
+    #
+    # The handler talks to these instead of poking ha/mqtt directly, so
+    # the two transports can run side by side (or either alone). MQTT is
+    # the recommended path; the REST client stays as a legacy fallback
+    # for users who haven't set up a broker.
+
+    def publish_recognition(
+        self,
+        *,
+        speaker: str,
+        confidence: float,
+        satellite_id: Optional[str],
+        is_known: bool,
+        distance: Optional[float] = None,
+        threshold: Optional[float] = None,
+        nearest_speaker: Optional[str] = None,
+        role: Optional[str] = None,
+        emotion: Optional[str] = None,
+        emotion_confidence: Optional[float] = None,
+    ) -> None:
+        """Fire-and-forget a recognition result to every configured sink.
+
+        Pushes to MQTT (if connected) and HA REST (if configured). Both
+        are scheduled as background tasks so neither blocks the Wyoming
+        pipeline.
+        """
+        kwargs = dict(
+            speaker=speaker,
+            confidence=confidence,
+            satellite_id=satellite_id,
+            is_known=is_known,
+            distance=distance,
+            threshold=threshold,
+            nearest_speaker=nearest_speaker,
+            role=role,
+            emotion=emotion,
+            emotion_confidence=emotion_confidence,
+        )
+        if self.mqtt.connected:
+            self.mqtt.publish_async(self.mqtt.publish_recognition(**kwargs))
+        if self.ha.configured:
+            self.ha.publish_async(self.ha.push_recognition(**kwargs))
+
+    async def is_tv_playing(self, satellite_id: Optional[str] = None) -> bool:
+        """Return True if a TV is playing in the relevant room.
+
+        Resolution order:
+          1. MQTT context cache (HA pushes ``murdock/context/<room>/tv``)
+          2. HA REST poll on the configured media_player entity (legacy)
+
+        The satellite_id doubles as the room key for the per-room MQTT
+        topic — satellites are named after their room in practice.
+        """
+        if self.mqtt.connected:
+            mqtt_state = self.mqtt.is_tv_playing(room=satellite_id)
+            if mqtt_state is not None:
+                return mqtt_state
+        # Legacy fallback: poll HA REST if a token + entity are set.
+        return await self.ha.is_tv_playing()
+
+    # ------------------------------------------------------------------
     # STT backend selection (upstream Wyoming vs. Voxtral cloud)
     # ------------------------------------------------------------------
 
@@ -547,6 +699,20 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         emotion_entity=get_setting(db, "ha_emotion_entity") or None,
     )
 
+    # MQTT client: DB override first, env (addon-injected / compose) fallback.
+    _mqtt_host = get_setting(db, "mqtt_host")
+    _mqtt_user = get_setting(db, "mqtt_username")
+    _mqtt_pass = get_setting(db, "mqtt_password")
+    _mqtt_port = get_setting(db, "mqtt_port")
+    mqtt = MQTTClient(
+        host=_mqtt_host if _mqtt_host is not None else (settings.mqtt_host or ""),
+        port=int(_mqtt_port) if _mqtt_port else settings.mqtt_port,
+        username=_mqtt_user if _mqtt_user is not None else (settings.mqtt_username or ""),
+        password=_mqtt_pass if _mqtt_pass is not None else (settings.mqtt_password or ""),
+        topic_prefix=get_setting(db, "mqtt_topic_prefix") or settings.mqtt_topic_prefix,
+        discovery_prefix=get_setting(db, "mqtt_discovery_prefix") or settings.mqtt_discovery_prefix,
+    )
+
     _CONTEXT = AppContext(
         settings=settings,
         db=db,
@@ -555,6 +721,7 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         speakers=speakers,
         unknown=unknown,
         ha=ha,
+        mqtt=mqtt,
         recognition=recognition,
         emotion=emotion,
     )

@@ -27,6 +27,7 @@ MISTRAL_API_KEY="$(cfg mistral_api_key)"
 MISTRAL_MODEL="$(cfg mistral_model)"
 LOG_LEVEL="$(cfg log_level)"
 ADVERTISED="$(cfg advertised_languages)"
+MQTT_ENABLED="$(cfg mqtt_enabled)"
 
 # Validate: upstream mode needs a URI, voxtral mode needs an API key.
 if [ "${STT_BACKEND:-upstream}" = "upstream" ] && [ -z "$UPSTREAM_URI" ]; then
@@ -65,6 +66,31 @@ if [ -n "${SUPERVISOR_TOKEN:-}" ]; then
     export HA_URL="${HA_URL:-http://supervisor/core}"
     export HA_TOKEN="${HA_TOKEN:-${SUPERVISOR_TOKEN}}"
     log "HA API wired via supervisor token."
+fi
+
+# --- MQTT auto-wiring (services: mqtt:want) -------------------------------
+#
+# When a Mosquitto broker is installed, the Supervisor exposes its host,
+# port and credentials at /services/mqtt. We pull them with the injected
+# token so MQTT discovery works out of the box — the user never types a
+# broker address. If no broker is published the call 404s and we leave
+# MQTT untouched (the Web UI can still configure it manually).
+if [ "${MQTT_ENABLED:-true}" = "true" ] && [ -n "${SUPERVISOR_TOKEN:-}" ]; then
+    MQTT_JSON="$(curl -sf \
+        -H "Authorization: Bearer ${SUPERVISOR_TOKEN}" \
+        "http://supervisor/services/mqtt" 2>/dev/null || true)"
+    if [ -n "$MQTT_JSON" ] && [ "$(echo "$MQTT_JSON" | jq -r '.result // ""')" = "ok" ]; then
+        export MQTT_ENABLED="true"
+        export MQTT_HOST="$(echo "$MQTT_JSON" | jq -r '.data.host // ""')"
+        export MQTT_PORT="$(echo "$MQTT_JSON" | jq -r '.data.port // 1883')"
+        _mqtt_user="$(echo "$MQTT_JSON" | jq -r '.data.username // ""')"
+        _mqtt_pass="$(echo "$MQTT_JSON" | jq -r '.data.password // ""')"
+        [ -n "$_mqtt_user" ] && export MQTT_USERNAME="$_mqtt_user"
+        [ -n "$_mqtt_pass" ] && export MQTT_PASSWORD="$_mqtt_pass"
+        log "MQTT auto-wired from Mosquitto service: ${MQTT_HOST}:${MQTT_PORT}"
+    else
+        log "MQTT enabled but no broker service published — configure host in Web UI."
+    fi
 fi
 
 # Persistent storage: /data is mounted by the supervisor and survives

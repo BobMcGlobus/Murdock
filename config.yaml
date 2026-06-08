@@ -52,6 +52,13 @@ ports_description:
 # options so existing users aren't disrupted.
 homeassistant_api: true
 hassio_api: false
+# Auto-wire the Mosquitto broker. With "mqtt:want" the Supervisor injects
+# the broker host/port/credentials via the services API when a broker is
+# installed — Murdock then gets working HA MQTT discovery with zero config.
+# "want" (not "need") keeps the addon installable on systems without a
+# broker; MQTT simply stays disabled there.
+services:
+  - mqtt:want
 options:
   stt_backend: "upstream"
   upstream_uri: "tcp://core-whisper:10300"
@@ -59,6 +66,7 @@ options:
   mistral_model: "voxtral-mini-latest"
   log_level: "info"
   advertised_languages: "de,en"
+  mqtt_enabled: true
 schema:
   # STT backend: "upstream" proxies to a Wyoming STT container,
   # "voxtral" sends audio to the Mistral Cloud API (no local STT needed).
@@ -77,3 +85,8 @@ schema:
   # Override only if auto-detect from the upstream doesn't surface the
   # languages you actually use. Empty string disables the override.
   advertised_languages: str?
+  # Publish recognition results over MQTT with HA auto-discovery. When a
+  # Mosquitto broker is installed the connection is auto-configured via
+  # the mqtt service above — no host/credentials needed here. Broker
+  # host/credentials can still be overridden from the Web UI.
+  mqtt_enabled: bool?

@@ -71,11 +71,24 @@ cluster, and tag the sample later.
   metadata; import with merge or replace mode.
 - **DE / EN UI** — full translation for both locales.
 
+### Home Assistant integration
+- **MQTT auto-discovery (recommended)** — publishes recognition results
+  over MQTT; entities (`sensor.murdock_current_speaker`,
+  `binary_sensor.murdock_speaker_recognized`, confidence, distance,
+  nearest speaker, role, emotion, satellite) appear automatically. **No
+  token, no manual helpers.** In the add-on the broker is auto-wired from
+  the Mosquitto service — zero config.
+- **Context push (token-free)** — HA publishes TV state / presence onto
+  retained `murdock/context/<room>/<key>` topics; Murdock subscribes and
+  tightens its threshold while the TV is on. The data flow is inverted
+  vs. the old REST path, so Murdock never needs a long-lived token.
+- **REST + token (legacy)** — the original push-via-`input_text`/event
+  path is still available for users who can't run a broker.
+
 ### Deployment
 - **Home Assistant add-on** — one-click install from this repo as a
   custom repository; Web UI served through HA ingress (no port
-  forwarding needed); supervisor token auto-wired so the HA
-  integration works out of the box without a long-lived token.
+  forwarding needed); MQTT broker auto-wired from Mosquitto.
 - **docker-compose** — same image, standalone deployment.
 
 ## Quick start
@@ -105,23 +118,45 @@ docker compose up -d
 open http://localhost:8099
 ```
 
-Home Assistant URL, token and entities are configured **in the Web UI**
-(Settings → Home Assistant tab) — no `.env` file required.
+All integration settings (MQTT broker, HA connection, entities) are
+configured **in the Web UI** (Settings tab) — no `.env` file required.
 
 ### Home Assistant setup
 
 1. **Voice → Devices & Services**: Home Assistant should auto-discover
    Murdock as a Wyoming ASR provider at `tcp://<host>:10350`.
 2. **Assist Pipeline**: select `murdock-proxy` as the speech-to-text engine.
-3. **Web UI → Home Assistant tab**: enter your HA URL + long-lived
-   token (the add-on auto-wires this), and click **Copy HA template**
-   for a ready-made `configuration.yaml` snippet with all helper
-   entities.
+3. **Integration** — pick one:
+   - **MQTT (recommended)**: enable it in **Web UI → MQTT**. In the
+     add-on the broker is auto-wired from Mosquitto; standalone, enter
+     your broker host/credentials. Entities appear automatically under a
+     **Murdock** device — no helpers to create.
+   - **REST (legacy)**: **Web UI → Home Assistant** tab, enter HA URL +
+     long-lived token, then **Copy HA template** for a ready-made
+     `configuration.yaml` snippet with all helper entities.
 4. **Conversation agent**: add to `extra_system_prompt`:
 
    ```
-   The current speaker is: {{ states('input_text.current_speaker') }}
+   The current speaker is: {{ states('sensor.murdock_current_speaker') }}
    ```
+
+### MQTT topics
+
+| Topic | Direction | Payload |
+|---|---|---|
+| `homeassistant/<comp>/murdock/<id>/config` | Murdock → HA | discovery (retained) |
+| `murdock/status` | Murdock → HA | `online` / `offline` (LWT, retained) |
+| `murdock/sensor/<name>/state` | Murdock → HA | recognition state (retained) |
+| `murdock/binary_sensor/speaker_recognized/state` | Murdock → HA | `ON` / `OFF` |
+| `murdock/event/recognition` | Murdock → HA | full JSON event |
+| `murdock/context/<room>/tv` | HA → Murdock | `{"playing": true}` (retain!) |
+| `murdock/context/<room>/presence` | HA → Murdock | `{"present": true}` (retain!) |
+
+Context topics **must** be published with `retain: true` so Murdock pulls
+the last known state immediately on (re)connect instead of starting blind.
+The Web UI's **MQTT → Context push** section generates a ready-to-paste HA
+automation for the TV topic. `<room>` should match the satellite name
+Murdock sees; `global` is the fallback when no room-specific topic exists.
 
 ### Enrolling speakers
 
@@ -188,7 +223,8 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── unknown_cluster.py    # Greedy cosine clustering of unknowns
 │   │   ├── sample_quality.py     # Composite quality scoring
 │   │   ├── liveness.py           # Spectral liveness heuristic
-│   │   ├── ha_integration.py     # HA REST client
+│   │   ├── ha_integration.py     # HA REST client (legacy push path)
+│   │   ├── mqtt_integration.py   # MQTT discovery + context subscribe (recommended)
 │   │   ├── recognition_log.py    # Event log store
 │   │   ├── info_cache.py         # Wyoming Info cache + upstream describe
 │   │   └── context.py            # Shared app context
@@ -214,7 +250,7 @@ TV entity — live in the UI and survive restarts.
 - Platt-scaling confidence calibration
 - Adaptive thresholds per speaker (beyond per-satellite)
 - ML-trained liveness classifier (using gathered TV samples)
-- MQTT output as an alternative to HA REST
+- Multi-modal identity fusion (voice + phone presence + room + mmWave)
 
 ## License
 

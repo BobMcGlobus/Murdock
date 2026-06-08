@@ -390,19 +390,17 @@ class MurdockHandler(AsyncEventHandler):
                     "[%s] EARLY MATCH: %s (d=%.4f, early_th=%.3f)",
                     sid, result.matched_speaker, result.distance, early_threshold,
                 )
-                # Push all recognition data to HA immediately.
+                # Push all recognition data to HA + MQTT immediately.
                 spk = self.context.speakers.get_speaker(result.matched_speaker_id)
-                self.context.ha.publish_async(
-                    self.context.ha.push_recognition(
-                        speaker=result.matched_speaker,
-                        confidence=1.0 - result.distance,
-                        satellite_id=self._satellite_id,
-                        is_known=True,
-                        distance=result.distance,
-                        threshold=result.threshold,
-                        nearest_speaker=result.matched_speaker,
-                        role=spk.role if spk else None,
-                    )
+                self.context.publish_recognition(
+                    speaker=result.matched_speaker,
+                    confidence=1.0 - result.distance,
+                    satellite_id=self._satellite_id,
+                    is_known=True,
+                    distance=result.distance,
+                    threshold=result.threshold,
+                    nearest_speaker=result.matched_speaker,
+                    role=spk.role if spk else None,
                 )
             else:
                 _LOGGER.debug(
@@ -574,13 +572,11 @@ class MurdockHandler(AsyncEventHandler):
                         "[%s] TV/NOISE detected (liveness=%.3f < %.3f) — blocking",
                         sid, liveness.score, min_liveness,
                     )
-                    self.context.ha.publish_async(
-                        self.context.ha.push_recognition(
-                            speaker="tv-noise",
-                            confidence=0.0,
-                            satellite_id=self._satellite_id,
-                            is_known=False,
-                        )
+                    self.context.publish_recognition(
+                        speaker="tv-noise",
+                        confidence=0.0,
+                        satellite_id=self._satellite_id,
+                        is_known=False,
                     )
                     await self._block_response(
                         outcome=OUTCOME_BLOCKED_TV_NOISE,
@@ -648,7 +644,7 @@ class MurdockHandler(AsyncEventHandler):
         # Gate 3: full embedder + verify (runs in parallel with STT).
         threshold = self.context.get_verify_threshold(self._satellite_id)
         require_match = self.context.get_require_match()
-        if await self.context.ha.is_tv_playing():
+        if await self.context.is_tv_playing(self._satellite_id):
             threshold = max(0.0, threshold - settings.tv_threshold_boost)
             _LOGGER.debug("[%s] TV playing — tightened threshold to %.3f", sid, threshold)
 
@@ -704,19 +700,17 @@ class MurdockHandler(AsyncEventHandler):
             emotion, emotion_conf = await self._classify_emotion(
                 verify_audio, duration,
             )
-            self.context.ha.publish_async(
-                self.context.ha.push_recognition(
-                    speaker=result.matched_speaker,
-                    confidence=1.0 - result.distance,
-                    satellite_id=self._satellite_id,
-                    is_known=True,
-                    distance=result.distance,
-                    threshold=result.threshold,
-                    nearest_speaker=result.matched_speaker,
-                    role=spk.role if spk else None,
-                    emotion=emotion,
-                    emotion_confidence=emotion_conf,
-                )
+            self.context.publish_recognition(
+                speaker=result.matched_speaker,
+                confidence=1.0 - result.distance,
+                satellite_id=self._satellite_id,
+                is_known=True,
+                distance=result.distance,
+                threshold=result.threshold,
+                nearest_speaker=result.matched_speaker,
+                role=spk.role if spk else None,
+                emotion=emotion,
+                emotion_confidence=emotion_conf,
             )
             self._record_event(
                 outcome=OUTCOME_MATCH,
@@ -751,16 +745,14 @@ class MurdockHandler(AsyncEventHandler):
         if result.all_distances:
             best_speaker = next(iter(result.all_distances))
 
-        self.context.ha.publish_async(
-            self.context.ha.push_recognition(
-                speaker="unknown",
-                confidence=max(0.0, 1.0 - result.distance),
-                satellite_id=self._satellite_id,
-                is_known=False,
-                distance=result.distance,
-                threshold=result.threshold,
-                nearest_speaker=best_speaker,
-            )
+        self.context.publish_recognition(
+            speaker="unknown",
+            confidence=max(0.0, 1.0 - result.distance),
+            satellite_id=self._satellite_id,
+            is_known=False,
+            distance=result.distance,
+            threshold=result.threshold,
+            nearest_speaker=best_speaker,
         )
 
         if not require_match:

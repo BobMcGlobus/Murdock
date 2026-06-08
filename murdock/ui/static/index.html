@@ -291,11 +291,69 @@
             </div>
 
             <div class="card">
-                <h2 data-i18n="ha.title">Home Assistant</h2>
+                <h2 data-i18n="mqtt.title">MQTT (recommended)</h2>
+                <p class="meta" data-i18n="mqtt.description">
+                    Publish speaker-recognition results over MQTT. Entities
+                    appear automatically in Home Assistant via discovery — no
+                    token, no manual helpers. Home Assistant can also push
+                    context (TV state, presence) back to Murdock on retained
+                    context topics.
+                </p>
+                <form id="mqtt-settings-form">
+                    <label class="checkbox">
+                        <input type="checkbox" name="mqtt_enabled">
+                        <span data-i18n="mqtt.enabled">Enable MQTT integration</span>
+                    </label>
+                    <label>
+                        <span data-i18n="mqtt.host">Broker host</span>
+                        <input type="text" name="mqtt_host" data-i18n-ph="mqtt.ph_host" placeholder="192.168.1.100 or core-mosquitto">
+                    </label>
+                    <label>
+                        <span data-i18n="mqtt.port">Broker port</span>
+                        <input type="number" name="mqtt_port" min="1" max="65535" placeholder="1883">
+                    </label>
+                    <label>
+                        <span data-i18n="mqtt.username">Username (optional)</span>
+                        <input type="text" name="mqtt_username" autocomplete="off" placeholder="mqtt_user">
+                    </label>
+                    <label>
+                        <span data-i18n="mqtt.password">Password (optional)</span>
+                        <input type="password" name="mqtt_password" autocomplete="off" data-i18n-ph="mqtt.ph_password" placeholder="paste password here">
+                        <small id="mqtt-password-hint" class="meta"></small>
+                    </label>
+                    <h3 data-i18n="mqtt.advanced">Advanced</h3>
+                    <label>
+                        <span data-i18n="mqtt.topic_prefix">Topic prefix</span>
+                        <input type="text" name="mqtt_topic_prefix" placeholder="murdock">
+                    </label>
+                    <label>
+                        <span data-i18n="mqtt.discovery_prefix">Discovery prefix</span>
+                        <input type="text" name="mqtt_discovery_prefix" placeholder="homeassistant">
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="mqtt.save">Save</button>
+                        <button type="button" id="mqtt-test-btn" class="secondary" data-i18n="mqtt.test">Test connection</button>
+                    </div>
+                    <p class="meta" id="mqtt-status"></p>
+                </form>
+                <div id="mqtt-feedback" class="meta"></div>
+                <div id="mqtt-context-hint">
+                    <h3 data-i18n="mqtt.context_title">Context push (optional)</h3>
+                    <p class="meta" data-i18n="mqtt.context_hint">
+                        Add a Home Assistant automation that publishes TV state
+                        to a retained context topic so Murdock can tighten its
+                        threshold while the TV is on — no token required:
+                    </p>
+                    <pre><code id="mqtt-context-code"></code></pre>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="ha.title">Home Assistant (REST — legacy)</h2>
                 <p class="meta" data-i18n="ha.description">
-                    Connect Murdock to your Home Assistant instance to push
-                    speaker recognition results. Leave URL and token empty
-                    to disable the integration.
+                    Legacy push via the HA REST API with a long-lived token.
+                    Prefer MQTT above. Use this only if you can't run a broker.
+                    Leave URL and token empty to disable.
                 </p>
                 <form id="ha-settings-form">
                     <label>
