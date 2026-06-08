@@ -78,6 +78,21 @@ class Settings(BaseSettings):
     # stays strict so deleting all speakers doesn't silently open the gate.
     passthrough_when_no_speakers: bool = Field(default=False)
 
+    # Adaptive target-speaker extraction. When the utterance has multiple
+    # speech regions (target + TV / second person), embed each region,
+    # keep only the dominant enrolled speaker's regions, and verify the
+    # clean concatenation. Fast-path skips it entirely for single-region
+    # utterances, so the common case pays only one cheap VAD pass.
+    enable_extraction: bool = Field(default=True)
+    # Cosine-distance ceiling for claiming a region for a speaker. Should
+    # be stricter (smaller) than verify_threshold — we only keep regions
+    # we're confident about, then verify the concatenation at the normal
+    # threshold.
+    extraction_threshold: float = Field(default=0.25)
+    # Regions shorter than this (seconds) are not scored — they fall below
+    # the embedder's minimum frame count and score unreliably.
+    extraction_min_region_sec: float = Field(default=0.6)
+
     # VAD
     vad_min_speech_ratio: float = Field(default=0.6)
     vad_speech_threshold: float = Field(default=0.5)

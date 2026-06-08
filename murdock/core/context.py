@@ -150,6 +150,56 @@ class AppContext:
             "true" if enabled else "false",
         )
 
+    # ------------------------------------------------------------------
+    # Adaptive target-speaker extraction
+    # ------------------------------------------------------------------
+
+    def get_enable_extraction(self) -> bool:
+        override = get_setting(self.db, "enable_extraction")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_extraction
+
+    def set_enable_extraction(self, enabled: bool) -> None:
+        set_setting(self.db, "enable_extraction", "true" if enabled else "false")
+
+    def get_extraction_threshold(self, satellite_id: Optional[str] = None) -> float:
+        """Effective extraction distance ceiling.
+
+        Mirrors the verify-threshold fallback chain: per-satellite override
+        → global override → env/config default. A noisy room can therefore
+        run a more lenient extraction threshold than a quiet one.
+        """
+        if satellite_id:
+            sat = get_setting(self.db, f"extraction_threshold_sat_{satellite_id}")
+            if sat:
+                try:
+                    return float(sat)
+                except ValueError:
+                    pass
+        override = get_setting(self.db, "extraction_threshold")
+        if override is not None:
+            try:
+                return float(override)
+            except ValueError:
+                pass
+        return self.settings.extraction_threshold
+
+    def set_extraction_threshold(self, value: float) -> None:
+        set_setting(self.db, "extraction_threshold", f"{max(0.0, float(value)):.4f}")
+
+    def get_extraction_min_region_sec(self) -> float:
+        override = get_setting(self.db, "extraction_min_region_sec")
+        if override is not None:
+            try:
+                return max(0.0, float(override))
+            except ValueError:
+                pass
+        return max(0.0, float(self.settings.extraction_min_region_sec))
+
+    def set_extraction_min_region_sec(self, value: float) -> None:
+        set_setting(self.db, "extraction_min_region_sec", f"{max(0.0, float(value)):.3f}")
+
     def get_skip_leading_seconds(self) -> float:
         override = get_setting(self.db, "skip_leading_seconds")
         if override is not None:

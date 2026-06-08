@@ -47,6 +47,12 @@ cluster, and tag the sample later.
   CPU (no GPU needed).
 - **sqlite-vec** — single-file database with SIMD-accelerated KNN.
 - **Silero VAD** — rejects enrollment samples with too little speech.
+- **Adaptive speaker extraction** — when an utterance contains more than
+  one speech region (target + TV, or a second person), each region is
+  embedded and scored, and only the dominant enrolled speaker's regions
+  are kept before verification — so a background voice no longer drags
+  the embedding into "unknown". A fast-path skips single-region clips
+  entirely, so the common case adds only one cheap VAD pass.
 - **Liveness heuristic** — spectral rolloff / crest factor / HF ratio
   label samples as "likely live" or "likely TV".
 - **Auto-enroll with smart replacement** — high-confidence matches add
@@ -226,6 +232,7 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── unknown_cluster.py    # Greedy cosine clustering of unknowns
 │   │   ├── sample_quality.py     # Composite quality scoring
 │   │   ├── liveness.py           # Spectral liveness heuristic
+│   │   ├── extraction.py         # Adaptive target-speaker region extraction
 │   │   ├── ha_integration.py     # HA REST client (legacy push path)
 │   │   ├── mqtt_integration.py   # MQTT discovery + context subscribe (recommended)
 │   │   ├── recognition_log.py    # Event log store

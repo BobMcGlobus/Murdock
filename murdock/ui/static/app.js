@@ -936,6 +936,18 @@ async function loadSettings() {
         if (form.auto_enroll) {
             form.auto_enroll.checked = !!s.auto_enroll;
         }
+        // Speaker extraction (new fields — backwards-compatible)
+        if (form.enable_extraction) {
+            form.enable_extraction.checked = !!s.enable_extraction;
+        }
+        if (form.extraction_threshold) {
+            form.extraction_threshold.value =
+                (s.extraction_threshold ?? 0.25).toFixed(2);
+        }
+        if (form.extraction_min_region_sec) {
+            form.extraction_min_region_sec.value =
+                (s.extraction_min_region_sec ?? 0.6).toFixed(1);
+        }
         if (s.upstream_uri_source === "override") {
             form.upstream_uri.value = s.upstream_uri || "";
         } else {
@@ -1273,6 +1285,15 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.auto_enroll) {
         body.auto_enroll = form.auto_enroll.checked;
+    }
+    if (form.enable_extraction) {
+        body.enable_extraction = form.enable_extraction.checked;
+    }
+    if (form.extraction_threshold && form.extraction_threshold.value !== "") {
+        body.extraction_threshold = parseFloat(form.extraction_threshold.value);
+    }
+    if (form.extraction_min_region_sec && form.extraction_min_region_sec.value !== "") {
+        body.extraction_min_region_sec = parseFloat(form.extraction_min_region_sec.value);
     }
     try {
         const s = await api("/api/settings", {

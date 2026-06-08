@@ -207,6 +207,21 @@
                         <span data-i18n="settings.auto_enroll">Auto-enroll on match (aging/re-training)</span>
                         <small class="meta" data-i18n="settings.auto_enroll_hint">Automatically add fresh embeddings when a known speaker is recognized, so the model adapts over time.</small>
                     </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_extraction">
+                        <span data-i18n="settings.enable_extraction">Speaker extraction (isolate target from TV/second voice)</span>
+                        <small class="meta" data-i18n="settings.enable_extraction_hint">When an utterance has multiple speech regions, embed each and keep only the dominant enrolled speaker's. Single-region clips are skipped (no added latency).</small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.extraction_threshold">Extraction threshold (stricter than verify)</span>
+                        <input type="number" step="0.01" min="0" max="2" name="extraction_threshold">
+                        <small class="meta" data-i18n="settings.extraction_threshold_hint">Max cosine distance for a region to count as the target speaker. Keep below the verify threshold. Default: 0.25.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.extraction_min_region">Min region length (seconds)</span>
+                        <input type="number" step="0.1" min="0" max="5" name="extraction_min_region_sec">
+                        <small class="meta" data-i18n="settings.extraction_min_region_hint">Speech regions shorter than this aren't scored (too short to embed reliably). Default: 0.6 s.</small>
+                    </label>
                     <label>
                         <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
                         <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">

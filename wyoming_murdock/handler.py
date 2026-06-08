@@ -43,6 +43,7 @@ from wyoming.info import Describe
 from wyoming.server import AsyncEventHandler
 
 from murdock.core.context import AppContext
+from murdock.core.extraction import extract_target_speaker
 from murdock.core.info_cache import UpstreamInfoCache
 from murdock.core.liveness import analyze_pcm as analyze_liveness
 from murdock.core.recognition_log import (
@@ -412,6 +413,52 @@ class MurdockHandler(AsyncEventHandler):
         except Exception:
             _LOGGER.debug("[%s] Early probe failed", sid, exc_info=True)
 
+    async def _maybe_extract(self, verify_audio: bytes) -> bytes:
+        """Run adaptive speaker extraction, returning the audio to verify.
+
+        Returns ``verify_audio`` unchanged on the fast-path (single speech
+        region), when extraction is disabled, when no speakers are
+        enrolled, or when extraction can't confidently improve the clip.
+        Never raises — any failure falls back to the original audio.
+        """
+        sid = self._session_id
+        if not self.context.get_enable_extraction():
+            return verify_audio
+        if self.context.vad is None:
+            return verify_audio
+        if len(self.context.speakers.list_speakers()) == 0:
+            return verify_audio
+
+        ext_threshold = self.context.get_extraction_threshold(self._satellite_id)
+        min_region = self.context.get_extraction_min_region_sec()
+        try:
+            async with _MODEL_LOCK:
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: extract_target_speaker(
+                        verify_audio,
+                        vad=self.context.vad,
+                        embedder=self.context.embedder,
+                        speakers=self.context.speakers,
+                        extraction_threshold=ext_threshold,
+                        min_region_sec=min_region,
+                    ),
+                )
+        except Exception:
+            _LOGGER.debug("[%s] Extraction failed; using full audio", sid, exc_info=True)
+            return verify_audio
+
+        if result.applied:
+            _LOGGER.info(
+                "[%s] EXTRACTION: %d regions → kept %d for %s "
+                "(dropped %.2fs of interfering audio)",
+                sid, result.n_regions, result.n_kept,
+                result.target_speaker, result.dropped_seconds,
+            )
+            return result.audio
+        return verify_audio
+
     async def _wait_for_upstream_transcript(self, timeout: float = 15.0) -> str:
         """Block until the upstream reader resolves the transcript.
 
@@ -640,6 +687,12 @@ class MurdockHandler(AsyncEventHandler):
                 self._early_distance, verify_audio, duration,
             )
             return
+
+        # Adaptive extraction: if the clip has multiple speech regions
+        # (target + TV / second voice), isolate the dominant enrolled
+        # speaker's regions so the embedding below isn't a blend. No-op
+        # fast-path for single-region utterances.
+        verify_audio = await self._maybe_extract(verify_audio)
 
         # Gate 3: full embedder + verify (runs in parallel with STT).
         threshold = self.context.get_verify_threshold(self._satellite_id)

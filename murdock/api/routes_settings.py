@@ -29,6 +29,9 @@ class SettingsOut(BaseModel):
     skip_leading_seconds: float
     min_liveness_score: float
     auto_enroll: bool
+    enable_extraction: bool = True
+    extraction_threshold: float = 0.25
+    extraction_min_region_sec: float = 0.6
     upstream_uri: str
     upstream_uri_default: str
     upstream_uri_source: str  # "env" | "override"
@@ -76,6 +79,9 @@ class SettingsPatch(BaseModel):
     skip_leading_seconds: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     min_liveness_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     auto_enroll: Optional[bool] = None
+    enable_extraction: Optional[bool] = None
+    extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     # None → field not touched
     # ""   → clear override, fall back to env default
     # "…"  → set override (host:port accepted, tcp:// auto-prefixed)
@@ -139,6 +145,9 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         skip_leading_seconds=ctx.get_skip_leading_seconds(),
         min_liveness_score=ctx.get_min_liveness_score(),
         auto_enroll=ctx.get_auto_enroll(),
+        enable_extraction=ctx.get_enable_extraction(),
+        extraction_threshold=ctx.get_extraction_threshold(),
+        extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
         upstream_uri=ctx.get_upstream_uri(),
         upstream_uri_default=ctx.settings.upstream_uri,
         upstream_uri_source=ctx.get_upstream_uri_source(),
@@ -202,6 +211,12 @@ async def patch_settings(
         ctx.set_min_liveness_score(body.min_liveness_score)
     if body.auto_enroll is not None:
         ctx.set_auto_enroll(body.auto_enroll)
+    if body.enable_extraction is not None:
+        ctx.set_enable_extraction(body.enable_extraction)
+    if body.extraction_threshold is not None:
+        ctx.set_extraction_threshold(body.extraction_threshold)
+    if body.extraction_min_region_sec is not None:
+        ctx.set_extraction_min_region_sec(body.extraction_min_region_sec)
     if body.upstream_uri is not None:
         ctx.set_upstream_uri(body.upstream_uri)
     if body.advertised_languages is not None:
