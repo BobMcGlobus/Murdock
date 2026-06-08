@@ -7,7 +7,3 @@
 build_from:
   amd64: python:3.11-slim-bookworm
   aarch64: python:3.11-slim-bookworm
-# The addon Dockerfile COPYs from murdock/, wyoming_murdock/ and scripts/
-# which live at the repo root, not inside addons/murdock/. Tell the
-# builder to use the repo root as the Docker build context.
-build_context: ../..

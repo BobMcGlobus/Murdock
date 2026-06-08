@@ -1,6 +1,8 @@
 services:
   murdock:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.standalone
     container_name: murdock
     ports:
       - "10350:10350"   # Wyoming proxy

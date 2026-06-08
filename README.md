@@ -90,7 +90,7 @@ cluster, and tag the sample later.
    the same HA host).
 4. Start the addon, click **Open Web UI**.
 
-See [`addons/murdock/DOCS.md`](addons/murdock/DOCS.md) for details.
+See [`DOCS.md`](DOCS.md) for details.
 
 ### Option B — docker-compose
 
@@ -163,18 +163,17 @@ TV entity — live in the UI and survive restarts.
 
 ```
 .
-├── Dockerfile                    # docker-compose image
+├── Dockerfile                    # HA addon image (also used by HA builder)
+├── Dockerfile.standalone         # docker-compose image
+├── config.yaml                   # HA addon options, ports, ingress
+├── build.yaml                    # HA addon build config
+├── run.sh                        # HA addon entrypoint (options.json → env)
+├── repository.yaml               # HA "Add repository" metadata
 ├── docker-compose.yml
+├── docker-compose.prod.yml       # Production (Unraid, NAS)
 ├── requirements.txt
-├── addons/                       # Home Assistant add-on
-│   ├── repository.yaml           # HA "Add repository" metadata
-│   └── murdock/
-│       ├── config.yaml           # Addon options, ports, ingress
-│       ├── Dockerfile            # addon image (python:3.11-slim)
-│       ├── run.sh                # /data/options.json → env bootstrap
-│       ├── build.yaml
-│       ├── DOCS.md               # shown in HA on the Documentation tab
-│       └── README.md
+├── DOCS.md                       # HA addon documentation tab
+├── CHANGELOG.md
 ├── wyoming_murdock/              # Wyoming proxy handler + entry point
 ├── murdock/                      # Core Python package
 │   ├── config.py                 # Env-based settings
