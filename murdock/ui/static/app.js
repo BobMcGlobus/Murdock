@@ -1069,8 +1069,9 @@ async function loadSettings() {
             updateMqttContextSnippet(s);
             updateMqttSatelliteSnippet(s);
         }
-        // Per-satellite thresholds
+        // Per-satellite thresholds + media restriction matrix
         loadSatelliteThresholds();
+        loadMediaRestrictions();
         // STT backend
         const sttForm = $("#stt-form");
         if (sttForm) {
@@ -1233,6 +1234,138 @@ function setSatFeedback(msg, cls) {
 const satRefreshBtn = $("#sat-threshold-refresh");
 if (satRefreshBtn) {
     satRefreshBtn.addEventListener("click", loadSatelliteThresholds);
+}
+
+// --- Media restriction matrix --------------------------------------------
+
+function setMediaRestrictFeedback(msg, cls) {
+    const el = $("#media-restrict-feedback");
+    if (!el) return;
+    el.className = "feedback " + (cls || "");
+    el.textContent = msg;
+    setTimeout(() => {
+        if (el.textContent === msg) {
+            el.textContent = "";
+            el.className = "feedback";
+        }
+    }, 4000);
+}
+
+function fillSelect(sel, values, placeholder) {
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = placeholder;
+    sel.appendChild(ph);
+    for (const v of values) {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v;
+        sel.appendChild(o);
+    }
+    if (values.includes(prev)) sel.value = prev;
+}
+
+async function loadMediaRestrictions() {
+    const list = $("#media-restrict-list");
+    if (!list) return;
+    list.innerHTML = t("generic.loading");
+    try {
+        const data = await api("/api/settings/media-restrictions");
+        const boost = (data.default_boost ?? 0.05).toFixed(3);
+        // Populate the add-row selects.
+        fillSelect($("#media-restrict-sat"), data.satellites || [], t("media_restrict.pick_sat"));
+        fillSelect(
+            $("#media-restrict-source"),
+            (data.media || []).map((m) => m.entity_id),
+            t("media_restrict.pick_source"),
+        );
+        // Currently-playing badge map.
+        const playing = {};
+        for (const m of data.media || []) playing[m.entity_id] = m.playing;
+
+        if (!data.restrictions || data.restrictions.length === 0) {
+            list.innerHTML =
+                `<p class="meta">${escapeHtml(t("media_restrict.none", { boost }))}</p>`;
+            return;
+        }
+        list.innerHTML = "";
+        for (const r of data.restrictions) {
+            const row = document.createElement("div");
+            row.className = "list-item";
+            const playBadge = playing[r.media_entity]
+                ? `<span class="badge">${escapeHtml(t("media_restrict.playing"))}</span>`
+                : "";
+            row.innerHTML = `
+                <div class="row">
+                    <span class="badge satellite">${escapeHtml(r.satellite_id)}</span>
+                    <span class="meta">←</span>
+                    <code>${escapeHtml(r.media_entity)}</code>
+                    ${playBadge}
+                </div>
+                <div class="row">
+                    <label style="flex-direction:row; align-items:center; gap:0.4rem">
+                        <span>${escapeHtml(t("media_restrict.delta"))}</span>
+                        <input type="number" step="0.01" min="0" max="2"
+                               data-mr-sat="${escapeHtml(r.satellite_id)}"
+                               data-mr-src="${escapeHtml(r.media_entity)}"
+                               value="${r.delta.toFixed(3)}">
+                    </label>
+                    <button class="secondary" data-mr-save>${escapeHtml(t("generic.save"))}</button>
+                    <button class="danger" data-mr-clear>${escapeHtml(t("sat_threshold.clear"))}</button>
+                </div>
+            `;
+            const save = row.querySelector("[data-mr-save]");
+            const clear = row.querySelector("[data-mr-clear]");
+            const input = row.querySelector("input");
+            save.addEventListener("click", () =>
+                patchMediaRestriction(r.satellite_id, r.media_entity, parseFloat(input.value)));
+            clear.addEventListener("click", () =>
+                patchMediaRestriction(r.satellite_id, r.media_entity, null));
+            list.appendChild(row);
+        }
+    } catch (err) {
+        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function patchMediaRestriction(sat, src, delta) {
+    if (delta !== null && Number.isNaN(delta)) {
+        setMediaRestrictFeedback(t("media_restrict.invalid"), "err");
+        return;
+    }
+    try {
+        await api("/api/settings/media-restrictions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ satellite_id: sat, media_entity: src, delta }),
+        });
+        setMediaRestrictFeedback(t("media_restrict.saved"), "ok");
+        loadMediaRestrictions();
+    } catch (err) {
+        setMediaRestrictFeedback(err.message, "err");
+    }
+}
+
+const mediaRestrictForm = $("#media-restrict-form");
+if (mediaRestrictForm) {
+    mediaRestrictForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const sat = $("#media-restrict-sat").value;
+        const src = $("#media-restrict-source").value;
+        const raw = $("#media-restrict-delta").value.trim();
+        if (!sat || !src) {
+            setMediaRestrictFeedback(t("media_restrict.pick_both"), "err");
+            return;
+        }
+        patchMediaRestriction(sat, src, raw === "" ? 0 : parseFloat(raw));
+    });
+}
+const mediaRestrictRefresh = $("#media-restrict-refresh");
+if (mediaRestrictRefresh) {
+    mediaRestrictRefresh.addEventListener("click", loadMediaRestrictions);
 }
 
 // --- STT backend toggle ---------------------------------------------------

@@ -390,60 +390,50 @@ class MQTTClient:
                     return bool(v)
         return None
 
-    def _media_playing_in_area(self, area: Optional[str]) -> Optional[bool]:
-        """Aggregate per-media-player state for an area.
+    def known_media(self) -> list[dict]:
+        """Return every media player Murdock has heard about (fresh only).
 
-        Media players publish to ``context/media/<entity_id>`` with a
-        payload like ``{"playing": true, "area": "Wohnzimmer"}`` (one
-        automation covers every TV/radio at once). Returns True if any
-        such player in ``area`` is playing, False if media context exists
-        for the area but nothing is playing, None if there's no media
-        context to judge by. ``area=None`` considers every media player.
+        Each entry: ``{"entity_id", "area", "playing"}``. Sourced from the
+        ``context/media/<entity_id>`` topics one HA automation publishes
+        for all TVs/radios/speakers.
         """
         now = time.monotonic()
-        found = False
-        for (room, _key), (value, arrived) in self._context.items():
+        out: list[dict] = []
+        for (room, key), (value, arrived) in self._context.items():
             if room != "media":
                 continue
             if now - arrived > _CONTEXT_TTL_SECONDS:
                 continue
-            if area is not None and value.get("area") != area:
-                continue
-            found = True
-            if self._coerce_bool(value, "playing"):
-                return True
-        return False if found else None
+            out.append({
+                "entity_id": key,
+                "area": value.get("area"),
+                "playing": bool(self._coerce_bool(value, "playing")),
+            })
+        return out
+
+    def playing_media(self) -> list[dict]:
+        """Subset of :meth:`known_media` that is currently playing."""
+        return [m for m in self.known_media() if m["playing"]]
 
     def is_tv_playing(self, room: Optional[str] = None) -> Optional[bool]:
-        """Return whether restricting audio is playing in ``room``.
+        """Return the legacy single-TV signal from the context cache.
 
-        Considers, in this order of signal (any "playing" wins):
-          * ``context/<room>/tv`` — the legacy single-TV topic
-          * any ``context/media/<entity>`` player whose area is ``room``
-          * ``context/global/tv`` — a global fallback
-
-        Returns True if anything relevant is playing, False if context
-        exists but nothing is playing, None when there's no context at all
-        (so callers can fall back to the legacy REST poll).
+        Checks ``context/<room>/tv`` first, then ``context/global/tv``.
+        Per-media-player state is handled separately (``known_media`` /
+        ``playing_media`` and the restriction matrix in the context
+        layer). Returns None when there's no TV context at all, so callers
+        can fall back to the legacy REST poll.
         """
-        signals: list[bool] = []
         if room:
             value = self._context_get(room, "tv")
             if value is not None:
-                b = self._coerce_bool(value, "playing")
-                if b is not None:
-                    signals.append(b)
-            media = self._media_playing_in_area(room)
-            if media is not None:
-                signals.append(media)
+                result = self._coerce_bool(value, "playing")
+                if result is not None:
+                    return result
         value = self._context_get("global", "tv")
         if value is not None:
-            b = self._coerce_bool(value, "playing")
-            if b is not None:
-                signals.append(b)
-        if not signals:
-            return None
-        return any(signals)
+            return self._coerce_bool(value, "playing")
+        return None
 
     def is_present(self, room: Optional[str] = None) -> Optional[bool]:
         """Return room/global presence from the context cache, or None."""

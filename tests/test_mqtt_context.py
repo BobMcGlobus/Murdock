@@ -172,37 +172,34 @@ def test_active_satellite_bare_string_no_area():
     assert c.get_active_satellite_area() is None
 
 
-def test_media_in_area_tightens_is_tv_playing():
+def test_known_and_playing_media():
     c = _client()
-    # A media player in Wohnzimmer is playing.
     c._handle_context_message(_msg(
         "murdock/context/media/media_player.wohnzimmer_tv",
         '{"playing": true, "area": "Wohnzimmer"}',
     ))
-    assert c.is_tv_playing(room="Wohnzimmer") is True
-    # A different room sees no media context → None (no signal).
-    assert c.is_tv_playing(room="Arbeitszimmer") is None
-
-
-def test_media_in_area_not_playing_is_false():
-    c = _client()
     c._handle_context_message(_msg(
-        "murdock/context/media/media_player.radio",
+        "murdock/context/media/media_player.kueche_radio",
         '{"playing": false, "area": "Kueche"}',
     ))
-    assert c.is_tv_playing(room="Kueche") is False
+    known = {m["entity_id"]: m for m in c.known_media()}
+    assert known["media_player.wohnzimmer_tv"]["area"] == "Wohnzimmer"
+    assert known["media_player.wohnzimmer_tv"]["playing"] is True
+    assert known["media_player.kueche_radio"]["playing"] is False
+    playing = c.playing_media()
+    assert [m["entity_id"] for m in playing] == ["media_player.wohnzimmer_tv"]
 
 
-def test_media_and_legacy_tv_combine():
+def test_legacy_tv_still_boolean():
     c = _client()
-    # Legacy single-TV topic says not playing…
-    c._handle_context_message(_msg("murdock/context/Wohnzimmer/tv", '{"playing": false}'))
-    # …but a media player in the room is playing → overall True.
+    c._handle_context_message(_msg("murdock/context/Wohnzimmer/tv", '{"playing": true}'))
+    assert c.is_tv_playing(room="Wohnzimmer") is True
+    # Media is NOT folded into is_tv_playing anymore.
     c._handle_context_message(_msg(
         "murdock/context/media/media_player.soundbar",
-        '{"playing": true, "area": "Wohnzimmer"}',
+        '{"playing": true, "area": "Arbeitszimmer"}',
     ))
-    assert c.is_tv_playing(room="Wohnzimmer") is True
+    assert c.is_tv_playing(room="Arbeitszimmer") is None
 
 
 def test_discovery_config_count_and_topics():

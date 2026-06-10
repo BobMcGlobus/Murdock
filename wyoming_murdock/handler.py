@@ -738,9 +738,15 @@ class MurdockHandler(AsyncEventHandler):
         # Gate 3: full embedder + verify (runs in parallel with STT).
         threshold = self.context.get_verify_threshold(self._satellite_id)
         require_match = self.context.get_require_match()
-        if await self.context.is_tv_playing(self._satellite_area or self._satellite_id):
-            threshold = max(0.0, threshold - settings.tv_threshold_boost)
-            _LOGGER.debug("[%s] TV playing — tightened threshold to %.3f", sid, threshold)
+        tighten = await self.context.compute_media_tightening(
+            self._satellite_id, self._satellite_area
+        )
+        if tighten > 0:
+            threshold = max(0.0, threshold - tighten)
+            _LOGGER.debug(
+                "[%s] Media playing — tightened threshold by %.3f to %.3f",
+                sid, tighten, threshold,
+            )
 
         verify_start = time.monotonic()
         embedding: Optional[np.ndarray] = None

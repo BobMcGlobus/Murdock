@@ -601,6 +601,88 @@ async def patch_satellite_threshold(
     return await list_satellite_thresholds(ctx)
 
 
+# ----------------------------------------------------------------------
+# Media-restriction matrix (per-satellite × per-source threshold deltas)
+# ----------------------------------------------------------------------
+
+
+class MediaSourceEntry(BaseModel):
+    entity_id: str
+    area: Optional[str] = None
+    playing: bool = False
+
+
+class MediaRestrictionEntry(BaseModel):
+    satellite_id: str
+    media_entity: str
+    delta: float
+
+
+class MediaRestrictionsOut(BaseModel):
+    default_boost: float
+    satellites: List[str]
+    media: List[MediaSourceEntry]
+    restrictions: List[MediaRestrictionEntry]
+
+
+class MediaRestrictionPatch(BaseModel):
+    satellite_id: str
+    media_entity: str
+    # null clears the cell; a value tightens by that much while playing
+    delta: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+
+
+def _build_media_restrictions(ctx: AppContext) -> MediaRestrictionsOut:
+    matrix = ctx.get_media_restrictions()
+    entries = [
+        MediaRestrictionEntry(satellite_id=sat, media_entity=ent, delta=float(d))
+        for sat, cell in matrix.items()
+        for ent, d in cell.items()
+    ]
+    # Satellites: those seen in recognition events plus any in the matrix.
+    sats = [sid for sid, _n, _last in _list_known_satellites(ctx)]
+    for sat in matrix:
+        if sat not in sats:
+            sats.append(sat)
+    # Media sources: currently-known players plus any referenced in the
+    # matrix that aren't currently publishing.
+    media = [MediaSourceEntry(**m) for m in ctx.mqtt.known_media()]
+    known_ids = {m.entity_id for m in media}
+    for cell in matrix.values():
+        for ent in cell:
+            if ent not in known_ids:
+                media.append(MediaSourceEntry(entity_id=ent))
+                known_ids.add(ent)
+    return MediaRestrictionsOut(
+        default_boost=float(ctx.settings.tv_threshold_boost),
+        satellites=sats,
+        media=media,
+        restrictions=entries,
+    )
+
+
+@router.get("/media-restrictions", response_model=MediaRestrictionsOut)
+async def list_media_restrictions(ctx: AppContext = Depends(get_context)):
+    """Return the per-satellite × per-source restriction matrix.
+
+    Plus the satellites Murdock has seen and the media players currently
+    announced over MQTT, so the UI can offer them as rows/columns.
+    """
+    return _build_media_restrictions(ctx)
+
+
+@router.patch("/media-restrictions", response_model=MediaRestrictionsOut)
+async def patch_media_restriction(
+    body: MediaRestrictionPatch, ctx: AppContext = Depends(get_context)
+):
+    """Set or clear one matrix cell (``delta = null`` clears it)."""
+    try:
+        ctx.set_media_restriction(body.satellite_id, body.media_entity, body.delta)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _build_media_restrictions(ctx)
+
+
 @router.post("/restart", response_model=RestartResponse)
 async def restart_service(ctx: AppContext = Depends(get_context)):
     """Hard-restart the Murdock process so container supervisors (Docker,

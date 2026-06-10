@@ -646,6 +646,85 @@ class AppContext:
         return await self.ha.is_tv_playing()
 
     # ------------------------------------------------------------------
+    # Media-aware gating: per-satellite × per-source restriction matrix
+    # ------------------------------------------------------------------
+    #
+    # Stored as JSON in the settings table:
+    #   {"<satellite_id>": {"<media_entity_id>": <threshold_delta>}}
+    # A delta is how much that source tightens (lowers) the verify
+    # threshold for that satellite while it's playing. An explicit 0
+    # means "this source does not restrict this satellite" (e.g. a radio
+    # in another room). Sources with no explicit entry fall back to the
+    # global tv_threshold_boost when they play in the satellite's room.
+
+    def get_media_restrictions(self) -> dict:
+        raw = get_setting(self.db, "media_restrictions")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def set_media_restriction(
+        self,
+        satellite_id: str,
+        media_entity: str,
+        delta: Optional[float],
+    ) -> None:
+        """Set (or clear, when delta is None) one matrix cell."""
+        sat = (satellite_id or "").strip()
+        ent = (media_entity or "").strip()
+        if not sat or not ent:
+            raise ValueError("satellite_id and media_entity are required")
+        matrix = self.get_media_restrictions()
+        cell = matrix.setdefault(sat, {})
+        if delta is None:
+            cell.pop(ent, None)
+            if not cell:
+                matrix.pop(sat, None)
+        else:
+            cell[ent] = round(max(0.0, float(delta)), 4)
+        set_setting(self.db, "media_restrictions", json.dumps(matrix))
+
+    async def compute_media_tightening(
+        self,
+        satellite_id: Optional[str],
+        satellite_area: Optional[str],
+    ) -> float:
+        """How much to tighten (lower) the verify threshold right now.
+
+        Looks at every currently-playing media player and applies, per
+        source: the explicit matrix delta for this satellite if set, else
+        the global boost when the source shares the satellite's room, else
+        nothing. The strongest single source wins (max, not sum, so two
+        playing devices don't over-restrict). Falls back to the legacy
+        room-TV / REST signal when no per-source media context exists.
+        """
+        default_boost = float(self.settings.tv_threshold_boost)
+        matrix = self.get_media_restrictions()
+        sat_rules = matrix.get(satellite_id or "", {}) if satellite_id else {}
+        deltas: List[float] = [0.0]
+
+        if self.mqtt.connected:
+            for media in self.mqtt.playing_media():
+                ent = media.get("entity_id") or ""
+                if ent in sat_rules:
+                    deltas.append(max(0.0, float(sat_rules[ent])))
+                elif satellite_area and media.get("area") == satellite_area:
+                    deltas.append(default_boost)
+                # else: different room, no explicit rule → no effect
+
+        # Legacy fallback only when per-source media contributed nothing,
+        # so the two paths never double-count.
+        if max(deltas) <= 0.0:
+            if await self.is_tv_playing(satellite_area or satellite_id):
+                deltas.append(default_boost)
+
+        return max(deltas)
+
+    # ------------------------------------------------------------------
     # STT backend selection (upstream Wyoming vs. Voxtral cloud)
     # ------------------------------------------------------------------
 

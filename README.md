@@ -77,6 +77,13 @@ cluster, and tag the sample later.
 - **Per-satellite thresholds** — override the verify threshold per
   satellite ID (e.g. a noisy kitchen vs. a quiet study) without
   touching the global default.
+- **Media-restriction matrix** — per (satellite × media source), set how
+  much that source tightens the threshold while it's playing: the
+  living-room TV restricts the living-room satellite strongly, a bedroom
+  radio not at all. Fed by one HA automation that publishes every
+  TV/radio/speaker's state; the strongest playing source wins. Sources
+  with no explicit rule fall back to a default boost when they play in
+  the satellite's room.
 - **Voice-sample clustering** — greedy cosine clustering of untagged
   unknown samples, with bulk-assign so labelling the same voice five
   times is one click instead of five.
@@ -327,8 +334,6 @@ TV entity — live in the UI and survive restarts.
 
 - Fold trustworthy recognition events into the calibration fit (not just
   enrollment-derived pairs)
-- Per-satellite × per-source restriction weights (how much TV X vs.
-  radio Y tightens each satellite) — builds on the media context above
 - Presence prior — push likely person presence/absence over MQTT and
   fold it into the match probability as a soft, bounded Bayesian prior
   (nudge, never override a strong voice match)

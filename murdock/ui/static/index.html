@@ -338,6 +338,29 @@
             </div>
 
             <div class="card">
+                <h2 data-i18n="media_restrict.title">Media restrictions (per satellite × source)</h2>
+                <p class="meta" data-i18n="media_restrict.description">
+                    Set how much each media source tightens the verify
+                    threshold for each satellite while it's playing — e.g. the
+                    living-room TV restricts the living-room satellite strongly,
+                    but a bedroom radio not at all. Needs the media + satellite
+                    MQTT automations (see the MQTT card). Sources with no rule
+                    fall back to the default boost when they play in the
+                    satellite's room.
+                </p>
+                <div id="media-restrict-list" class="list"></div>
+                <form id="media-restrict-form" class="row" style="margin-top:0.5rem; flex-wrap:wrap; gap:0.5rem">
+                    <select id="media-restrict-sat"></select>
+                    <select id="media-restrict-source"></select>
+                    <input type="number" id="media-restrict-delta" step="0.01" min="0" max="2"
+                           data-i18n-ph="media_restrict.ph_delta" placeholder="0.10" style="width:6rem">
+                    <button type="submit" data-i18n="media_restrict.add">Add / update</button>
+                    <button type="button" id="media-restrict-refresh" class="secondary" data-i18n="media_restrict.refresh">Refresh</button>
+                </form>
+                <div id="media-restrict-feedback" class="feedback"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="calibration.title">Confidence calibration</h2>
                 <p class="meta" data-i18n="calibration.description">
                     Maps the raw cosine distance to a calibrated probability
