@@ -149,6 +149,45 @@ class SpeakerStore:
             updated_at=row["updated_at"],
         )
 
+    def create_speaker(
+        self,
+        name: str,
+        role: Optional[str] = None,
+        ha_user_id: Optional[str] = None,
+    ) -> Speaker:
+        """Create a speaker with no samples yet.
+
+        Lets the user set up a speaker first and then add training audio
+        later — e.g. by assigning utterances captured over the voice
+        satellite. Raises ValueError on a blank or duplicate name.
+        """
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Speaker name cannot be empty")
+        if role is not None and role not in VALID_ROLES:
+            raise ValueError(
+                f"Invalid role '{role}'. Allowed: {', '.join(VALID_ROLES)}"
+            )
+        now = time.time()
+        with self._lock:
+            clash = self.conn.execute(
+                "SELECT id FROM speakers WHERE name = ?", (name,)
+            ).fetchone()
+            if clash is not None:
+                raise ValueError(f"Speaker name '{name}' already exists")
+            cur = self.conn.execute(
+                "INSERT INTO speakers(name, ha_user_id, role, "
+                "enrollment_count, created_at, updated_at) "
+                "VALUES(?, ?, ?, 0, ?, ?)",
+                (name, ha_user_id, role, now, now),
+            )
+            self.conn.commit()
+            speaker_id = int(cur.lastrowid)
+        created = self.get_speaker(speaker_id)
+        assert created is not None
+        _LOGGER.info("Created empty speaker '%s' (id=%d)", name, speaker_id)
+        return created
+
     def get_speaker_by_name(self, name: str) -> Optional[Speaker]:
         with self._lock:
             row = self.conn.execute(

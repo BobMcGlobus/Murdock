@@ -28,6 +28,9 @@ class RecognitionEventOut(BaseModel):
     transcript: Optional[str]
     emotion: Optional[str] = None
     emotion_confidence: Optional[float] = None
+    # Set when a captured (untagged) unknown sample exists for this
+    # session, so the UI can offer "assign to speaker" on blocked entries.
+    unknown_sample_id: Optional[int] = None
 
 
 class RecognitionListOut(BaseModel):
@@ -54,6 +57,11 @@ async def list_events(
     events = ctx.recognition.list_events(
         limit=limit, outcome=outcome, speaker=speaker
     )
+    # Link each event to its captured audio (if any) so the UI can offer
+    # "assign to speaker" directly on blocked/unknown entries.
+    session_map = ctx.unknown.map_sessions_to_samples(
+        [e.session_id for e in events]
+    )
     return RecognitionListOut(
         events=[
             RecognitionEventOut(
@@ -70,6 +78,7 @@ async def list_events(
                 transcript=e.transcript,
                 emotion=e.emotion,
                 emotion_confidence=e.emotion_confidence,
+                unknown_sample_id=session_map.get(e.session_id),
             )
             for e in events
         ]

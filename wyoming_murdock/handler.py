@@ -588,6 +588,11 @@ class MurdockHandler(AsyncEventHandler):
 
         # Gate 2: no speakers enrolled.
         if speaker_count == 0:
+            # Bootstrap path: with nothing enrolled there's nobody to match
+            # against, but we still capture the utterance to the unknown
+            # postbox so the user can assign it to a (new) speaker from the
+            # UI and train entirely over the voice satellite.
+            await self._capture_for_training(audio_16k, duration)
             if self.context.get_passthrough_when_empty():
                 _LOGGER.info("[%s] NO SPEAKERS — passthrough (opt-in)", sid)
                 await self._passthrough_response(
@@ -1038,6 +1043,46 @@ class MurdockHandler(AsyncEventHandler):
                 "[%s] Failed to record audit row", self._session_id,
                 exc_info=True,
             )
+
+    async def _capture_for_training(self, audio_16k: bytes, duration: float) -> None:
+        """Log an utterance to the unknown postbox so it can be assigned to
+        a speaker from the UI.
+
+        Used to bootstrap training over the voice satellite when no speakers
+        are enrolled yet: every spoken utterance becomes assignable material,
+        so the user can build a profile without the browser microphone or a
+        file upload. Gated on the unknown-logging setting; never raises.
+        """
+        if not self.context.get_unknown_logging():
+            return
+        sid = self._session_id
+        try:
+            async with _MODEL_LOCK:
+                loop = asyncio.get_running_loop()
+                embedding = await loop.run_in_executor(
+                    None, self.context.embedder.embed_pcm, audio_16k
+                )
+            try:
+                liveness = await asyncio.to_thread(analyze_liveness, audio_16k)
+                liveness_score = float(liveness.score)
+            except Exception:
+                liveness_score = None
+            await asyncio.to_thread(
+                self.context.unknown.record,
+                self._session_id,
+                audio_16k,
+                embedding,
+                duration,
+                2.0,    # best_distance — nothing enrolled to compare against
+                None,   # best_speaker
+                self._satellite_id,
+                liveness_score,
+            )
+            _LOGGER.info(
+                "[%s] Captured utterance for training (no enrolled speakers)", sid
+            )
+        except Exception:
+            _LOGGER.debug("[%s] Training capture failed", sid, exc_info=True)
 
     async def _log_unknown(
         self,

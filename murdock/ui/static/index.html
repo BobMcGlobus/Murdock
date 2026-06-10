@@ -65,6 +65,35 @@
                     <button type="submit" data-i18n="speakers.enroll_btn">Enroll</button>
                 </form>
                 <div id="enroll-feedback"></div>
+                <p class="meta" id="mic-hint" data-i18n="speakers.train_hint">
+                    No microphone in the Home Assistant add-on? Browser
+                    recording needs HTTPS. Upload a file here, or just talk to
+                    your voice satellite — every utterance is captured under
+                    “Unknown voices”, where you can assign it to a speaker.
+                </p>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="speakers.create_empty_title">Create speaker (no samples)</h2>
+                <p class="meta" data-i18n="speakers.create_empty_hint">
+                    Set up a speaker now and add training audio later — e.g. by
+                    assigning utterances captured from your voice satellite in
+                    the “Unknown voices” tab.
+                </p>
+                <form id="create-speaker-form">
+                    <label>
+                        <span data-i18n="speakers.name">Name</span>
+                        <input type="text" name="name" required data-i18n-ph="speakers.ph_name" placeholder="e.g. jonas">
+                    </label>
+                    <label>
+                        <span data-i18n="speakers.role">Role (optional)</span>
+                        <select name="role" id="create-speaker-role">
+                            <option value="" data-i18n="speakers.none">— none —</option>
+                        </select>
+                    </label>
+                    <button type="submit" data-i18n="speakers.create_empty_btn">Create speaker</button>
+                </form>
+                <div id="create-speaker-feedback"></div>
             </div>
 
             <div class="card">

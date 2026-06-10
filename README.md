@@ -177,10 +177,27 @@ Murdock sees; `global` is the fallback when no room-specific topic exists.
 
 ### Enrolling speakers
 
-**Web UI (recommended):** record 3–5 samples of 5 s each per speaker
-directly in your browser, or upload audio files (WAV, MP3, M4A, OGG,
+**Train over your voice satellite (no microphone needed):** just talk to
+your satellite. Every utterance is captured to the **Unknown voices**
+tab, where you can assign it to a speaker — existing or new (the speaker
+is created on assign). Blocked entries in the **Recognition log** also
+get an **Add to speaker** button that does the same in one click. This is
+the path to use in the Home Assistant add-on, where the browser
+microphone isn't available (see note below). You can also pre-create an
+empty speaker under **Speakers → Create speaker (no samples)** and fill
+it from the pipeline later.
+
+**Web UI recording / upload:** record 3–5 samples of 5 s each per
+speaker in your browser, or upload audio files (WAV, MP3, M4A, OGG,
 FLAC, WebM). The quality score on each sample tells you whether the
-recording is actually training-worthy.
+recording is training-worthy.
+
+> **Browser microphone & the add-on:** `getUserMedia` only works in a
+> *secure context* (HTTPS or `localhost`). Home Assistant's ingress
+> serves the UI over plain HTTP, so in-browser recording is unavailable
+> there — the UI detects this and points you to upload / satellite
+> training instead. Direct access over `https://` or `http://localhost`
+> still supports recording.
 
 **CLI:**
 
@@ -191,6 +208,18 @@ docker compose exec murdock python -m scripts.enroll \
     /app/data/samples/jonas_2.wav \
     /app/data/samples/jonas_3.wav
 ```
+
+### How satellite identification works
+
+Murdock reads the satellite/room id from the Wyoming `Transcribe` event's
+`name` field. Home Assistant's Assist pipeline usually does **not** pass
+the originating device down to the ASR stage, so `name` arrives empty and
+the per-satellite threshold list stays at "no satellites seen yet". This
+is a limitation of how HA's pipeline talks to a Wyoming ASR service, not
+a Murdock bug. The handler logs the received name on every request
+(`Transcribe from HA — language=… name=…`) so you can confirm what, if
+anything, your setup sends. Satellites that connect to Murdock directly
+(e.g. `wyoming-satellite` with a configured name) do populate it.
 
 ## Configuration
 

@@ -108,6 +108,31 @@ async def list_speakers(ctx: AppContext = Depends(get_context)):
     return [_speaker_to_out(s) for s in ctx.speakers.list_speakers()]
 
 
+class CreateSpeakerBody(BaseModel):
+    name: str
+    role: Optional[str] = None
+    ha_user_id: Optional[str] = None
+
+
+@router.post("", response_model=SpeakerOut, status_code=201)
+async def create_speaker(
+    body: CreateSpeakerBody, ctx: AppContext = Depends(get_context)
+):
+    """Create a speaker with no samples yet.
+
+    Lets the user set up a speaker first and add training audio later —
+    e.g. by assigning utterances captured over the voice satellite from
+    the Unknown-voices tab.
+    """
+    try:
+        speaker = ctx.speakers.create_speaker(
+            name=body.name, role=body.role, ha_user_id=body.ha_user_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _speaker_to_out(speaker)
+
+
 @router.patch("/{speaker_id}", response_model=SpeakerOut)
 async def edit_speaker(
     speaker_id: int,

@@ -95,8 +95,9 @@ async function loadRoles() {
             const data = await api("/api/speakers/roles");
             ROLES = data.roles || [];
             SOURCES = data.sources || [];
-            const select = $("#enroll-role");
-            if (select) {
+            for (const selId of ["#enroll-role", "#create-speaker-role"]) {
+                const select = $(selId);
+                if (!select) continue;
                 select.innerHTML = `<option value="">${t("speakers.none")}</option>`;
                 for (const r of ROLES) {
                     const opt = document.createElement("option");
@@ -160,7 +161,32 @@ const recordBtn = $("#record-btn");
 const recordStatus = $("#record-status");
 const recordPlayback = $("#record-playback");
 
+// Browser microphone capture needs a secure context (HTTPS or localhost).
+// Home Assistant's ingress serves this UI over plain HTTP, so
+// navigator.mediaDevices is undefined there. Detect it up front and guide
+// the user to file upload or voice-satellite training instead of throwing
+// a cryptic "Cannot read properties of undefined" at click time.
+function micAvailable() {
+    return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function initMicAvailability() {
+    if (micAvailable()) return;
+    if (recordBtn) {
+        recordBtn.disabled = true;
+        recordBtn.classList.add("disabled");
+    }
+    if (recordStatus) {
+        recordStatus.textContent = t("speakers.mic_unavailable");
+        recordStatus.className = "feedback";
+    }
+}
+
 recordBtn.addEventListener("click", async () => {
+    if (!micAvailable()) {
+        recordStatus.textContent = t("speakers.mic_unavailable");
+        return;
+    }
     if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
         return;
@@ -269,6 +295,36 @@ $("#enroll-form").addEventListener("submit", async (e) => {
         form.ha_user_id.readOnly = false;
         form.role.disabled = false;
         $("#enroll-existing").value = "";
+        loadSpeakers();
+    } catch (err) {
+        feedback.className = "feedback err";
+        feedback.textContent = t("generic.error", { err: err.message });
+    }
+});
+
+$("#create-speaker-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const name = form.name.value.trim();
+    const role = form.role ? form.role.value : "";
+    const feedback = $("#create-speaker-feedback");
+    feedback.className = "feedback";
+    if (!name) {
+        feedback.className = "feedback err";
+        feedback.textContent = t("speakers.no_name");
+        return;
+    }
+    const body = { name };
+    if (role) body.role = role;
+    try {
+        const res = await api("/api/speakers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        feedback.className = "feedback ok";
+        feedback.textContent = t("speakers.created_ok", { name: res.name });
+        form.reset();
         loadSpeakers();
     } catch (err) {
         feedback.className = "feedback err";
@@ -1897,6 +1953,12 @@ function renderRecognitionEvent(e) {
                   : ""
           }</span>`
         : "";
+    // Blocked/unknown entries whose audio was captured can be turned into
+    // training data directly from the log.
+    const assignBtn = e.unknown_sample_id
+        ? `<button type="button" class="secondary small" data-assign-sample="${e.unknown_sample_id}"
+             data-nearest="${escapeHtml(e.matched_speaker || "")}">${escapeHtml(t("rec.add_to_speaker"))}</button>`
+        : "";
     return `
         <div class="list-item">
             <div class="row">
@@ -1908,9 +1970,34 @@ function renderRecognitionEvent(e) {
             ${transcript}
             ${nearestHint}
             ${scoreLine ? `<div class="meta">${scoreLine}</div>` : ""}
+            ${assignBtn ? `<div class="row">${assignBtn}</div>` : ""}
         </div>
     `;
 }
+
+// Delegated handler: "add to speaker" on a captured recognition event.
+document.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("[data-assign-sample]");
+    if (!btn) return;
+    const sampleId = btn.dataset.assignSample;
+    const nearest = btn.dataset.nearest || "";
+    const name = prompt(t("rec.assign_prompt"), nearest);
+    if (!name || !name.trim()) return;
+    btn.disabled = true;
+    try {
+        const res = await api(`/api/unknown/${sampleId}/assign`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ speaker_name: name.trim(), create_if_missing: true }),
+        });
+        setStatus(t("rec.assigned_ok", { name: res.speaker_name, n: res.total_samples }), "ok");
+        loadRecognition();
+        loadSpeakers();
+    } catch (err) {
+        setStatus(t("generic.error", { err: err.message }), "err");
+        btn.disabled = false;
+    }
+});
 
 async function loadRecognition() {
     const list = $("#rec-list");
@@ -2070,6 +2157,7 @@ function escapeHtml(s) {
 // Initial load
 loadRoles();
 loadSpeakers();
+initMicAvailability();
 api("/api/health")
     .then((h) => setStatus(t("health.status", { version: h.version, n: h.speakers })))
     .catch((err) => setStatus(t("health.failed", { err: err.message }), "err"));

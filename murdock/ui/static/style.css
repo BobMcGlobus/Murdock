@@ -225,6 +225,23 @@ button.secondary:hover {
     background: var(--card);
 }
 
+button.small {
+    padding: 0.3rem 0.7rem;
+    font-size: 0.85rem;
+}
+
+button:disabled,
+button.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+button:disabled:hover,
+button.disabled:hover {
+    border-color: var(--border);
+    background: var(--card-alt);
+    box-shadow: none;
+}
+
 /* ── Recorder / row helpers ─────────────────────────────── */
 
 .recorder {

@@ -110,6 +110,28 @@ class UnknownStore:
             for row in rows
         ]
 
+    def map_sessions_to_samples(self, session_ids: List[str]) -> Dict[str, int]:
+        """Return ``{session_id: unknown_sample_id}`` for untagged samples.
+
+        Used to surface an "assign to speaker" action on blocked entries in
+        the recognition log: a recognition event and its captured audio
+        share a session_id. Only untagged (not-yet-assigned) samples are
+        returned, so the UI doesn't offer to re-assign something already
+        handled.
+        """
+        ids = [s for s in session_ids if s]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT session_id, MAX(id) AS sample_id FROM unknown_samples "
+                f"WHERE tag IS NULL AND session_id IN ({placeholders}) "
+                "GROUP BY session_id",
+                ids,
+            ).fetchall()
+        return {row["session_id"]: int(row["sample_id"]) for row in rows}
+
     def get_audio(self, sample_id: int) -> Optional[bytes]:
         with self._lock:
             row = self.conn.execute(
