@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+Satellite identity and media-aware gating.
+
+- **Satellite identification over MQTT** — HA's pipeline never tells the
+  STT stage which device is speaking, so per-satellite features stayed
+  dark. A small HA automation now publishes the active satellite (and its
+  room) on `murdock/active_satellite` when it starts listening; Murdock
+  attributes the recognition to it. The Web UI generates the automation
+  (MQTT → Satellite identification).
+- **Media context, one automation for all** — a single HA automation
+  publishes every TV/radio/speaker's playing-state + room to
+  `murdock/context/media/<entity>`. Murdock tightens the threshold when
+  something plays in the active satellite's room (MQTT → Media context).
+- **Per-satellite × per-source restriction matrix** — set how much each
+  media source tightens each satellite while playing (living-room TV
+  restricts the living-room satellite strongly; a bedroom radio not at
+  all). The strongest playing source wins; an explicit `0` disables a
+  source. New "Media restrictions" card in the settings tab.
+- Browser cache-busting for CSS/JS so add-on updates no longer leave a
+  stale UI (no more "settings won't save / no translations" after an
+  update). README brought fully up to date.
+
 ## 0.2.3
 
 - **Clarify the "Test upstream" result** — it lists every language the
