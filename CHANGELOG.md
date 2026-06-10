@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.2.0
+
+### Home Assistant integration
+- **MQTT with auto-discovery (recommended)** — publishes recognition
+  results over MQTT; entities appear automatically under a *Murdock*
+  device, no token and no manual helpers. In the add-on the broker is
+  auto-wired from the Mosquitto service (`services: mqtt:want`).
+- **Token-free context push** — Home Assistant publishes TV state /
+  presence onto retained `murdock/context/<room>/<key>` topics; Murdock
+  subscribes and tightens its threshold while the TV is on. The HA REST +
+  long-lived-token path is kept as a legacy option.
+
+### Recognition quality
+- **Adaptive target-speaker extraction** — multi-speaker utterances
+  (target + TV, or a second person) are split per region; only the
+  dominant enrolled speaker's regions are kept before verification, so a
+  background voice no longer drags the embedding to "unknown". A
+  fast-path skips single-region clips (no added latency).
+- **Confidence calibration (Platt scaling)** — the confidence reported to
+  HA is now a calibrated *probability that it's the same speaker*, fitted
+  automatically from your enrolled samples and refitted in the background
+  on enrollment changes.
+
+### Training over the voice satellite
+- Every utterance is captured to the **Unknown voices** tab (even with no
+  speakers enrolled), so you can train entirely over the voice pipeline.
+- Blocked entries in the recognition log get an **Add to speaker** button.
+- **Create speaker (no samples)** to set up a profile and fill it later.
+- The browser microphone is gracefully disabled in the add-on (HA ingress
+  isn't a secure context, so `getUserMedia` is unavailable) with guidance
+  toward upload / satellite training.
+
+### Project
+- MIT license, CI (pytest) and multi-arch GHCR publishing.
+
 ## 0.1.0 — Initial addon release
 
 - Package Murdock as a Home Assistant add-on.
