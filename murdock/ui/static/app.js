@@ -1386,11 +1386,14 @@ $("#ping-upstream-btn").addEventListener("click", async () => {
     try {
         const res = await api("/api/settings/ping-upstream", { method: "POST" });
         if (res.ok) {
-            const langs = (res.languages || []).join(", ") || "(none)";
+            const langArr = res.languages || [];
+            const langs = langArr.join(", ") || "(none)";
             out.innerHTML =
                 `<span class="feedback ok">${escapeHtml(t("ping.ok"))}</span><br>` +
                 `<code>${escapeHtml(res.upstream_uri)}</code> — ` +
-                `${res.latency_ms.toFixed(0)}ms, ${t("ping.languages")} ${escapeHtml(langs)}`;
+                `${res.latency_ms.toFixed(0)}ms<br>` +
+                `${escapeHtml(t("ping.upstream_supports", { n: langArr.length }))} ${escapeHtml(langs)}<br>` +
+                `<small class="meta">${escapeHtml(t("ping.advertise_note"))}</small>`;
             setStatus(t("ping.upstream_ok"), "ok");
         } else {
             out.innerHTML =

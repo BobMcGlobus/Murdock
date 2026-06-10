@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3
+
+- **Clarify the "Test upstream" result** — it lists every language the
+  *upstream* STT supports (often ~100 for Whisper), which looked like
+  Murdock was advertising all of them. It now reads "Upstream supports N
+  languages: …" with a note that Murdock only advertises the languages
+  you configure. No functional change — the advertised-languages override
+  was always respected (verified: with `de,en` set, Murdock's Wyoming
+  Describe returns exactly `de, en`).
+
 ## 0.2.2
 
 - **Satellite identification over MQTT** — HA's Assist pipeline doesn't

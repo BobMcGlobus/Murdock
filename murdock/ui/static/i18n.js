@@ -367,6 +367,8 @@ const I18N = (() => {
             "ping.upstream_unreachable": "Upstream unreachable",
             "ping.failed": "Ping failed: {err}",
             "ping.languages": "languages:",
+            "ping.upstream_supports": "Upstream supports {n} languages:",
+            "ping.advertise_note": "This is what the upstream STT can do — Murdock only advertises the languages you set above.",
 
             // -- Refresh --
             "refresh.refreshing": "Refreshing…",
@@ -750,6 +752,8 @@ const I18N = (() => {
             "ping.upstream_unreachable": "Upstream nicht erreichbar",
             "ping.failed": "Ping fehlgeschlagen: {err}",
             "ping.languages": "Sprachen:",
+            "ping.upstream_supports": "Upstream unterstützt {n} Sprachen:",
+            "ping.advertise_note": "Das ist, was der Upstream-STT kann — Murdock bewirbt nur die oben eingestellten Sprachen.",
 
             // -- Refresh --
             "refresh.refreshing": "Aktualisiere…",
