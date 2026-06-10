@@ -353,6 +353,7 @@ class MurdockHandler(AsyncEventHandler):
         a high-confidence match. If found, fire HA events immediately
         so downstream automations can react before AudioStop."""
         sid = self._session_id
+        self._resolve_satellite_id()
         try:
             from murdock.core.audio import to_mono_16k_pcm
             audio_16k = to_mono_16k_pcm(
@@ -518,8 +519,31 @@ class MurdockHandler(AsyncEventHandler):
     # Gate + verify
     # ------------------------------------------------------------------
 
+    def _resolve_satellite_id(self) -> None:
+        """Fill in the satellite id from MQTT when HA didn't send one.
+
+        HA's Assist pipeline doesn't pass the originating device to the
+        Wyoming STT stage (``Transcribe.name`` arrives as None), so the
+        satellite is learned from the ``murdock/active_satellite`` topic
+        that a small HA automation publishes when a satellite starts
+        listening. Only fills when still unknown, so a name explicitly
+        sent by a direct Wyoming satellite always wins.
+        """
+        if self._satellite_id:
+            return
+        try:
+            active = self.context.mqtt.get_active_satellite()
+        except Exception:
+            return
+        if active:
+            self._satellite_id = active
+            _LOGGER.info(
+                "[%s] Satellite resolved via MQTT: %s", self._session_id, active
+            )
+
     async def _finish_session(self) -> None:
         sid = self._session_id
+        self._resolve_satellite_id()
         from murdock.core.audio import to_mono_16k_pcm
 
         # Cancel any in-flight early probe so it doesn't race with us.

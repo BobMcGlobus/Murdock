@@ -495,6 +495,7 @@ async def test_mqtt(ctx: AppContext = Depends(get_context)):
 class MQTTContextOut(BaseModel):
     connected: bool
     context: dict = Field(default_factory=dict)
+    active_satellite: Optional[str] = None
 
 
 @router.get("/mqtt-context", response_model=MQTTContextOut)
@@ -502,12 +503,14 @@ async def mqtt_context(ctx: AppContext = Depends(get_context)):
     """Return the context Murdock has received from HA over MQTT.
 
     Shows what HA has pushed onto the retained ``context/<room>/<key>``
-    topics (TV state, presence). Useful for verifying the context-push
-    automation works without digging through broker tooling.
+    topics (TV state, presence) and the last announced active satellite.
+    Useful for verifying the context-push / satellite automations without
+    digging through broker tooling.
     """
     return MQTTContextOut(
         connected=ctx.mqtt.connected,
         context=ctx.mqtt.context_snapshot(),
+        active_satellite=ctx.mqtt.get_active_satellite(),
     )
 
 

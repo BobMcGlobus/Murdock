@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.2
+
+- **Satellite identification over MQTT** — HA's Assist pipeline doesn't
+  pass the originating device to the STT stage, so `Transcribe.name`
+  arrives empty and per-satellite features stayed dark. Murdock now
+  subscribes to a `murdock/active_satellite` topic; a small HA automation
+  (generated for you under **MQTT → Satellite identification**) publishes
+  the active satellite's room when it starts listening, and Murdock
+  attributes the recognition to it. The value is used only when fresh
+  (≤ 30 s) and when no name came in over Wyoming, so a directly-connected
+  satellite with its own name still wins. This lights up per-satellite
+  thresholds and room-based TV context.
+
 ## 0.2.1
 
 - **Fix stale UI after updates** — CSS/JS are now cache-busted with the

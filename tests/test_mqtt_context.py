@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from murdock.core.mqtt_integration import (
+    _ACTIVE_SAT_TTL_SECONDS,
     _CONTEXT_TTL_SECONDS,
     MQTTClient,
 )
@@ -128,6 +129,29 @@ def test_context_snapshot_shape():
     assert "wohnzimmer" in snap
     assert snap["wohnzimmer"]["tv"]["value"] == {"playing": True}
     assert "age_seconds" in snap["wohnzimmer"]["tv"]
+
+
+def test_active_satellite_roundtrip():
+    c = _client()
+    assert c.get_active_satellite() is None
+    c._handle_active_satellite(_msg("murdock/active_satellite", "Arbeitszimmer"))
+    assert c.get_active_satellite() == "Arbeitszimmer"
+
+
+def test_active_satellite_empty_clears():
+    c = _client()
+    c._handle_active_satellite(_msg("murdock/active_satellite", "Kueche"))
+    assert c.get_active_satellite() == "Kueche"
+    c._handle_active_satellite(_msg("murdock/active_satellite", ""))
+    assert c.get_active_satellite() is None
+
+
+def test_active_satellite_staleness():
+    c = _client()
+    c._handle_active_satellite(_msg("murdock/active_satellite", "Wohnzimmer"))
+    name, _ = c._active_satellite
+    c._active_satellite = (name, time.monotonic() - _ACTIVE_SAT_TTL_SECONDS - 5)
+    assert c.get_active_satellite() is None
 
 
 def test_discovery_config_count_and_topics():

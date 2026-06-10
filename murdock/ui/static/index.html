@@ -414,6 +414,16 @@
                         threshold while the TV is on — no token required:
                     </p>
                     <pre><code id="mqtt-context-code"></code></pre>
+                    <h3 data-i18n="mqtt.satellite_title">Satellite identification (optional)</h3>
+                    <p class="meta" data-i18n="mqtt.satellite_hint">
+                        Home Assistant's pipeline doesn't tell the STT engine
+                        which satellite is speaking. This automation publishes
+                        the active satellite's room when it starts listening, so
+                        per-satellite thresholds and room-based TV context work.
+                        Replace the entity IDs with your own assist_satellite
+                        entities:
+                    </p>
+                    <pre><code id="mqtt-satellite-code"></code></pre>
                 </div>
             </div>
 

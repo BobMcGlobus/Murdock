@@ -1067,6 +1067,7 @@ async function loadSettings() {
             }
             renderMqttStatus(s);
             updateMqttContextSnippet(s);
+            updateMqttSatelliteSnippet(s);
         }
         // Per-satellite thresholds
         loadSatelliteThresholds();
@@ -1553,6 +1554,32 @@ function updateMqttContextSnippet(s) {
     el.textContent = snippet;
 }
 
+function updateMqttSatelliteSnippet(s) {
+    const el = $("#mqtt-satellite-code");
+    if (!el) return;
+    const prefix = (s.mqtt_topic_prefix || "murdock").trim() || "murdock";
+    // Publishes the active satellite's room when it starts listening, so
+    // Murdock can attribute a recognition to a satellite even though HA's
+    // pipeline never passes the device to the STT stage.
+    const snippet = [
+        "alias: Murdock — publish active satellite",
+        "trigger:",
+        "  - platform: state",
+        "    entity_id:",
+        "      - assist_satellite.living_room",
+        "      - assist_satellite.kitchen",
+        "    to: listening",
+        "action:",
+        "  - service: mqtt.publish",
+        "    data:",
+        `      topic: ${prefix}/active_satellite`,
+        '      payload: "{{ area_name(trigger.entity_id) or trigger.entity_id }}"',
+        "mode: queued",
+        "max: 10",
+    ].join("\n");
+    el.textContent = snippet;
+}
+
 $("#mqtt-settings-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -1583,6 +1610,7 @@ $("#mqtt-settings-form").addEventListener("submit", async (e) => {
         }
         renderMqttStatus(s);
         updateMqttContextSnippet(s);
+        updateMqttSatelliteSnippet(s);
         setStatus(t("mqtt.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");
@@ -1616,7 +1644,9 @@ $("#mqtt-test-btn").addEventListener("click", async () => {
 const _mqttPrefixInput = document.querySelector("#mqtt-settings-form input[name='mqtt_topic_prefix']");
 if (_mqttPrefixInput) {
     _mqttPrefixInput.addEventListener("input", () => {
-        updateMqttContextSnippet({ mqtt_topic_prefix: _mqttPrefixInput.value });
+        const v = { mqtt_topic_prefix: _mqttPrefixInput.value };
+        updateMqttContextSnippet(v);
+        updateMqttSatelliteSnippet(v);
     });
 }
 

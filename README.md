@@ -217,9 +217,35 @@ the originating device down to the ASR stage, so `name` arrives empty and
 the per-satellite threshold list stays at "no satellites seen yet". This
 is a limitation of how HA's pipeline talks to a Wyoming ASR service, not
 a Murdock bug. The handler logs the received name on every request
-(`Transcribe from HA — language=… name=…`) so you can confirm what, if
-anything, your setup sends. Satellites that connect to Murdock directly
-(e.g. `wyoming-satellite` with a configured name) do populate it.
+(`Transcribe from HA — language=… name=…`).
+
+**Recover it over MQTT.** Because HA *does* know which satellite is
+running, a tiny automation can publish the active satellite's room when
+it starts listening, and Murdock attributes the next recognition to it:
+
+```yaml
+alias: Murdock — publish active satellite
+trigger:
+  - platform: state
+    entity_id:
+      - assist_satellite.living_room
+      - assist_satellite.kitchen
+    to: listening
+action:
+  - service: mqtt.publish
+    data:
+      topic: murdock/active_satellite
+      payload: "{{ area_name(trigger.entity_id) or trigger.entity_id }}"
+mode: queued
+max: 10
+```
+
+The Web UI's **MQTT → Satellite identification** section generates this
+snippet for you. Murdock only uses the value when it's fresh (≤ 30 s) and
+when `Transcribe.name` was empty, so a directly-connected
+`wyoming-satellite` with its own name still wins. Use the **area name**
+as the payload so it lines up with the `murdock/context/<room>/…` topics
+used for per-room TV context.
 
 ## Configuration
 

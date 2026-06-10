@@ -204,6 +204,8 @@ const I18N = (() => {
             "mqtt.status_disconnected": "Enabled, but not connected — check broker host/credentials.",
             "mqtt.context_title": "Context push (optional)",
             "mqtt.context_hint": "Add a Home Assistant automation that publishes TV state to a retained context topic so Murdock can tighten its threshold while the TV is on — no token required:",
+            "mqtt.satellite_title": "Satellite identification (optional)",
+            "mqtt.satellite_hint": "Home Assistant's pipeline doesn't tell the STT engine which satellite is speaking. This automation publishes the active satellite's room when it starts listening, so per-satellite thresholds and room-based TV context work. Replace the entity IDs with your own assist_satellite entities:",
 
             // -- Home Assistant --
             "ha.title": "Home Assistant (REST — legacy)",
@@ -585,6 +587,8 @@ const I18N = (() => {
             "mqtt.status_disconnected": "Aktiviert, aber nicht verbunden — Broker-Host/Zugangsdaten prüfen.",
             "mqtt.context_title": "Kontext-Push (optional)",
             "mqtt.context_hint": "Füge eine Home-Assistant-Automation hinzu, die den TV-Status auf ein retained Kontext-Topic veröffentlicht, damit Murdock seinen Threshold bei laufendem TV anziehen kann — kein Token nötig:",
+            "mqtt.satellite_title": "Satelliten-Erkennung (optional)",
+            "mqtt.satellite_hint": "HAs Pipeline verrät der STT-Stufe nicht, welcher Satellit spricht. Diese Automation veröffentlicht den Raum des aktiven Satelliten, sobald er zuhört — damit funktionieren per-Satellit-Schwellen und raumbasierter TV-Kontext. Ersetze die Entity-IDs durch deine eigenen assist_satellite-Entities:",
 
             // -- Home Assistant --
             "ha.title": "Home Assistant (REST — Legacy)",

@@ -53,6 +53,12 @@ DEFAULT_DISCOVERY_PREFIX = "homeassistant"
 # so a generous window is safe.
 _CONTEXT_TTL_SECONDS = 3600.0
 
+# How long an "active satellite" signal stays valid. HA publishes which
+# satellite started listening just before the STT request reaches us; by
+# the time we verify (a few seconds later) it's still fresh. A short TTL
+# means a stale signal from a much earlier utterance is never misapplied.
+_ACTIVE_SAT_TTL_SECONDS = 30.0
+
 
 class MQTTClient:
     """Async MQTT client: publishes recognition, subscribes to context."""
@@ -83,6 +89,12 @@ class MQTTClient:
         # Context cache: {(room, key): (value: dict, arrived_at: float)}.
         # Populated from retained `murdock/context/<room>/<key>` messages.
         self._context: dict[tuple[str, str], tuple[dict, float]] = {}
+
+        # Most-recently-announced active satellite (name, arrived_at), from
+        # `murdock/active_satellite`. HA's pipeline doesn't pass the device
+        # to the STT stage, so this is how Murdock learns which satellite a
+        # recognition came from.
+        self._active_satellite: Optional[tuple[str, float]] = None
 
     @property
     def configured(self) -> bool:
@@ -127,6 +139,7 @@ class MQTTClient:
         self._connected = False
         self._client = None
         self._context.clear()
+        self._active_satellite = None
         _LOGGER.info("MQTT client stopped")
 
     async def reconfigure(
@@ -212,11 +225,18 @@ class MQTTClient:
                     # Subscribe to the context tree — HA pushes TV /
                     # presence here. Retained messages arrive immediately.
                     await client.subscribe(f"{self.topic_prefix}/context/#")
+                    # …and the active-satellite signal (which device is
+                    # currently running a pipeline).
+                    await client.subscribe(f"{self.topic_prefix}/active_satellite")
 
                     # Inbound pump: blocks until the connection drops or
                     # the task is cancelled on stop().
+                    active_topic = f"{self.topic_prefix}/active_satellite"
                     async for message in client.messages:
-                        self._handle_context_message(message)
+                        if str(message.topic) == active_topic:
+                            self._handle_active_satellite(message)
+                        else:
+                            self._handle_context_message(message)
 
             except asyncio.CancelledError:
                 break
@@ -288,6 +308,33 @@ class MQTTClient:
 
         self._context[(room, key)] = (value, time.monotonic())
         _LOGGER.debug("MQTT context update: %s/%s = %s", room, key, value)
+
+    def _handle_active_satellite(self, message) -> None:
+        """Record which satellite HA says is currently active.
+
+        Payload is a bare string (the room/area or entity id). An empty
+        payload clears it.
+        """
+        raw = message.payload
+        if isinstance(raw, (bytes, bytearray)):
+            raw = raw.decode("utf-8", errors="replace")
+        name = (raw or "").strip()
+        if not name:
+            self._active_satellite = None
+            return
+        self._active_satellite = (name, time.monotonic())
+        _LOGGER.debug("MQTT active satellite: %s", name)
+
+    def get_active_satellite(
+        self, max_age: float = _ACTIVE_SAT_TTL_SECONDS
+    ) -> Optional[str]:
+        """Return the satellite HA last announced, if still fresh."""
+        if self._active_satellite is None:
+            return None
+        name, arrived = self._active_satellite
+        if time.monotonic() - arrived > max_age:
+            return None
+        return name
 
     def _context_get(self, room: str, key: str) -> Optional[dict]:
         """Return a fresh context value dict, or None if missing/stale."""
