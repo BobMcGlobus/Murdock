@@ -75,6 +75,9 @@ def create_app(context: AppContext) -> FastAPI:
             ingress_path = request.headers.get("X-Ingress-Path", "")
             ingress_path = ingress_path.rstrip("/")
             html = _INDEX_HTML.replace("__API_BASE__", ingress_path)
+            # Cache-bust CSS/JS per release so an add-on update never leaves
+            # stale assets in the browser.
+            html = html.replace("__VERSION__", __version__)
             return HTMLResponse(html)
     else:
         _LOGGER.warning("UI static dir not found at %s", _STATIC_DIR)

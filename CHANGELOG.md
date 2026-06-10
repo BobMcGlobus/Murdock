@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1
+
+- **Fix stale UI after updates** — CSS/JS are now cache-busted with the
+  running version (`?v=<version>`), so an add-on update no longer leaves
+  the browser running old `app.js` / `i18n.js`. This was the cause of the
+  MQTT settings appearing unsaved, the Test button doing nothing, and
+  missing translations right after updating to 0.2.0. (After updating to
+  this version, do one hard refresh — Ctrl/Cmd+Shift+R — to clear the
+  pre-fix cache; subsequent updates refresh automatically.)
+
 ## 0.2.0
 
 ### Home Assistant integration
