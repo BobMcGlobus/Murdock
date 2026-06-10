@@ -149,9 +149,60 @@ def test_active_satellite_empty_clears():
 def test_active_satellite_staleness():
     c = _client()
     c._handle_active_satellite(_msg("murdock/active_satellite", "Wohnzimmer"))
-    name, _ = c._active_satellite
-    c._active_satellite = (name, time.monotonic() - _ACTIVE_SAT_TTL_SECONDS - 5)
+    sat_id, area, _ = c._active_satellite
+    c._active_satellite = (sat_id, area, time.monotonic() - _ACTIVE_SAT_TTL_SECONDS - 5)
     assert c.get_active_satellite() is None
+    assert c.get_active_satellite_area() is None
+
+
+def test_active_satellite_json_with_area():
+    c = _client()
+    c._handle_active_satellite(_msg(
+        "murdock/active_satellite",
+        '{"id": "assist_satellite.sat1", "area": "Arbeitszimmer"}',
+    ))
+    assert c.get_active_satellite() == "assist_satellite.sat1"
+    assert c.get_active_satellite_area() == "Arbeitszimmer"
+
+
+def test_active_satellite_bare_string_no_area():
+    c = _client()
+    c._handle_active_satellite(_msg("murdock/active_satellite", "Kueche"))
+    assert c.get_active_satellite() == "Kueche"
+    assert c.get_active_satellite_area() is None
+
+
+def test_media_in_area_tightens_is_tv_playing():
+    c = _client()
+    # A media player in Wohnzimmer is playing.
+    c._handle_context_message(_msg(
+        "murdock/context/media/media_player.wohnzimmer_tv",
+        '{"playing": true, "area": "Wohnzimmer"}',
+    ))
+    assert c.is_tv_playing(room="Wohnzimmer") is True
+    # A different room sees no media context → None (no signal).
+    assert c.is_tv_playing(room="Arbeitszimmer") is None
+
+
+def test_media_in_area_not_playing_is_false():
+    c = _client()
+    c._handle_context_message(_msg(
+        "murdock/context/media/media_player.radio",
+        '{"playing": false, "area": "Kueche"}',
+    ))
+    assert c.is_tv_playing(room="Kueche") is False
+
+
+def test_media_and_legacy_tv_combine():
+    c = _client()
+    # Legacy single-TV topic says not playing…
+    c._handle_context_message(_msg("murdock/context/Wohnzimmer/tv", '{"playing": false}'))
+    # …but a media player in the room is playing → overall True.
+    c._handle_context_message(_msg(
+        "murdock/context/media/media_player.soundbar",
+        '{"playing": true, "area": "Wohnzimmer"}',
+    ))
+    assert c.is_tv_playing(room="Wohnzimmer") is True
 
 
 def test_discovery_config_count_and_topics():

@@ -14,7 +14,8 @@ conversation agent knows whose command it's handling.
 > Murdock replaces the ECAPA-TDNN embedder with WeSpeaker **CAM++ (ONNX)**,
 > adds a **Web UI**, **sqlite-vec**-backed storage, **unknown-voice logging**,
 > **liveness heuristics**, **sample quality scoring**, **voice clustering**,
-> and direct **HA REST integration**.
+> **adaptive speaker extraction**, **confidence calibration**, and
+> **token-free MQTT integration** with Home Assistant.
 
 ## Architecture
 
@@ -22,18 +23,20 @@ conversation agent knows whose command it's handling.
 Voice Satellite → Wake Word → [Murdock Proxy] → STT Engine → HA Assist Pipeline
                                     │
                                     ├─ CAM++ embedding (CPU, onnxruntime)
+                                    ├─ Adaptive speaker extraction (multi-voice utterances)
                                     ├─ sqlite-vec KNN (cosine distance)
+                                    ├─ Confidence calibration (Platt scaling)
                                     ├─ Silero VAD (enrollment QC)
                                     ├─ Liveness heuristics (TV / background rejection)
-                                    ├─ Sample quality scoring (SNR, consistency, centroid fit)
                                     ├─ Per-satellite threshold overrides
-                                    └─ HA REST (input_text + event bus)
+                                    ├─ Media-aware gating (tighten while TV/radio plays)
+                                    └─ MQTT (auto-discovery out, context in) · HA REST (legacy)
 ```
 
-**Known speaker** → audio is forwarded to upstream STT, speaker name is
-pushed into `input_text.current_speaker` (plus optional confidence,
-distance, nearest-speaker and role entities), and a
-`speaker_recognition_detected` event is fired.
+**Known speaker** → audio is forwarded to upstream STT and the result is
+published over MQTT (auto-discovered `sensor.murdock_*` entities) and/or
+the legacy HA REST path (`input_text.current_speaker` + a
+`speaker_recognition_detected` event).
 
 **Unknown speaker** → empty transcript (command blocked). Audio is
 optionally logged to an "enrollment postbox" with TTL so you can review,
@@ -166,14 +169,18 @@ configured **in the Web UI** (Settings tab) — no `.env` file required.
 | `murdock/sensor/<name>/state` | Murdock → HA | recognition state (retained) |
 | `murdock/binary_sensor/speaker_recognized/state` | Murdock → HA | `ON` / `OFF` |
 | `murdock/event/recognition` | Murdock → HA | full JSON event |
-| `murdock/context/<room>/tv` | HA → Murdock | `{"playing": true}` (retain!) |
+| `murdock/active_satellite` | HA → Murdock | `{"id": "...", "area": "..."}` (or bare id) |
+| `murdock/context/media/<entity_id>` | HA → Murdock | `{"playing": true, "area": "..."}` (retain!) |
+| `murdock/context/<room>/tv` | HA → Murdock | `{"playing": true}` (retain!, legacy single-TV) |
 | `murdock/context/<room>/presence` | HA → Murdock | `{"present": true}` (retain!) |
 
-Context topics **must** be published with `retain: true` so Murdock pulls
-the last known state immediately on (re)connect instead of starting blind.
-The Web UI's **MQTT → Context push** section generates a ready-to-paste HA
-automation for the TV topic. `<room>` should match the satellite name
-Murdock sees; `global` is the fallback when no room-specific topic exists.
+Inbound context topics **must** be published with `retain: true` so
+Murdock pulls the last known state immediately on (re)connect instead of
+starting blind (the `active_satellite` signal is momentary and need not
+be retained). The Web UI's **MQTT** card generates ready-to-paste HA
+automations for both the **media context** (one automation covers all
+your TVs/radios) and **satellite identification**. Media gating tightens
+the threshold when any player in the active satellite's room is playing.
 
 ### Enrolling speakers
 
@@ -272,8 +279,7 @@ TV entity — live in the UI and survive restarts.
 .
 ├── Dockerfile                    # HA addon image (also used by HA builder)
 ├── Dockerfile.standalone         # docker-compose image
-├── config.yaml                   # HA addon options, ports, ingress
-├── build.yaml                    # HA addon build config
+├── config.yaml                   # HA addon options, ports, ingress, mqtt:want
 ├── run.sh                        # HA addon entrypoint (options.json → env)
 ├── repository.yaml               # HA "Add repository" metadata
 ├── docker-compose.yml
@@ -321,6 +327,11 @@ TV entity — live in the UI and survive restarts.
 
 - Fold trustworthy recognition events into the calibration fit (not just
   enrollment-derived pairs)
+- Per-satellite × per-source restriction weights (how much TV X vs.
+  radio Y tightens each satellite) — builds on the media context above
+- Presence prior — push likely person presence/absence over MQTT and
+  fold it into the match probability as a soft, bounded Bayesian prior
+  (nudge, never override a strong voice match)
 - Adaptive thresholds per speaker, in calibrated-probability space
 - Parakeet STT bridge / integration notes
 - ML-trained liveness classifier (using gathered TV samples)

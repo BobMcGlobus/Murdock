@@ -90,11 +90,12 @@ class MQTTClient:
         # Populated from retained `murdock/context/<room>/<key>` messages.
         self._context: dict[tuple[str, str], tuple[dict, float]] = {}
 
-        # Most-recently-announced active satellite (name, arrived_at), from
-        # `murdock/active_satellite`. HA's pipeline doesn't pass the device
-        # to the STT stage, so this is how Murdock learns which satellite a
-        # recognition came from.
-        self._active_satellite: Optional[tuple[str, float]] = None
+        # Most-recently-announced active satellite (id, area, arrived_at),
+        # from `murdock/active_satellite`. HA's pipeline doesn't pass the
+        # device to the STT stage, so this is how Murdock learns which
+        # satellite a recognition came from (and, optionally, its room so
+        # media playing in that room can tighten the threshold).
+        self._active_satellite: Optional[tuple[str, Optional[str], float]] = None
 
     @property
     def configured(self) -> bool:
@@ -312,29 +313,58 @@ class MQTTClient:
     def _handle_active_satellite(self, message) -> None:
         """Record which satellite HA says is currently active.
 
-        Payload is a bare string (the room/area or entity id). An empty
+        Payload is either a bare id string (e.g. an entity id or room) or
+        a JSON object ``{"id": "...", "area": "..."}``. The optional area
+        lets media playing in that room tighten the threshold. An empty
         payload clears it.
         """
         raw = message.payload
         if isinstance(raw, (bytes, bytearray)):
             raw = raw.decode("utf-8", errors="replace")
-        name = (raw or "").strip()
-        if not name:
+        raw = (raw or "").strip()
+        if not raw:
             self._active_satellite = None
             return
-        self._active_satellite = (name, time.monotonic())
-        _LOGGER.debug("MQTT active satellite: %s", name)
+        sat_id = raw
+        area: Optional[str] = None
+        if raw.startswith("{"):
+            try:
+                obj = json.loads(raw)
+            except (ValueError, TypeError):
+                obj = None
+            if isinstance(obj, dict):
+                sat_id = str(obj.get("id") or obj.get("satellite") or "").strip() or raw
+                a = obj.get("area")
+                area = str(a).strip() if a else None
+        if not sat_id:
+            self._active_satellite = None
+            return
+        self._active_satellite = (sat_id, area, time.monotonic())
+        _LOGGER.debug("MQTT active satellite: %s (area=%s)", sat_id, area)
+
+    def _fresh_active_satellite(
+        self, max_age: float
+    ) -> Optional[tuple[str, Optional[str]]]:
+        if self._active_satellite is None:
+            return None
+        sat_id, area, arrived = self._active_satellite
+        if time.monotonic() - arrived > max_age:
+            return None
+        return (sat_id, area)
 
     def get_active_satellite(
         self, max_age: float = _ACTIVE_SAT_TTL_SECONDS
     ) -> Optional[str]:
-        """Return the satellite HA last announced, if still fresh."""
-        if self._active_satellite is None:
-            return None
-        name, arrived = self._active_satellite
-        if time.monotonic() - arrived > max_age:
-            return None
-        return name
+        """Return the satellite id HA last announced, if still fresh."""
+        fresh = self._fresh_active_satellite(max_age)
+        return fresh[0] if fresh else None
+
+    def get_active_satellite_area(
+        self, max_age: float = _ACTIVE_SAT_TTL_SECONDS
+    ) -> Optional[str]:
+        """Return the active satellite's room/area, if announced and fresh."""
+        fresh = self._fresh_active_satellite(max_age)
+        return fresh[1] if fresh else None
 
     def _context_get(self, room: str, key: str) -> Optional[dict]:
         """Return a fresh context value dict, or None if missing/stale."""
@@ -360,24 +390,60 @@ class MQTTClient:
                     return bool(v)
         return None
 
-    def is_tv_playing(self, room: Optional[str] = None) -> Optional[bool]:
-        """Return TV state from the context cache.
+    def _media_playing_in_area(self, area: Optional[str]) -> Optional[bool]:
+        """Aggregate per-media-player state for an area.
 
-        Checks the room-specific topic first (``context/<room>/tv``),
-        then falls back to ``context/global/tv``. Returns None when no
-        context has been received at all, so callers can fall back to the
-        legacy REST path.
+        Media players publish to ``context/media/<entity_id>`` with a
+        payload like ``{"playing": true, "area": "Wohnzimmer"}`` (one
+        automation covers every TV/radio at once). Returns True if any
+        such player in ``area`` is playing, False if media context exists
+        for the area but nothing is playing, None if there's no media
+        context to judge by. ``area=None`` considers every media player.
         """
+        now = time.monotonic()
+        found = False
+        for (room, _key), (value, arrived) in self._context.items():
+            if room != "media":
+                continue
+            if now - arrived > _CONTEXT_TTL_SECONDS:
+                continue
+            if area is not None and value.get("area") != area:
+                continue
+            found = True
+            if self._coerce_bool(value, "playing"):
+                return True
+        return False if found else None
+
+    def is_tv_playing(self, room: Optional[str] = None) -> Optional[bool]:
+        """Return whether restricting audio is playing in ``room``.
+
+        Considers, in this order of signal (any "playing" wins):
+          * ``context/<room>/tv`` — the legacy single-TV topic
+          * any ``context/media/<entity>`` player whose area is ``room``
+          * ``context/global/tv`` — a global fallback
+
+        Returns True if anything relevant is playing, False if context
+        exists but nothing is playing, None when there's no context at all
+        (so callers can fall back to the legacy REST poll).
+        """
+        signals: list[bool] = []
         if room:
             value = self._context_get(room, "tv")
             if value is not None:
-                result = self._coerce_bool(value, "playing")
-                if result is not None:
-                    return result
+                b = self._coerce_bool(value, "playing")
+                if b is not None:
+                    signals.append(b)
+            media = self._media_playing_in_area(room)
+            if media is not None:
+                signals.append(media)
         value = self._context_get("global", "tv")
         if value is not None:
-            return self._coerce_bool(value, "playing")
-        return None
+            b = self._coerce_bool(value, "playing")
+            if b is not None:
+                signals.append(b)
+        if not signals:
+            return None
+        return any(signals)
 
     def is_present(self, room: Optional[str] = None) -> Optional[bool]:
         """Return room/global presence from the context cache, or None."""

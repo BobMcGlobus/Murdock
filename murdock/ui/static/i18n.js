@@ -202,8 +202,8 @@ const I18N = (() => {
             "mqtt.status_disabled": "MQTT is disabled.",
             "mqtt.status_connected": "Connected to broker.",
             "mqtt.status_disconnected": "Enabled, but not connected — check broker host/credentials.",
-            "mqtt.context_title": "Context push (optional)",
-            "mqtt.context_hint": "Add a Home Assistant automation that publishes TV state to a retained context topic so Murdock can tighten its threshold while the TV is on — no token required:",
+            "mqtt.context_title": "Media context push (optional)",
+            "mqtt.context_hint": "One automation for all your TVs / radios / speakers: each publishes its playing-state and room to a retained topic, so Murdock tightens the threshold when something is playing in the active satellite's room. List your media_player entities — no token required:",
             "mqtt.satellite_title": "Satellite identification (optional)",
             "mqtt.satellite_hint": "Home Assistant's pipeline doesn't tell the STT engine which satellite is speaking. This automation publishes the active satellite's room when it starts listening, so per-satellite thresholds and room-based TV context work. Replace the entity IDs with your own assist_satellite entities:",
 
@@ -587,8 +587,8 @@ const I18N = (() => {
             "mqtt.status_disabled": "MQTT ist deaktiviert.",
             "mqtt.status_connected": "Mit Broker verbunden.",
             "mqtt.status_disconnected": "Aktiviert, aber nicht verbunden — Broker-Host/Zugangsdaten prüfen.",
-            "mqtt.context_title": "Kontext-Push (optional)",
-            "mqtt.context_hint": "Füge eine Home-Assistant-Automation hinzu, die den TV-Status auf ein retained Kontext-Topic veröffentlicht, damit Murdock seinen Threshold bei laufendem TV anziehen kann — kein Token nötig:",
+            "mqtt.context_title": "Medien-Kontext-Push (optional)",
+            "mqtt.context_hint": "Eine Automation für alle TVs / Radios / Lautsprecher: jedes Gerät veröffentlicht seinen Abspielstatus und Raum auf ein retained Topic, damit Murdock den Threshold anzieht, wenn im Raum des aktiven Satelliten etwas läuft. Liste deine media_player-Entities — kein Token nötig:",
             "mqtt.satellite_title": "Satelliten-Erkennung (optional)",
             "mqtt.satellite_hint": "HAs Pipeline verrät der STT-Stufe nicht, welcher Satellit spricht. Diese Automation veröffentlicht den Raum des aktiven Satelliten, sobald er zuhört — damit funktionieren per-Satellit-Schwellen und raumbasierter TV-Kontext. Ersetze die Entity-IDs durch deine eigenen assist_satellite-Entities:",
 

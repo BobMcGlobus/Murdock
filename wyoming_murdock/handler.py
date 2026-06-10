@@ -89,6 +89,9 @@ class MurdockHandler(AsyncEventHandler):
         self._stream_start: Optional[float] = None
         self._session_id = uuid.uuid4().hex[:8]
         self._satellite_id: Optional[str] = None
+        # Room/area of the satellite (from the active_satellite signal),
+        # used to check whether media is playing in the same room.
+        self._satellite_area: Optional[str] = None
 
         # Upstream streaming state. The transcript future is (re)created at
         # each AudioStart so we never reuse a resolved future across sessions.
@@ -529,6 +532,14 @@ class MurdockHandler(AsyncEventHandler):
         listening. Only fills when still unknown, so a name explicitly
         sent by a direct Wyoming satellite always wins.
         """
+        # The room is useful even when HA did send a Wyoming name, so
+        # refresh it independently of the id.
+        try:
+            area = self.context.mqtt.get_active_satellite_area()
+        except Exception:
+            area = None
+        if area:
+            self._satellite_area = area
         if self._satellite_id:
             return
         try:
@@ -538,7 +549,8 @@ class MurdockHandler(AsyncEventHandler):
         if active:
             self._satellite_id = active
             _LOGGER.info(
-                "[%s] Satellite resolved via MQTT: %s", self._session_id, active
+                "[%s] Satellite resolved via MQTT: %s (area=%s)",
+                self._session_id, active, self._satellite_area,
             )
 
     async def _finish_session(self) -> None:
@@ -726,7 +738,7 @@ class MurdockHandler(AsyncEventHandler):
         # Gate 3: full embedder + verify (runs in parallel with STT).
         threshold = self.context.get_verify_threshold(self._satellite_id)
         require_match = self.context.get_require_match()
-        if await self.context.is_tv_playing(self._satellite_id):
+        if await self.context.is_tv_playing(self._satellite_area or self._satellite_id):
             threshold = max(0.0, threshold - settings.tv_threshold_boost)
             _LOGGER.debug("[%s] TV playing — tightened threshold to %.3f", sid, threshold)
 

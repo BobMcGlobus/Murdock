@@ -496,6 +496,7 @@ class MQTTContextOut(BaseModel):
     connected: bool
     context: dict = Field(default_factory=dict)
     active_satellite: Optional[str] = None
+    active_satellite_area: Optional[str] = None
 
 
 @router.get("/mqtt-context", response_model=MQTTContextOut)
@@ -511,6 +512,7 @@ async def mqtt_context(ctx: AppContext = Depends(get_context)):
         connected=ctx.mqtt.connected,
         context=ctx.mqtt.context_snapshot(),
         active_satellite=ctx.mqtt.get_active_satellite(),
+        active_satellite_area=ctx.mqtt.get_active_satellite_area(),
     )
 
 

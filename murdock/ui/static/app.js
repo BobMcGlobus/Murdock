@@ -1540,19 +1540,27 @@ function updateMqttContextSnippet(s) {
     const prefix = (s.mqtt_topic_prefix || "murdock").trim() || "murdock";
     // A ready-to-paste HA automation that pushes TV state on a retained
     // context topic. <room> should match the satellite name Murdock sees.
+    // One automation for every TV / radio / speaker at once. Each player
+    // publishes its own playing-state + area; Murdock tightens the
+    // threshold when any player in the active satellite's room is playing.
     const snippet = [
-        "alias: Murdock — push TV state",
+        "alias: Murdock — publish media players",
         "trigger:",
         "  - platform: state",
-        "    entity_id: media_player.living_room_tv",
+        "    entity_id:",
+        "      - media_player.living_room_tv",
+        "      - media_player.kitchen_radio",
+        "      # ↑ list every TV / radio / speaker you want to gate on",
         "action:",
         "  - service: mqtt.publish",
         "    data:",
-        `      topic: ${prefix}/context/living_room/tv`,
+        `      topic: "${prefix}/context/media/{{ trigger.entity_id }}"`,
         "      retain: true",
-        '      payload: >-',
-        `        {{ {"playing": is_state('media_player.living_room_tv','playing')} | to_json }}`,
-        "mode: single",
+        "      payload: >-",
+        "        {{ {'playing': is_state(trigger.entity_id,'playing'),",
+        "            'area': area_name(trigger.entity_id)} | to_json }}",
+        "mode: queued",
+        "max: 20",
     ].join("\n");
     el.textContent = snippet;
 }
@@ -1576,7 +1584,9 @@ function updateMqttSatelliteSnippet(s) {
         "  - service: mqtt.publish",
         "    data:",
         `      topic: ${prefix}/active_satellite`,
-        '      payload: "{{ area_name(trigger.entity_id) or trigger.entity_id }}"',
+        "      payload: >-",
+        "        {{ {'id': trigger.entity_id,",
+        "            'area': area_name(trigger.entity_id)} | to_json }}",
         "mode: queued",
         "max: 10",
     ].join("\n");
