@@ -60,6 +60,17 @@ header h1 {
     color: var(--accent);
     letter-spacing: 0.15em;
     text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.logo-mark {
+    height: 1.7em;
+    width: auto;
+    /* The mark ships on its own dark plate; round it so it reads as a
+       badge next to the wordmark. */
+    border-radius: 6px;
 }
 
 nav {

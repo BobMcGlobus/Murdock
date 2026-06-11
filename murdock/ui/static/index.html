@@ -8,13 +8,14 @@
          a new release busts the browser cache for CSS/JS (otherwise an
          add-on update leaves stale app.js / i18n.js behind). -->
     <link rel="stylesheet" href="static/style.css?v=__VERSION__">
+    <link rel="icon" type="image/png" href="static/favicon.png?v=__VERSION__">
     <!-- API_BASE is rewritten by the server when running under Home
          Assistant ingress; stays empty for direct port access. -->
     <script>window.API_BASE = "__API_BASE__";</script>
 </head>
 <body>
     <header>
-        <h1>Murdock</h1>
+        <h1><img src="static/favicon.png?v=__VERSION__" alt="" class="logo-mark">Murdock</h1>
         <nav>
             <button data-tab="speakers" class="tab-btn active" data-i18n="nav.speakers">Speakers</button>
             <button data-tab="verify" class="tab-btn" data-i18n="nav.verify">Verify</button>
