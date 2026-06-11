@@ -16,7 +16,6 @@ clean edges. The base geometry lives in 256x256 design units.
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
@@ -27,22 +26,24 @@ BRIGHT = (239, 68, 68, 255)   # --danger #ef4444
 DEEP = (153, 27, 27, 255)     # --accent-soft #991b1b
 MUTED = (113, 113, 122, 255)  # --muted  #71717a
 
-# Base design (256x256 units): head circle, horns, sonar arcs.
+# Base design (256x256 units): head circle, horns, voice-waveform bars.
 HEAD_C = (128.0, 142.0)
 HEAD_R = 64.0
 HEAD_SW = 13.0
 # Each horn: (base-on-circle, ctrl-out, tip, ctrl-in, base-on-circle).
-# Short outward-curving crescents — devil horns, not cat or rabbit ears.
-HORN_L = ((80.0, 100.0), (58.0, 84.0), (62.0, 44.0), (84.0, 62.0), (104.0, 82.0))
-HORN_R = ((176.0, 100.0), (198.0, 84.0), (194.0, 44.0), (172.0, 62.0), (152.0, 82.0))
-ARC_C = (128.0, 188.0)
-ARCS = (  # (radius, color, alpha)
-    (18.0, BRIGHT, 255),
-    (36.0, CRIMSON, 217),
-    (54.0, DEEP, 255),
+# Small crescents curling upward — both edges bow outward so the horn
+# hooks like 😈, tips pointing up-inward.
+HORN_L = ((88.0, 94.0), (54.0, 62.0), (84.0, 36.0), (70.0, 70.0), (108.0, 82.0))
+HORN_R = ((168.0, 94.0), (202.0, 62.0), (172.0, 36.0), (186.0, 70.0), (148.0, 82.0))
+# Voice-waveform bars inside the head: (x-center, height, color).
+BAR_W = 11.0
+BARS = (
+    (92.0, 26.0, DEEP),
+    (110.0, 46.0, CRIMSON),
+    (128.0, 66.0, BRIGHT),
+    (146.0, 46.0, CRIMSON),
+    (164.0, 26.0, DEEP),
 )
-ARC_SW = 8.0
-ARC_START, ARC_END = 200.0, 340.0  # PIL degrees, clockwise from 3 o'clock
 
 
 def _quad(p0, c, p1, n=28):
@@ -85,24 +86,13 @@ def draw_mark(img: Image.Image, ox: float, oy: float, k: float,
         p0, c1, tip, c2, p1 = horn
         pts = _quad(p0, c1, tip) + _quad(tip, c2, p1)
         d.polygon([T(p) for p in pts], fill=CRIMSON)
-    # Sonar arcs with faked round caps.
-    acx, acy = T(ARC_C)
-    sw = max(1, round(k * ARC_SW))
-    for radius, color, alpha in ARCS:
-        col = color[:3] + (alpha,)
-        rr = k * radius
-        d.arc([acx - rr, acy - rr, acx + rr, acy + rr],
-              ARC_START, ARC_END, fill=col, width=sw)
-        for ang in (ARC_START, ARC_END):
-            a = math.radians(ang)
-            ex, ey = acx + rr_mid(rr, sw) * math.cos(a), acy + rr_mid(rr, sw) * math.sin(a)
-            cap = sw / 2 - 0.5
-            d.ellipse([ex - cap, ey - cap, ex + cap, ey + cap], fill=col)
-
-
-def rr_mid(rr: float, sw: int) -> float:
-    """PIL strokes arcs inward from the bbox — cap centers sit mid-stroke."""
-    return rr - sw / 2
+    # Voice-waveform bars, vertically centered on the head.
+    for bx, bh, color in BARS:
+        x0 = ox + k * (bx - BAR_W / 2)
+        x1 = ox + k * (bx + BAR_W / 2)
+        y0 = oy + k * (HEAD_C[1] - bh / 2)
+        y1 = oy + k * (HEAD_C[1] + bh / 2)
+        d.rounded_rectangle([x0, y0, x1, y1], radius=k * BAR_W / 2, fill=color)
 
 
 def make_icon(size: int = 256, ss: int = 4) -> Image.Image:
