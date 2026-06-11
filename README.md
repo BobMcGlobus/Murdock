@@ -17,21 +17,16 @@ conversation agent knows whose command it's handling.
 > **adaptive speaker extraction**, **confidence calibration**, and
 > **token-free MQTT integration** with Home Assistant.
 
-## Architecture
+## How it works
 
-```
-Voice Satellite → Wake Word → [Murdock Proxy] → STT Engine → HA Assist Pipeline
-                                    │
-                                    ├─ CAM++ embedding (CPU, onnxruntime)
-                                    ├─ Adaptive speaker extraction (multi-voice utterances)
-                                    ├─ sqlite-vec KNN (cosine distance)
-                                    ├─ Confidence calibration (Platt scaling)
-                                    ├─ Silero VAD (enrollment QC)
-                                    ├─ Liveness heuristics (TV / background rejection)
-                                    ├─ Per-satellite threshold overrides
-                                    ├─ Media-aware gating (tighten while TV/radio plays)
-                                    └─ MQTT (auto-discovery out, context in) · HA REST (legacy)
-```
+<p align="center">
+  <img src="docs/how-murdock-works.svg" alt="How Murdock works: a voice satellite streams audio to Murdock, which forwards it live to the STT engine while verifying the speaker in parallel (liveness, extraction, CAM++ embedding, profile match). A gate passes the transcript for known speakers or blocks unknown voices into the training postbox; Home Assistant pushes context back over MQTT." width="760">
+</p>
+
+Under the hood the verify path adds: sqlite-vec KNN over speaker
+centroids, Platt-scaled confidence calibration, Silero VAD for
+enrollment QC, per-satellite threshold overrides and media-aware gating
+(see [Features](#features)).
 
 **Known speaker** → audio is forwarded to upstream STT and the result is
 published over MQTT (auto-discovered `sensor.murdock_*` entities) and/or
