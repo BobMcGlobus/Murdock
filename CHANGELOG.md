@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+- **Logo** — Murdock has a face: a crimson devil-horned head with a
+  voice-waveform inside (a nod to the namesake — Daredevil perceives
+  through sound, Murdock identifies through it). Shows as the add-on
+  icon/logo in the store, as the Web UI favicon and next to the header
+  wordmark. Geometry lives in `scripts/gen_logo.py`.
+- **CI** — workflows moved to Node 24 actions (checkout v5,
+  setup-python v6, `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`) ahead of
+  GitHub's 2026-06-16 flag day.
+
 ## 0.4.0
 
 Diagnostics and quality-of-life.
