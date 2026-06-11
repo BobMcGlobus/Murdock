@@ -11,14 +11,20 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Node 20 is removed from GitHub runners on 2026-09-16 (forced to Node 24
+# from 2026-06-16). Opt in explicitly so any incompatibility surfaces in
+# CI now instead of breaking silently on the flag day.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip

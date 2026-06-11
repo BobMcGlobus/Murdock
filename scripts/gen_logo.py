@@ -33,8 +33,8 @@ HEAD_SW = 13.0
 # Each horn: (base-on-circle, ctrl-out, tip, ctrl-in, base-on-circle).
 # Small crescents curling upward — both edges bow outward so the horn
 # hooks like 😈, tips pointing up-inward.
-HORN_L = ((88.0, 94.0), (54.0, 62.0), (84.0, 36.0), (70.0, 70.0), (108.0, 82.0))
-HORN_R = ((168.0, 94.0), (202.0, 62.0), (172.0, 36.0), (186.0, 70.0), (148.0, 82.0))
+HORN_L = ((82.0, 98.0), (48.0, 72.0), (80.0, 52.0), (78.0, 78.0), (112.0, 80.0))
+HORN_R = ((174.0, 98.0), (208.0, 72.0), (176.0, 52.0), (178.0, 78.0), (144.0, 80.0))
 # Voice-waveform bars inside the head: (x-center, height, color).
 BAR_W = 11.0
 BARS = (

@@ -18,6 +18,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ghcr.io/bobmcglobus/murdock
+  # Node 20 leaves GitHub runners 2026-09-16; opt into Node 24 now so
+  # problems show up in a controlled run, not on the flag day.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-push:
@@ -26,7 +29,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up QEMU (arm64 emulation)
         uses: docker/setup-qemu-action@v3
