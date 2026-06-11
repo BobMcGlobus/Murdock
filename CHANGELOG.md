@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0
+
+Diagnostics and quality-of-life.
+
+- **Voice map** — 2-D PCA projection of the whole embedding space in the
+  Speakers tab: one color per speaker, rings for centroids, gray crosses
+  for unknown samples. **Click any point** to play it, delete it, or
+  (for unknowns) assign it to a speaker — the map re-renders after each
+  action.
+- **Speaker health** — per-speaker panel with each sample's drift from
+  the centroid, age and quality, plus a quality trend (newest vs. oldest
+  half). Drifted samples are flagged for pruning.
+- **Threshold recommendation** — "Suggest from log" next to the verify
+  threshold analyses the recognition log (match distances vs.
+  blocked/unknown distances) and proposes an empirically grounded
+  threshold, with a one-click Apply. Warns when the distributions
+  overlap.
+- **Full backup** — the backup ZIP now includes all settings
+  (thresholds, MQTT/HA config, media matrix, calibration parameters).
+  Restore re-applies everything live, no restart needed. Note: the
+  archive contains your configured credentials — store it safely.
+- **Collapsible settings** — every settings card folds to its heading;
+  state is remembered per card.
+- New [project wiki](https://github.com/BobMcGlobus/Murdock/wiki) with
+  installation, MQTT, training, tuning, backup and architecture guides.
+
 ## 0.3.0
 
 Satellite identity and media-aware gating.

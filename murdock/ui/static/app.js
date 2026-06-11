@@ -370,7 +370,10 @@ function renderEmbeddingMap(data) {
         const tip = `unknown #${p.sample_id}` +
             (p.best_speaker ? ` · ${t("rec.nearest", { name: p.best_speaker })}` : "") +
             (p.distance != null ? ` · d=${p.distance}` : "");
-        shapes += `<g class="map-unknown"><title>${escapeHtml(tip)}</title>
+        shapes += `<g class="map-unknown map-clickable" data-map-kind="unknown"
+            data-map-id="${p.sample_id}" data-map-nearest="${escapeHtml(p.best_speaker || "")}">
+            <title>${escapeHtml(tip)}</title>
+            <circle cx="${x}" cy="${y}" r="8" fill="transparent"/>
             <line x1="${x - 4}" y1="${y - 4}" x2="${x + 4}" y2="${y + 4}"/>
             <line x1="${x - 4}" y1="${y + 4}" x2="${x + 4}" y2="${y - 4}"/></g>`;
     }
@@ -379,8 +382,11 @@ function renderEmbeddingMap(data) {
         const tip = `${p.speaker} #${p.sample_id} (${p.source || "?"})` +
             (p.quality != null ? ` · q=${p.quality.toFixed(2)}` : "") +
             (p.distance != null ? ` · d=${p.distance}` : "");
-        shapes += `<circle cx="${x}" cy="${y}" r="4" fill="${colorOf(p.speaker_id)}"
-            fill-opacity="0.75"><title>${escapeHtml(tip)}</title></circle>`;
+        shapes += `<circle class="map-clickable" cx="${x}" cy="${y}" r="4"
+            fill="${colorOf(p.speaker_id)}" fill-opacity="0.75"
+            data-map-kind="sample" data-map-id="${p.sample_id}"
+            data-map-speaker="${escapeHtml(p.speaker)}">
+            <title>${escapeHtml(tip)}</title></circle>`;
     }
     for (const p of byKind.centroid) {
         const x = sx(p.x), y = sy(p.y);
@@ -402,32 +408,108 @@ function renderEmbeddingMap(data) {
     out.innerHTML = `
         <svg class="embedding-map" viewBox="0 0 ${W} ${H}" role="img">${shapes}</svg>
         <div class="map-legend">${legend} ${unknownLegend}</div>
+        <div id="map-action"></div>
         <p class="meta">${escapeHtml(t("map.stats", {
             n: data.count,
             pc1: Math.round((data.explained?.[0] || 0) * 100),
             pc2: Math.round((data.explained?.[1] || 0) * 100),
             ms: Math.round(data.computed_ms || 0),
         }))}</p>`;
+
+    // Click a point → action panel (play / delete / assign).
+    out.querySelector("svg").addEventListener("click", (ev) => {
+        const el = ev.target.closest("[data-map-kind]");
+        if (!el) return;
+        showMapAction(el.dataset);
+    });
+}
+
+function showMapAction(d) {
+    const panel = $("#map-action");
+    if (!panel) return;
+    const id = d.mapId;
+    if (d.mapKind === "sample") {
+        panel.innerHTML = `
+            <div class="row">
+                <strong>${escapeHtml(d.mapSpeaker)}</strong> <code>#${escapeHtml(id)}</code>
+                <audio controls src="${apiUrl(`/api/speakers/samples/${id}/audio`)}"></audio>
+                <button type="button" class="danger small" data-map-del-sample="${escapeHtml(id)}">${escapeHtml(t("map.delete_sample"))}</button>
+            </div>`;
+        panel.querySelector("[data-map-del-sample]").addEventListener("click", async (ev) => {
+            if (!confirm(t("map.confirm_delete_sample"))) return;
+            ev.target.disabled = true;
+            try {
+                await api(`/api/speakers/samples/${id}`, { method: "DELETE" });
+                setStatus(t("map.sample_deleted"), "ok");
+                loadSpeakers();
+                loadEmbeddingMap();
+            } catch (err) {
+                setStatus(err.message, "err");
+                ev.target.disabled = false;
+            }
+        });
+    } else if (d.mapKind === "unknown") {
+        panel.innerHTML = `
+            <div class="row">
+                <strong>${escapeHtml(t("rec.unknown"))}</strong> <code>#${escapeHtml(id)}</code>
+                <audio controls src="${apiUrl(`/api/unknown/${id}/audio`)}"></audio>
+                <button type="button" class="secondary small" data-map-assign="${escapeHtml(id)}">${escapeHtml(t("rec.add_to_speaker"))}</button>
+                <button type="button" class="danger small" data-map-del-unknown="${escapeHtml(id)}">${escapeHtml(t("map.delete_sample"))}</button>
+            </div>`;
+        panel.querySelector("[data-map-assign]").addEventListener("click", async (ev) => {
+            const name = prompt(t("rec.assign_prompt"), d.mapNearest || "");
+            if (!name || !name.trim()) return;
+            ev.target.disabled = true;
+            try {
+                const res = await api(`/api/unknown/${id}/assign`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ speaker_name: name.trim(), create_if_missing: true }),
+                });
+                setStatus(t("rec.assigned_ok", { name: res.speaker_name, n: res.total_samples }), "ok");
+                loadSpeakers();
+                loadEmbeddingMap();
+            } catch (err) {
+                setStatus(err.message, "err");
+                ev.target.disabled = false;
+            }
+        });
+        panel.querySelector("[data-map-del-unknown]").addEventListener("click", async (ev) => {
+            ev.target.disabled = true;
+            try {
+                await api(`/api/unknown/${id}`, { method: "DELETE" });
+                setStatus(t("map.sample_deleted"), "ok");
+                loadEmbeddingMap();
+            } catch (err) {
+                setStatus(err.message, "err");
+                ev.target.disabled = false;
+            }
+        });
+    }
+}
+
+async function loadEmbeddingMap() {
+    const out = $("#embedding-map-result");
+    const btn = $("#embedding-map-btn");
+    if (!out || !btn) return;
+    btn.disabled = true;
+    btn.textContent = t("map.rendering");
+    out.innerHTML = `<p class="meta">${escapeHtml(t("map.computing"))}</p>`;
+    try {
+        const inc = $("#embedding-map-unknown").checked;
+        const data = await api(`/api/speakers/embedding-map?include_unknown=${inc}`);
+        renderEmbeddingMap(data);
+    } catch (err) {
+        out.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = t("map.render");
+    }
 }
 
 const embeddingMapBtn = $("#embedding-map-btn");
 if (embeddingMapBtn) {
-    embeddingMapBtn.addEventListener("click", async () => {
-        const out = $("#embedding-map-result");
-        embeddingMapBtn.disabled = true;
-        embeddingMapBtn.textContent = t("map.rendering");
-        out.innerHTML = `<p class="meta">${escapeHtml(t("map.computing"))}</p>`;
-        try {
-            const inc = $("#embedding-map-unknown").checked;
-            const data = await api(`/api/speakers/embedding-map?include_unknown=${inc}`);
-            renderEmbeddingMap(data);
-        } catch (err) {
-            out.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
-        } finally {
-            embeddingMapBtn.disabled = false;
-            embeddingMapBtn.textContent = t("map.render");
-        }
-    });
+    embeddingMapBtn.addEventListener("click", loadEmbeddingMap);
 }
 
 // --- Verify ---------------------------------------------------------------
@@ -1698,6 +1780,54 @@ $("#ping-upstream-btn").addEventListener("click", async () => {
         btn.textContent = t("settings.ping");
     }
 });
+
+// --- Threshold recommendation ----------------------------------------------
+
+const thresholdSuggestBtn = $("#threshold-suggest-btn");
+if (thresholdSuggestBtn) {
+    thresholdSuggestBtn.addEventListener("click", async () => {
+        const out = $("#threshold-suggest-result");
+        thresholdSuggestBtn.disabled = true;
+        out.textContent = t("thsuggest.computing");
+        try {
+            const r = await api("/api/settings/threshold-recommendation");
+            if (r.status === "insufficient_data") {
+                out.textContent = t("thsuggest.insufficient", {
+                    g: r.genuine_count, i: r.impostor_count,
+                });
+                return;
+            }
+            const overlapNote = r.status === "overlap"
+                ? ` ${t("thsuggest.overlap")}` : "";
+            out.innerHTML = `${escapeHtml(t("thsuggest.result", {
+                rec: r.recommended.toFixed(3),
+                g95: r.genuine_p95.toFixed(3),
+                i05: r.impostor_p05.toFixed(3),
+                g: r.genuine_count,
+                i: r.impostor_count,
+            }))}${escapeHtml(overlapNote)}
+                <button type="button" class="secondary small" id="threshold-apply-btn">${escapeHtml(t("thsuggest.apply"))}</button>`;
+            $("#threshold-apply-btn").addEventListener("click", async () => {
+                try {
+                    await api("/api/settings", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ verify_threshold: r.recommended }),
+                    });
+                    $("#settings-form").verify_threshold.value = r.recommended.toFixed(3);
+                    out.textContent = t("thsuggest.applied", { rec: r.recommended.toFixed(3) });
+                    setStatus(t("thsuggest.applied", { rec: r.recommended.toFixed(3) }), "ok");
+                } catch (err) {
+                    setStatus(t("generic.error", { err: err.message }), "err");
+                }
+            });
+        } catch (err) {
+            out.textContent = err.message;
+        } finally {
+            thresholdSuggestBtn.disabled = false;
+        }
+    });
+}
 
 $("#refresh-langs-btn").addEventListener("click", async () => {
     const btn = $("#refresh-langs-btn");

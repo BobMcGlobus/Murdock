@@ -277,6 +277,9 @@ button.disabled:hover {
     border: 1px solid var(--border);
     border-radius: 8px;
 }
+.embedding-map .map-clickable {
+    cursor: pointer;
+}
 .embedding-map .map-unknown line {
     stroke: var(--muted);
     stroke-width: 1.5;

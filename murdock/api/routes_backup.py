@@ -22,12 +22,38 @@ _LOGGER = logging.getLogger("murdock.api.backup")
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
-BACKUP_VERSION = 1
+# v2 adds settings.json (full settings table). v1 archives (no settings)
+# restore fine — the settings step is simply skipped.
+BACKUP_VERSION = 2
 
 
 def _safe_dirname(name: str) -> str:
     """Sanitise a speaker name for use as a ZIP directory name."""
     return "".join(c if c.isalnum() or c in " _-" else "_" for c in name).strip()
+
+
+def dump_settings(conn) -> dict:
+    """Full settings-table dump: thresholds, MQTT, HA, matrix, calibration.
+
+    Includes secrets (HA token, MQTT password, Mistral key) — the backup
+    is a local file and a restore should bring the whole configuration
+    back without re-entering credentials. Documented in the wiki.
+    """
+    rows = conn.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def apply_settings(conn, data: dict) -> int:
+    """Upsert a settings dump back into the table. Returns the row count."""
+    from murdock.core.db import set_setting
+
+    count = 0
+    for key, value in data.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            continue
+        set_setting(conn, key, value)
+        count += 1
+    return count
 
 
 @router.get("")
@@ -70,11 +96,20 @@ async def export_backup(ctx: AppContext = Depends(get_context)):
                 json.dumps(speaker_meta, indent=2, ensure_ascii=False),
             )
 
+        # Full settings table: thresholds, MQTT/HA config, media matrix,
+        # calibration parameters — so a restore brings back the whole
+        # deployment, not just the voices.
+        zf.writestr(
+            "settings.json",
+            json.dumps(dump_settings(ctx.db), indent=2, ensure_ascii=False),
+        )
+
         manifest = {
             "version": BACKUP_VERSION,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "speaker_count": len(speakers),
             "sample_count": total_samples,
+            "includes_settings": True,
         }
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
 
@@ -94,6 +129,7 @@ class RestoreResult(BaseModel):
     speakers_created: int = 0
     speakers_skipped: int = 0
     samples_imported: int = 0
+    settings_restored: int = 0
     errors: list[str] = []
 
 
@@ -101,13 +137,19 @@ class RestoreResult(BaseModel):
 async def restore_backup(
     file: UploadFile = File(...),
     mode: str = Query("merge", pattern="^(merge|replace)$"),
+    restore_settings: bool = Query(True),
     ctx: AppContext = Depends(get_context),
 ):
-    """Upload a backup ZIP to restore speakers.
+    """Upload a backup ZIP to restore speakers (and settings, v2+).
 
     Modes:
       - ``merge``: add new speakers, skip existing names
       - ``replace``: delete ALL current speakers first, then import
+
+    Settings (thresholds, MQTT/HA config, media matrix, calibration) are
+    restored from v2 archives unless ``restore_settings=false``. Runtime
+    clients (HA, MQTT, calibration) are reconfigured afterwards so no
+    restart is needed.
     """
     data = await file.read()
     if len(data) > 500 * 1024 * 1024:
@@ -135,7 +177,8 @@ async def restore_backup(
         n for n in zf.namelist()
         if n.endswith("/speaker.json") and n.startswith("speakers/")
     ]
-    if not speaker_jsons:
+    has_settings = "settings.json" in zf.namelist()
+    if not speaker_jsons and not has_settings:
         raise HTTPException(status_code=400, detail="No speakers found in backup")
 
     # Replace mode: wipe existing speakers
@@ -207,6 +250,26 @@ async def restore_backup(
         if not first_sample:
             result.speakers_created += 1
             existing_names.add(name.lower())
+
+    # Settings: apply after speakers so a replace-mode wipe can't clobber
+    # what we just restored, then reconfigure the live clients.
+    if restore_settings and has_settings:
+        try:
+            settings_data = json.loads(zf.read("settings.json"))
+            if isinstance(settings_data, dict):
+                result.settings_restored = apply_settings(ctx.db, settings_data)
+                ctx.speakers.threshold = ctx.get_verify_threshold()
+                ctx.load_calibration()
+                try:
+                    await ctx.apply_ha_settings()
+                    await ctx.apply_mqtt_settings()
+                except Exception:
+                    _LOGGER.exception("Client reconfigure after restore failed")
+                _LOGGER.info(
+                    "Restored %d settings from backup", result.settings_restored
+                )
+        except (json.JSONDecodeError, KeyError) as exc:
+            result.errors.append(f"settings.json unreadable: {exc}")
 
     zf.close()
     _LOGGER.info(

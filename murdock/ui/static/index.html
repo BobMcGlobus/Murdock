@@ -230,6 +230,10 @@
                     <label>
                         <span data-i18n="settings.threshold">Verify threshold (cosine distance, 0 = identical)</span>
                         <input type="number" step="0.01" min="0" max="2" name="verify_threshold">
+                        <small class="meta">
+                            <button type="button" id="threshold-suggest-btn" class="secondary small" data-i18n="thsuggest.btn">Suggest from log</button>
+                            <span id="threshold-suggest-result"></span>
+                        </small>
                     </label>
                     <label>
                         <span data-i18n="settings.skip_leading">Skip leading seconds (trim satellite chime before embedding)</span>

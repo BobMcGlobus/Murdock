@@ -7,6 +7,8 @@ import logging
 import os
 from typing import List, Optional
 
+import numpy as np
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -391,6 +393,92 @@ async def refresh_languages(ctx: AppContext = Depends(get_context)):
             status_code=502, detail=f"upstream refresh failed: {exc}"
         ) from exc
     return _build_settings_out(ctx)
+
+
+class ThresholdRecommendationOut(BaseModel):
+    status: str  # "ok" | "overlap" | "insufficient_data"
+    current: float
+    recommended: Optional[float] = None
+    genuine_count: int = 0
+    impostor_count: int = 0
+    genuine_p95: Optional[float] = None
+    impostor_p05: Optional[float] = None
+    separation: Optional[float] = None
+    window_hours: float = 0.0
+
+
+def recommend_threshold(
+    genuine: List[float],
+    impostor: List[float],
+    current: float,
+    min_genuine: int = 10,
+    min_impostor: int = 5,
+) -> dict:
+    """Derive a verify-threshold suggestion from observed distances.
+
+    genuine = distances of accepted matches, impostor = best distances of
+    blocked/unknown utterances. The suggestion is the midpoint between
+    the genuine 95th percentile and the impostor 5th percentile — i.e.
+    the middle of the gap between "your voice on a bad day" and "the
+    closest stranger". A negative separation means the distributions
+    overlap; the midpoint then balances false rejects against false
+    accepts, flagged so the UI can warn.
+    """
+    if len(genuine) < min_genuine or len(impostor) < min_impostor:
+        return {
+            "status": "insufficient_data",
+            "current": current,
+            "genuine_count": len(genuine),
+            "impostor_count": len(impostor),
+        }
+    g95 = float(np.percentile(np.asarray(genuine, dtype=np.float64), 95))
+    i05 = float(np.percentile(np.asarray(impostor, dtype=np.float64), 5))
+    separation = i05 - g95
+    recommended = max(0.05, min(1.5, (g95 + i05) / 2.0))
+    return {
+        "status": "ok" if separation > 0 else "overlap",
+        "current": current,
+        "recommended": round(recommended, 3),
+        "genuine_count": len(genuine),
+        "impostor_count": len(impostor),
+        "genuine_p95": round(g95, 4),
+        "impostor_p05": round(i05, 4),
+        "separation": round(separation, 4),
+    }
+
+
+@router.get("/threshold-recommendation", response_model=ThresholdRecommendationOut)
+async def threshold_recommendation(
+    hours: float = 24.0 * 30,
+    ctx: AppContext = Depends(get_context),
+):
+    """Suggest a verify threshold from the recognition log's distances.
+
+    Empirical replacement for tuning by feel: matches give the genuine
+    distance distribution, blocked/unknown events the impostor one.
+    """
+    import time as _time
+
+    from murdock.core.recognition_log import (
+        OUTCOME_BLOCKED_NO_MATCH,
+        OUTCOME_MATCH,
+        OUTCOME_UNKNOWN_FORWARDED,
+    )
+
+    cutoff = _time.time() - hours * 3600.0
+    rows = ctx.db.execute(
+        "SELECT outcome, distance FROM recognition_events "
+        "WHERE distance IS NOT NULL AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+    genuine = [float(r["distance"]) for r in rows if r["outcome"] == OUTCOME_MATCH]
+    impostor = [
+        float(r["distance"]) for r in rows
+        if r["outcome"] in (OUTCOME_BLOCKED_NO_MATCH, OUTCOME_UNKNOWN_FORWARDED)
+    ]
+    data = recommend_threshold(genuine, impostor, ctx.get_verify_threshold())
+    data["window_hours"] = hours
+    return ThresholdRecommendationOut(**data)
 
 
 class CalibrationOut(BaseModel):
