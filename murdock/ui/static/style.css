@@ -242,6 +242,90 @@ button.disabled:hover {
     box-shadow: none;
 }
 
+/* ── Collapsible settings cards ─────────────────────────── */
+
+.card.collapsible > h2 {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    padding-right: 1.6rem;
+}
+.card.collapsible > h2::after {
+    content: "▾";
+    position: absolute;
+    right: 0.2rem;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+}
+.card.collapsed > h2 {
+    margin-bottom: 0;
+}
+.card.collapsed > h2::after {
+    transform: rotate(-90deg);
+}
+.card.collapsed > :not(h2) {
+    display: none;
+}
+
+/* ── Voice map (embedding space) ────────────────────────── */
+
+.embedding-map {
+    width: 100%;
+    height: auto;
+    margin-top: 0.75rem;
+    background: var(--card-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.embedding-map .map-unknown line {
+    stroke: var(--muted);
+    stroke-width: 1.5;
+    opacity: 0.7;
+}
+.map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    margin-top: 0.5rem;
+}
+.map-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text);
+}
+.map-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.map-cross {
+    color: var(--muted);
+    font-weight: bold;
+}
+
+/* ── Speaker health panel ───────────────────────────────── */
+
+.health-panel {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    background: var(--card-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.health-row.flagged {
+    border-left: 3px solid var(--danger);
+    padding-left: 0.5rem;
+}
+.health-panel .ok { color: var(--success); }
+.health-panel .warn { color: var(--danger); }
+.badge.warn {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
 /* ── Recorder / row helpers ─────────────────────────────── */
 
 .recorder {

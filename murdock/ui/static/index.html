@@ -103,6 +103,25 @@
                 <h2 data-i18n="speakers.enrolled_title">Enrolled speakers</h2>
                 <div id="speaker-list" class="list"></div>
             </div>
+
+            <div class="card">
+                <h2 data-i18n="map.title">Voice map (embedding space)</h2>
+                <p class="meta" data-i18n="map.description">
+                    2-D projection (PCA) of every sample embedding: one color
+                    per speaker, large rings are centroids, gray crosses are
+                    untagged unknown samples. Tight, well-separated clusters
+                    mean reliable recognition; samples drifting toward another
+                    cluster are candidates for pruning.
+                </p>
+                <div class="row">
+                    <button type="button" id="embedding-map-btn" data-i18n="map.render">Render map</button>
+                    <label class="switch" style="margin:0">
+                        <input type="checkbox" id="embedding-map-unknown" checked>
+                        <span data-i18n="map.include_unknown">Include unknown samples</span>
+                    </label>
+                </div>
+                <div id="embedding-map-result"></div>
+            </div>
         </section>
 
         <!-- Verify tab -->

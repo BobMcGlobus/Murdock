@@ -103,6 +103,27 @@ async def list_roles():
     return {"roles": list(VALID_ROLES), "sources": list(VALID_SAMPLE_SOURCES)}
 
 
+@router.get("/embedding-map")
+async def embedding_map(
+    include_unknown: bool = True,
+    ctx: AppContext = Depends(get_context),
+):
+    """2-D PCA projection of all sample embeddings, centroids and unknowns.
+
+    Embedding-heavy (re-embeds every stored sample), so it runs in a
+    thread and is only triggered by an explicit UI action. Declared
+    before the /{speaker_id} routes so the literal path isn't swallowed
+    by the int path parameter.
+    """
+    import asyncio
+
+    from murdock.core.embedding_map import compute_embedding_map
+
+    return await asyncio.to_thread(
+        compute_embedding_map, ctx.speakers, ctx.unknown, include_unknown
+    )
+
+
 @router.get("", response_model=List[SpeakerOut])
 async def list_speakers(ctx: AppContext = Depends(get_context)):
     return [_speaker_to_out(s) for s in ctx.speakers.list_speakers()]
@@ -301,6 +322,18 @@ async def speaker_quality(speaker_id: int, ctx: AppContext = Depends(get_context
         scored_count=len(scored),
         avg_sample_score=avg,
     )
+
+
+@router.get("/{speaker_id}/health")
+async def speaker_health(speaker_id: int, ctx: AppContext = Depends(get_context)):
+    """Per-sample drift from the centroid + aging stats for one speaker."""
+    speaker = ctx.speakers.get_speaker(speaker_id)
+    if not speaker:
+        raise HTTPException(status_code=404, detail="Speaker not found")
+    import asyncio
+    data = await asyncio.to_thread(ctx.speakers.speaker_health, speaker_id)
+    data["name"] = speaker.name
+    return data
 
 
 @router.post("/{speaker_id}/rescore", response_model=RescoreResponse)

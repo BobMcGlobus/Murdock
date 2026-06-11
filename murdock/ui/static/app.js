@@ -332,6 +332,104 @@ $("#create-speaker-form").addEventListener("submit", async (e) => {
     }
 });
 
+// --- Voice map (embedding space) -------------------------------------------
+
+const MAP_PALETTE = [
+    "#dc2626", "#2563eb", "#16a34a", "#d97706", "#9333ea",
+    "#0891b2", "#db2777", "#65a30d", "#7c3aed", "#ea580c",
+];
+
+function renderEmbeddingMap(data) {
+    const out = $("#embedding-map-result");
+    if (!data.points || data.points.length === 0) {
+        out.innerHTML = `<p class="meta">${escapeHtml(t("map.not_enough"))}</p>`;
+        return;
+    }
+    // Scale data coords into the SVG viewBox with padding.
+    const W = 640, H = 420, PAD = 30;
+    const xs = data.points.map((p) => p.x);
+    const ys = data.points.map((p) => p.y);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const sx = (v) => PAD + ((v - xMin) / ((xMax - xMin) || 1)) * (W - 2 * PAD);
+    const sy = (v) => PAD + ((v - yMin) / ((yMax - yMin) || 1)) * (H - 2 * PAD);
+
+    // Stable speaker → color mapping (sorted by id).
+    const speakerIds = [...new Set(
+        data.points.filter((p) => p.speaker_id != null).map((p) => p.speaker_id)
+    )].sort((a, b) => a - b);
+    const colorOf = (sid) => MAP_PALETTE[speakerIds.indexOf(sid) % MAP_PALETTE.length];
+
+    let shapes = "";
+    // Draw unknowns first (background), then samples, then centroids on top.
+    const byKind = { unknown: [], sample: [], centroid: [] };
+    for (const p of data.points) (byKind[p.kind] || byKind.sample).push(p);
+
+    for (const p of byKind.unknown) {
+        const x = sx(p.x), y = sy(p.y);
+        const tip = `unknown #${p.sample_id}` +
+            (p.best_speaker ? ` · ${t("rec.nearest", { name: p.best_speaker })}` : "") +
+            (p.distance != null ? ` · d=${p.distance}` : "");
+        shapes += `<g class="map-unknown"><title>${escapeHtml(tip)}</title>
+            <line x1="${x - 4}" y1="${y - 4}" x2="${x + 4}" y2="${y + 4}"/>
+            <line x1="${x - 4}" y1="${y + 4}" x2="${x + 4}" y2="${y - 4}"/></g>`;
+    }
+    for (const p of byKind.sample) {
+        const x = sx(p.x), y = sy(p.y);
+        const tip = `${p.speaker} #${p.sample_id} (${p.source || "?"})` +
+            (p.quality != null ? ` · q=${p.quality.toFixed(2)}` : "") +
+            (p.distance != null ? ` · d=${p.distance}` : "");
+        shapes += `<circle cx="${x}" cy="${y}" r="4" fill="${colorOf(p.speaker_id)}"
+            fill-opacity="0.75"><title>${escapeHtml(tip)}</title></circle>`;
+    }
+    for (const p of byKind.centroid) {
+        const x = sx(p.x), y = sy(p.y);
+        shapes += `<circle cx="${x}" cy="${y}" r="9" fill="none"
+            stroke="${colorOf(p.speaker_id)}" stroke-width="2.5">
+            <title>${escapeHtml(t("map.centroid", { name: p.speaker }))}</title></circle>`;
+    }
+
+    const legend = speakerIds.map((sid) => {
+        const name = (byKind.centroid.find((c) => c.speaker_id === sid) ||
+                      byKind.sample.find((s) => s.speaker_id === sid) || {}).speaker || sid;
+        return `<span class="map-legend-item">
+            <span class="map-dot" style="background:${colorOf(sid)}"></span>${escapeHtml(name)}</span>`;
+    }).join(" ");
+    const unknownLegend = byKind.unknown.length
+        ? `<span class="map-legend-item"><span class="map-cross">✕</span>${escapeHtml(t("map.unknown_legend", { n: byKind.unknown.length }))}</span>`
+        : "";
+
+    out.innerHTML = `
+        <svg class="embedding-map" viewBox="0 0 ${W} ${H}" role="img">${shapes}</svg>
+        <div class="map-legend">${legend} ${unknownLegend}</div>
+        <p class="meta">${escapeHtml(t("map.stats", {
+            n: data.count,
+            pc1: Math.round((data.explained?.[0] || 0) * 100),
+            pc2: Math.round((data.explained?.[1] || 0) * 100),
+            ms: Math.round(data.computed_ms || 0),
+        }))}</p>`;
+}
+
+const embeddingMapBtn = $("#embedding-map-btn");
+if (embeddingMapBtn) {
+    embeddingMapBtn.addEventListener("click", async () => {
+        const out = $("#embedding-map-result");
+        embeddingMapBtn.disabled = true;
+        embeddingMapBtn.textContent = t("map.rendering");
+        out.innerHTML = `<p class="meta">${escapeHtml(t("map.computing"))}</p>`;
+        try {
+            const inc = $("#embedding-map-unknown").checked;
+            const data = await api(`/api/speakers/embedding-map?include_unknown=${inc}`);
+            renderEmbeddingMap(data);
+        } catch (err) {
+            out.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+        } finally {
+            embeddingMapBtn.disabled = false;
+            embeddingMapBtn.textContent = t("map.render");
+        }
+    });
+}
+
 // --- Verify ---------------------------------------------------------------
 
 $("#verify-form").addEventListener("submit", async (e) => {
@@ -464,10 +562,12 @@ async function loadSpeakers() {
                     <button class="secondary" data-view="${s.id}">${escapeHtml(t("speakers.view_samples"))}</button>
                     <button class="secondary" data-edit="${s.id}">${escapeHtml(t("speakers.edit"))}</button>
                     <button class="secondary" data-rescore="${s.id}">${escapeHtml(t("quality.rescore_one"))}</button>
+                    <button class="secondary" data-health="${s.id}">${escapeHtml(t("health_panel.btn"))}</button>
                     <button class="danger" data-del="${s.id}">${escapeHtml(t("speakers.delete_speaker"))}</button>
                 </div>
                 <div class="edit-panel" hidden></div>
                 <div class="samples" hidden></div>
+                <div class="health-panel" hidden></div>
             `;
             list.appendChild(item);
             // Fire-and-forget per-speaker quality fetch
@@ -515,8 +615,62 @@ async function loadSpeakers() {
                 toggleEdit(btn, speakers.find((x) => x.id == btn.dataset.edit))
             )
         );
+        list.querySelectorAll("button[data-health]").forEach((btn) =>
+            btn.addEventListener("click", () => toggleHealth(btn))
+        );
     } catch (err) {
         list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+async function toggleHealth(btn) {
+    const item = btn.closest(".list-item");
+    const panel = item.querySelector(".health-panel");
+    if (!panel.hidden) {
+        panel.hidden = true;
+        return;
+    }
+    panel.hidden = false;
+    panel.innerHTML = `<p class="meta">${escapeHtml(t("health_panel.loading"))}</p>`;
+    try {
+        const h = await api(`/api/speakers/${btn.dataset.health}/health`);
+        if (!h.embedded_count) {
+            panel.innerHTML = `<p class="meta">${escapeHtml(t("health_panel.no_samples"))}</p>`;
+            return;
+        }
+        let trend = "";
+        if (h.quality_trend != null) {
+            const up = h.quality_trend >= 0;
+            trend = ` · <span class="${up ? "ok" : "warn"}">${escapeHtml(
+                t(up ? "health_panel.trend_up" : "health_panel.trend_down",
+                  { d: Math.abs(h.quality_trend).toFixed(2) })
+            )}</span>`;
+        }
+        // Flag samples sitting far outside the profile's typical spread.
+        const flagAt = Math.max(h.spread_avg * 1.75, 0.12);
+        const rows = [...h.samples]
+            .sort((a, b) => b.centroid_distance - a.centroid_distance)
+            .map((s) => {
+                const flagged = s.centroid_distance >= flagAt && h.samples.length > 2;
+                return `<div class="row health-row${flagged ? " flagged" : ""}">
+                    <code>#${s.id}</code>
+                    <span class="badge">${escapeHtml(s.source || "?")}</span>
+                    <span class="meta">${escapeHtml(t("health_panel.age", { d: s.age_days.toFixed(1) }))}</span>
+                    ${s.quality_score != null ? `<span class="meta">q=${s.quality_score.toFixed(2)}</span>` : ""}
+                    <span class="meta">d=${s.centroid_distance.toFixed(3)}</span>
+                    ${flagged ? `<span class="badge warn">${escapeHtml(t("health_panel.drifted"))}</span>` : ""}
+                </div>`;
+            }).join("");
+        panel.innerHTML = `
+            <p class="meta">${escapeHtml(t("health_panel.summary", {
+                n: h.embedded_count,
+                avg: h.spread_avg.toFixed(3),
+                max: h.spread_max.toFixed(3),
+            }))}${trend}</p>
+            ${rows}
+            <p class="meta">${escapeHtml(t("health_panel.hint"))}</p>`;
+    } catch (err) {
+        panel.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
     }
 }
 
@@ -2330,10 +2484,35 @@ function escapeHtml(s) {
     }[c]));
 }
 
+// --- Collapsible settings cards --------------------------------------------
+//
+// The settings tab has grown long; every card collapses to its heading.
+// Default: first card (core settings) open, the rest closed. The choice
+// is remembered per card in localStorage. Hidden cards still receive
+// their loadSettings() population — display:none doesn't affect that.
+function initCollapsibleCards() {
+    document.querySelectorAll("#tab-settings > .card").forEach((card, i) => {
+        const h2 = card.querySelector("h2");
+        if (!h2) return;
+        const key = "murdock.collapse." + (h2.dataset.i18n || i);
+        card.classList.add("collapsible");
+        const stored = localStorage.getItem(key);
+        const collapsed = stored === null ? i > 0 : stored === "1";
+        card.classList.toggle("collapsed", collapsed);
+        h2.addEventListener("click", () => {
+            card.classList.toggle("collapsed");
+            localStorage.setItem(
+                key, card.classList.contains("collapsed") ? "1" : "0"
+            );
+        });
+    });
+}
+
 // Initial load
 loadRoles();
 loadSpeakers();
 initMicAvailability();
+initCollapsibleCards();
 api("/api/health")
     .then((h) => setStatus(t("health.status", { version: h.version, n: h.speakers })))
     .catch((err) => setStatus(t("health.failed", { err: err.message }), "err"));

@@ -197,7 +197,7 @@ class UpstreamInfoCache:
                     ),
                     attribution=Attribution(
                         name="Murdock",
-                        url="https://github.com/bobmcphee/Murdock",
+                        url="https://github.com/BobMcGlobus/Murdock",
                     ),
                     installed=True,
                     version=__version__,
@@ -208,7 +208,7 @@ class UpstreamInfoCache:
                             languages=languages,
                             attribution=Attribution(
                                 name="Murdock",
-                                url="https://github.com/bobmcphee/Murdock",
+                                url="https://github.com/BobMcGlobus/Murdock",
                             ),
                             installed=True,
                             version=__version__,

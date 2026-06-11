@@ -659,6 +659,80 @@ class SpeakerStore:
         scores = [float(r["quality_score"]) for r in rows]
         return speaker_training_quality(scores)
 
+    def speaker_health(self, speaker_id: int) -> dict:
+        """Profile health: per-sample drift from the centroid + aging stats.
+
+        Re-embeds every stored sample (blocking — call off the event
+        loop) and reports, per sample, its cosine distance to the
+        *current* centroid plus age and quality. Samples that drifted far
+        from the centroid are flagged so the user can prune bad takes;
+        the quality trend (newest vs. oldest half) shows whether
+        auto-enroll is improving or degrading the profile over time.
+        """
+        from .audio import decode_wav, to_mono_16k_pcm
+
+        samples = self.list_samples(speaker_id)  # newest first
+        entries: List[tuple[Dict, np.ndarray]] = []
+        for s in samples:
+            wav = self.get_sample_audio(s["id"])
+            if wav is None:
+                continue
+            try:
+                pcm, rate, width, channels = decode_wav(wav)
+                pcm = to_mono_16k_pcm(pcm, rate, width, channels)
+                emb = self.embedder.embed_pcm(pcm)
+            except Exception as exc:
+                _LOGGER.debug("Health: skipping sample %d: %s", s["id"], exc)
+                continue
+            entries.append((s, emb))
+
+        if not entries:
+            return {
+                "speaker_id": speaker_id,
+                "sample_count": len(samples),
+                "embedded_count": 0,
+                "samples": [],
+                "spread_avg": None,
+                "spread_max": None,
+                "quality_trend": None,
+            }
+
+        centroid = CAMPPlusEmbedder.average([e for _s, e in entries])
+        now = time.time()
+        out: List[Dict] = []
+        dists: List[float] = []
+        for s, emb in entries:
+            d = float(CAMPPlusEmbedder.cosine_distance(emb, centroid))
+            dists.append(d)
+            out.append({
+                "id": s["id"],
+                "source": s.get("source"),
+                "created_at": s["created_at"],
+                "age_days": round((now - s["created_at"]) / 86400.0, 2),
+                "quality_score": s.get("quality_score"),
+                "centroid_distance": round(d, 4),
+            })
+
+        # Quality trend: newest half vs. oldest half of the scored samples
+        # (list is newest-first). Positive = profile improving over time.
+        scored = [x["quality_score"] for x in out if x["quality_score"] is not None]
+        quality_trend: Optional[float] = None
+        if len(scored) >= 4:
+            half = len(scored) // 2
+            newest = sum(scored[:half]) / half
+            oldest = sum(scored[-half:]) / half
+            quality_trend = round(newest - oldest, 4)
+
+        return {
+            "speaker_id": speaker_id,
+            "sample_count": len(samples),
+            "embedded_count": len(out),
+            "samples": out,
+            "spread_avg": round(sum(dists) / len(dists), 4),
+            "spread_max": round(max(dists), 4),
+            "quality_trend": quality_trend,
+        }
+
     def rescore_all_samples(self, speaker_id: int) -> int:
         """Recompute quality scores for all samples of a speaker.
 

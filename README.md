@@ -91,7 +91,15 @@ cluster, and tag the sample later.
 ### UI & operations
 - **Web UI** — speaker enrollment (browser mic or WAV/MP3/M4A/OGG/
   FLAC/WebM upload), sample review with playback, unknown-voice
-  review, cluster review, recognition event log, runtime settings.
+  review, cluster review, recognition event log, runtime settings
+  (collapsible sections).
+- **Voice map** — 2-D PCA projection of the embedding space: every
+  sample, each speaker's centroid, and the unknown samples on one
+  scatter plot. Shows at a glance how cleanly speakers separate and
+  which samples drift.
+- **Speaker health** — per-sample drift from the centroid, age, and a
+  quality trend (newest vs. oldest samples), with drifted samples
+  flagged for pruning.
 - **Satellite tagging** — samples remember which satellite recorded
   them, visible in the UI.
 - **Backup/restore** — ZIP export of all speakers, samples and
@@ -310,6 +318,7 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── liveness.py           # Spectral liveness heuristic
 │   │   ├── extraction.py         # Adaptive target-speaker region extraction
 │   │   ├── calibration.py        # Platt-scaling confidence calibration
+│   │   ├── embedding_map.py      # 2-D PCA projection for the voice map
 │   │   ├── ha_integration.py     # HA REST client (legacy push path)
 │   │   ├── mqtt_integration.py   # MQTT discovery + context subscribe (recommended)
 │   │   ├── recognition_log.py    # Event log store
