@@ -67,6 +67,15 @@ class VerificationResult:
     distance: float
     threshold: float
     all_distances: Dict[str, float] = field(default_factory=dict)
+    # True when the winning distance came from a per-satellite sub-centroid
+    # rather than the speaker's global centroid.
+    used_satellite_profile: bool = False
+
+
+# Minimum same-satellite samples before a sub-centroid is built. Below
+# this the per-mic average is noisier than the global centroid it would
+# replace.
+SATELLITE_PROFILE_MIN_SAMPLES = 3
 
 
 @dataclass
@@ -437,8 +446,9 @@ class SpeakerStore:
             )
             sample_id = int(cur.lastrowid)
 
-            centroid, sample_count = self._compute_centroid(speaker_id)
+            centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
             self._write_centroid(speaker_id, centroid)
+            self._write_satellite_centroids(speaker_id, sat_centroids)
 
             self.conn.execute(
                 "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
@@ -550,8 +560,9 @@ class SpeakerStore:
                 (speaker_id, wav_bytes, duration_sec, now, new_quality, satellite_id),
             )
 
-            centroid, sample_count = self._compute_centroid(speaker_id)
+            centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
             self._write_centroid(speaker_id, centroid)
+            self._write_satellite_centroids(speaker_id, sat_centroids)
             self.conn.execute(
                 "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
                 (sample_count, now, speaker_id),
@@ -593,8 +604,35 @@ class SpeakerStore:
         self,
         embedding: np.ndarray,
         threshold: Optional[float] = None,
+        *,
+        satellite_id: Optional[str] = None,
+        speaker_thresholds: Optional[Dict[str, float]] = None,
+        global_threshold: Optional[float] = None,
+        tighten: float = 0.0,
     ) -> VerificationResult:
-        effective_threshold = threshold if threshold is not None else self.threshold
+        """Score an embedding against the enrolled speakers.
+
+        ``threshold`` is the base acceptance distance (already resolved
+        for the satellite, i.e. a per-satellite override when one exists).
+
+        Optional refinements, all default-off so old callers behave as
+        before:
+
+        * ``satellite_id`` — also score against per-satellite
+          sub-centroids; a speaker's effective distance is the minimum of
+          global and same-mic distance (a different microphone can only
+          stop hurting, never start helping impostors much).
+        * ``speaker_thresholds`` — adaptive per-speaker thresholds (from
+          calibration). The winner is gated by its own threshold; the
+          satellite override is preserved as a delta on top
+          (``threshold - global_threshold``), so a "noisy kitchen +0.05"
+          keeps applying to adaptive speakers too.
+        * ``tighten`` — context tightening (media playing in the room),
+          subtracted from whichever threshold won.
+        """
+        base = threshold if threshold is not None else self.threshold
+        glob = global_threshold if global_threshold is not None else base
+        sat_delta = base - glob
         blob = _embedding_to_blob(embedding)
 
         with self._lock:
@@ -603,9 +641,20 @@ class SpeakerStore:
                 "       vec_distance_cosine(se.embedding, ?) AS distance "
                 "FROM speaker_embeddings se "
                 "JOIN speakers s ON s.id = se.speaker_id "
-                "ORDER BY distance LIMIT 5",
+                "ORDER BY distance LIMIT 10",
                 (blob,),
             ).fetchall()
+            sub_map: Dict[int, np.ndarray] = {}
+            if satellite_id:
+                sub_rows = self.conn.execute(
+                    "SELECT speaker_id, embedding "
+                    "FROM speaker_satellite_centroids WHERE satellite_id = ?",
+                    (satellite_id,),
+                ).fetchall()
+                sub_map = {
+                    int(r["speaker_id"]): _blob_to_embedding(bytes(r["embedding"]))
+                    for r in sub_rows
+                }
 
         if not rows:
             return VerificationResult(
@@ -613,21 +662,42 @@ class SpeakerStore:
                 matched_speaker=None,
                 matched_speaker_id=None,
                 distance=2.0,
-                threshold=effective_threshold,
+                threshold=max(0.0, base - tighten),
             )
 
-        all_distances = {row["name"]: float(row["distance"]) for row in rows}
-        best = rows[0]
-        distance = float(best["distance"])
-        is_match = distance <= effective_threshold
+        # Effective distance per candidate: min(global, same-mic centroid).
+        candidates: List[tuple[float, sqlite3.Row, bool]] = []
+        for row in rows:
+            dist = float(row["distance"])
+            used_sub = False
+            sub = sub_map.get(int(row["speaker_id"]))
+            if sub is not None:
+                sub_dist = CAMPPlusEmbedder.cosine_distance(embedding, sub)
+                if sub_dist < dist:
+                    dist, used_sub = sub_dist, True
+            candidates.append((dist, row, used_sub))
+        candidates.sort(key=lambda c: c[0])
+
+        all_distances = {c[1]["name"]: float(c[0]) for c in candidates}
+        best_dist, best_row, best_sub = candidates[0]
+        best_name = best_row["name"]
+
+        if speaker_thresholds and best_name in speaker_thresholds:
+            effective_threshold = float(speaker_thresholds[best_name]) + sat_delta
+        else:
+            effective_threshold = base
+        effective_threshold = max(0.0, effective_threshold - tighten)
+
+        is_match = best_dist <= effective_threshold
 
         return VerificationResult(
             is_match=is_match,
-            matched_speaker=best["name"] if is_match else None,
-            matched_speaker_id=int(best["speaker_id"]) if is_match else None,
-            distance=distance,
+            matched_speaker=best_name if is_match else None,
+            matched_speaker_id=int(best_row["speaker_id"]) if is_match else None,
+            distance=best_dist,
             threshold=effective_threshold,
             all_distances=all_distances,
+            used_satellite_profile=bool(best_sub),
         )
 
     # ------------------------------------------------------------------
@@ -771,13 +841,22 @@ class SpeakerStore:
             self.conn.commit()
         return count
 
-    def collect_calibration_data(self) -> tuple[List[float], List[int]]:
-        """Build (distances, labels) pairs for Platt calibration.
+    def collect_calibration_data(
+        self,
+    ) -> tuple[List[float], List[int], Dict[str, Dict[str, List[float]]]]:
+        """Build calibration pairs plus per-speaker score distributions.
+
+        Returns ``(distances, labels, per_speaker)``:
 
         * genuine (label 1): each sample vs. its speaker's leave-one-out
           centroid — honest, since the sample isn't in its own reference.
         * impostor (label 0): each sample vs. every other speaker's full
           centroid.
+        * per_speaker: ``{name: {"genuine": [...], "impostor": [...]}}``
+          where a speaker's impostor scores are *other people's* samples
+          measured against *this speaker's* centroid — exactly the
+          distribution that decides this speaker's false-accept risk.
+          Feeds the adaptive per-speaker thresholds.
 
         Mirrors the verify path (sample-embedding vs. centroid). Audio is
         decoded under the lock, embedded outside it (the embedder
@@ -789,8 +868,11 @@ class SpeakerStore:
         # 1. Pull every sample's audio under the lock, grouped by speaker.
         with self._lock:
             speaker_rows = self.conn.execute(
-                "SELECT id FROM speakers ORDER BY id"
+                "SELECT id, name FROM speakers ORDER BY id"
             ).fetchall()
+            names: Dict[int, str] = {
+                int(r["id"]): r["name"] for r in speaker_rows
+            }
             audio_by_speaker: Dict[int, List[bytes]] = {}
             for srow in speaker_rows:
                 sid = int(srow["id"])
@@ -824,6 +906,12 @@ class SpeakerStore:
 
         distances: List[float] = []
         labels: List[int] = []
+        per_speaker: Dict[str, Dict[str, List[float]]] = {}
+
+        def _stats(sid: int) -> Dict[str, List[float]]:
+            name = names.get(sid, str(sid))
+            return per_speaker.setdefault(name, {"genuine": [], "impostor": []})
+
         sids = list(emb_by_speaker.keys())
         for sid, embs in emb_by_speaker.items():
             n = len(embs)
@@ -833,41 +921,91 @@ class SpeakerStore:
                     others = [embs[j] for j in range(n) if j != i]
                     try:
                         loo = CAMPPlusEmbedder.average(others)
-                        distances.append(
-                            CAMPPlusEmbedder.cosine_distance(e, loo)
-                        )
+                        d = CAMPPlusEmbedder.cosine_distance(e, loo)
+                        distances.append(d)
                         labels.append(1)
+                        _stats(sid)["genuine"].append(d)
                     except ValueError:
                         pass
-                # impostor — vs. other speakers' centroids
+                # impostor — vs. other speakers' centroids. The score
+                # belongs to the *target* speaker's distribution (osid):
+                # it measures how close strangers get to their profile.
                 for osid in sids:
                     if osid == sid or osid not in centroids:
                         continue
-                    distances.append(
-                        CAMPPlusEmbedder.cosine_distance(e, centroids[osid])
-                    )
+                    d = CAMPPlusEmbedder.cosine_distance(e, centroids[osid])
+                    distances.append(d)
                     labels.append(0)
+                    _stats(osid)["impostor"].append(d)
 
-        return distances, labels
+        return distances, labels, per_speaker
 
-    def _compute_centroid(self, speaker_id: int) -> tuple[np.ndarray, int]:
+    def _compute_centroid(
+        self, speaker_id: int
+    ) -> tuple[np.ndarray, int, Dict[str, np.ndarray]]:
+        """Re-embed all samples → (global centroid, count, per-satellite centroids).
+
+        Per-satellite centroids are built from samples tagged with a
+        satellite_id, one pass for everything so an enroll never embeds a
+        sample twice. Satellites with fewer than
+        ``SATELLITE_PROFILE_MIN_SAMPLES`` tagged samples get no
+        sub-centroid (too noisy to beat the global one).
+        """
         rows = self.conn.execute(
-            "SELECT audio FROM speaker_samples WHERE speaker_id = ? ORDER BY id",
+            "SELECT audio, satellite_id FROM speaker_samples "
+            "WHERE speaker_id = ? ORDER BY id",
             (speaker_id,),
         ).fetchall()
         embeddings: List[np.ndarray] = []
+        per_sat: Dict[str, List[np.ndarray]] = {}
         for row in rows:
             from .audio import decode_wav, to_mono_16k_pcm
             pcm, rate, width, channels = decode_wav(bytes(row["audio"]))
             pcm = to_mono_16k_pcm(pcm, rate, width, channels)
             try:
-                embeddings.append(self.embedder.embed_pcm(pcm))
+                emb = self.embedder.embed_pcm(pcm)
             except ValueError as exc:
                 _LOGGER.warning("Skipping sample during centroid rebuild: %s", exc)
+                continue
+            embeddings.append(emb)
+            sat = row["satellite_id"]
+            if sat:
+                per_sat.setdefault(sat, []).append(emb)
         if not embeddings:
-            return np.zeros(CAMPPlusEmbedder.EMBEDDING_DIM, dtype=np.float32), 0
+            return np.zeros(CAMPPlusEmbedder.EMBEDDING_DIM, dtype=np.float32), 0, {}
         centroid = CAMPPlusEmbedder.average(embeddings)
-        return centroid, len(embeddings)
+        sat_centroids = {
+            sat: (CAMPPlusEmbedder.average(embs), len(embs))
+            for sat, embs in per_sat.items()
+            if len(embs) >= SATELLITE_PROFILE_MIN_SAMPLES
+        }
+        return centroid, len(embeddings), sat_centroids
+
+    def _write_satellite_centroids(
+        self, speaker_id: int,
+        sat_centroids: Dict[str, tuple[np.ndarray, int]],
+    ) -> None:
+        """Replace the speaker's per-satellite sub-centroids."""
+        self.conn.execute(
+            "DELETE FROM speaker_satellite_centroids WHERE speaker_id = ?",
+            (speaker_id,),
+        )
+        now = time.time()
+        for sat, (centroid, count) in sat_centroids.items():
+            self.conn.execute(
+                "INSERT INTO speaker_satellite_centroids("
+                "speaker_id, satellite_id, embedding, sample_count, updated_at) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (speaker_id, sat, _embedding_to_blob(centroid), count, now),
+            )
+
+    def list_satellite_profiles(self, speaker_id: int) -> Dict[str, int]:
+        """Return ``{satellite_id: sample_count}`` for the speaker's sub-profiles."""
+        rows = self.conn.execute(
+            "SELECT satellite_id, sample_count FROM speaker_satellite_centroids "
+            "WHERE speaker_id = ?", (speaker_id,),
+        ).fetchall()
+        return {row["satellite_id"]: int(row["sample_count"]) for row in rows}
 
     def _write_centroid(self, speaker_id: int, centroid: np.ndarray) -> None:
         # sqlite-vec's vec0 virtual tables don't support ON CONFLICT / UPSERT,
@@ -885,8 +1023,9 @@ class SpeakerStore:
         )
 
     def _rebuild_centroid(self, speaker_id: int) -> None:
-        centroid, sample_count = self._compute_centroid(speaker_id)
+        centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
         self._write_centroid(speaker_id, centroid)
+        self._write_satellite_centroids(speaker_id, sat_centroids)
         self.conn.execute(
             "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
             (sample_count, time.time(), speaker_id),

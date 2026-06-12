@@ -72,6 +72,16 @@ cluster, and tag the sample later.
 - **Per-satellite thresholds** — override the verify threshold per
   satellite ID (e.g. a noisy kitchen vs. a quiet study) without
   touching the global default.
+- **Per-satellite voice profiles** — an extra centroid per (speaker,
+  satellite) built from same-mic samples; verification scores against
+  the better of global/same-mic. Removes systematic microphone bias
+  between satellites (fewer mics, no beamforming). Auto-maintained from
+  satellite-tagged samples, including auto-enroll.
+- **Adaptive per-speaker thresholds** — each speaker's gate derives from
+  their own genuine/impostor score distributions (recomputed on every
+  calibration refit), bounded to ±0.08 around the global threshold so a
+  small enrollment can nudge but never fling the gate open. Per-satellite
+  overrides keep applying as a delta on top.
 - **Media-restriction matrix** — per (satellite × media source), set how
   much that source tightens the threshold while it's playing: the
   living-room TV restricts the living-room satellite strongly, a bedroom
@@ -341,7 +351,9 @@ TV entity — live in the UI and survive restarts.
 - Presence prior — push likely person presence/absence over MQTT and
   fold it into the match probability as a soft, bounded Bayesian prior
   (nudge, never override a strong voice match)
-- Adaptive thresholds per speaker, in calibrated-probability space
+- Fast wake-window reject — a conservative early-reject on the first
+  second of audio so unknown voices are dropped in ~50 ms instead of
+  after the full utterance
 - Parakeet STT bridge / integration notes
 - ML-trained liveness classifier (using gathered TV samples)
 - Multi-modal identity fusion (voice + phone presence + room + mmWave)

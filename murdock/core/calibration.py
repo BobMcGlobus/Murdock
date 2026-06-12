@@ -170,6 +170,48 @@ class Calibrator:
         )
 
 
+def compute_adaptive_thresholds(
+    per_speaker: dict,
+    global_threshold: float,
+    *,
+    max_delta: float = 0.08,
+    min_genuine: int = 4,
+    min_impostor: int = 4,
+) -> dict:
+    """Derive a per-speaker verify threshold from their score distributions.
+
+    For each speaker with enough data, the threshold is the midpoint
+    between their genuine 95th percentile (their own voice on a bad day)
+    and their impostor 5th percentile (the closest a stranger gets to
+    their profile) — i.e. the per-speaker version of the global
+    threshold-recommendation logic, and (via the fitted sigmoid) a
+    per-speaker probability cut.
+
+    Deliberately bounded: the result is clamped to
+    ``global_threshold ± max_delta`` so a small enrollment can nudge a
+    speaker's gate, never swing it wide open. Speakers whose
+    distributions overlap (or with too little data) get no entry and
+    keep the global threshold.
+    """
+    out: dict = {}
+    for name, stats in (per_speaker or {}).items():
+        genuine = stats.get("genuine") or []
+        impostor = stats.get("impostor") or []
+        if len(genuine) < min_genuine or len(impostor) < min_impostor:
+            continue
+        g95 = float(np.percentile(np.asarray(genuine, dtype=np.float64), 95))
+        i05 = float(np.percentile(np.asarray(impostor, dtype=np.float64), 5))
+        if i05 - g95 <= 0:
+            # Overlapping distributions: the data can't justify a custom
+            # gate — more/better samples needed, not a different number.
+            continue
+        mid = (g95 + i05) / 2.0
+        lo = max(0.05, global_threshold - max_delta)
+        hi = global_threshold + max_delta
+        out[name] = round(min(hi, max(lo, mid)), 4)
+    return out
+
+
 def calibrator_from_pairs(
     distances: Sequence[float], labels: Sequence[int]
 ) -> Calibrator:

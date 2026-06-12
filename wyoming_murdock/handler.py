@@ -372,8 +372,7 @@ class MurdockHandler(AsyncEventHandler):
                     audio_16k = audio_16k[skip_bytes:]
 
             threshold = self.context.get_verify_threshold(self._satellite_id)
-            # Only declare early if clearly under threshold (extra margin).
-            early_threshold = threshold * 0.75
+            verify_kwargs = self._verify_kwargs()
 
             async with _MODEL_LOCK:
                 loop = asyncio.get_running_loop()
@@ -382,11 +381,14 @@ class MurdockHandler(AsyncEventHandler):
                 )
                 result = await loop.run_in_executor(
                     None,
-                    self.context.speakers.verify_embedding,
-                    embedding,
-                    threshold,
+                    lambda: self.context.speakers.verify_embedding(
+                        embedding, threshold, **verify_kwargs
+                    ),
                 )
 
+            # Only declare early if clearly under the effective threshold
+            # (extra margin against the short-window noise).
+            early_threshold = result.threshold * 0.75 if result else 0.0
             if result is not None and result.is_match and result.distance <= early_threshold:
                 self._early_match = result.matched_speaker
                 self._early_match_id = result.matched_speaker_id
@@ -552,6 +554,30 @@ class MurdockHandler(AsyncEventHandler):
                 "[%s] Satellite resolved via MQTT: %s (area=%s)",
                 self._session_id, active, self._satellite_area,
             )
+
+    def _verify_kwargs(self, tighten: float = 0.0) -> dict:
+        """Assemble the optional verify refinements for this session.
+
+        Pulls the per-satellite sub-profile id (when the feature is on and
+        the satellite is known) and the adaptive per-speaker thresholds
+        (when enabled and fitted). Centralised so the early probe and the
+        full verify gate behave identically.
+        """
+        kwargs: dict = {"tighten": tighten}
+        try:
+            if self._satellite_id and self.context.get_enable_satellite_profiles():
+                kwargs["satellite_id"] = self._satellite_id
+            if self.context.get_enable_adaptive_thresholds():
+                adaptive = self.context.get_adaptive_thresholds()
+                if adaptive:
+                    kwargs["speaker_thresholds"] = adaptive
+                    kwargs["global_threshold"] = self.context.get_verify_threshold()
+        except Exception:
+            _LOGGER.debug(
+                "[%s] verify-kwargs assembly failed", self._session_id,
+                exc_info=True,
+            )
+        return kwargs
 
     async def _finish_session(self) -> None:
         sid = self._session_id
@@ -742,11 +768,10 @@ class MurdockHandler(AsyncEventHandler):
             self._satellite_id, self._satellite_area
         )
         if tighten > 0:
-            threshold = max(0.0, threshold - tighten)
             _LOGGER.debug(
-                "[%s] Media playing — tightened threshold by %.3f to %.3f",
-                sid, tighten, threshold,
+                "[%s] Media playing — tightening threshold by %.3f", sid, tighten,
             )
+        verify_kwargs = self._verify_kwargs(tighten=tighten)
 
         verify_start = time.monotonic()
         embedding: Optional[np.ndarray] = None
@@ -759,9 +784,9 @@ class MurdockHandler(AsyncEventHandler):
                 )
                 result = await loop.run_in_executor(
                     None,
-                    self.context.speakers.verify_embedding,
-                    embedding,
-                    threshold,
+                    lambda: self.context.speakers.verify_embedding(
+                        embedding, threshold, **verify_kwargs
+                    ),
                 )
             except ValueError as exc:
                 _LOGGER.info("[%s] Embedding failed: %s", sid, exc)
@@ -779,9 +804,10 @@ class MurdockHandler(AsyncEventHandler):
 
         if result.is_match and result.matched_speaker:
             _LOGGER.info(
-                "[%s] MATCH: %s (d=%.4f, th=%.3f, verify=%.0fms)",
+                "[%s] MATCH: %s (d=%.4f, th=%.3f, verify=%.0fms%s)",
                 sid, result.matched_speaker, result.distance,
                 result.threshold, verify_ms,
+                ", via sat-profile" if result.used_satellite_profile else "",
             )
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
             transcript = await self._get_transcript(verify_audio)

@@ -1240,11 +1240,20 @@ async function loadSettings() {
             form.extraction_min_region_sec.value =
                 (s.extraction_min_region_sec ?? 0.6).toFixed(1);
         }
+        // Per-satellite voice profiles (new field — backwards-compatible)
+        if (form.enable_satellite_profiles) {
+            form.enable_satellite_profiles.checked = !!s.enable_satellite_profiles;
+        }
         // Confidence calibration (new section — backwards-compatible)
         const calForm = $("#calibration-form");
         if (calForm && calForm.enable_calibration) {
             calForm.enable_calibration.checked = !!s.enable_calibration;
+            if (calForm.enable_adaptive_thresholds) {
+                calForm.enable_adaptive_thresholds.checked =
+                    !!s.enable_adaptive_thresholds;
+            }
             renderCalibrationStatus(s);
+            renderAdaptiveThresholds(s.adaptive_thresholds || {});
         }
         if (s.upstream_uri_source === "override") {
             form.upstream_uri.value = s.upstream_uri || "";
@@ -1721,6 +1730,9 @@ $("#settings-form").addEventListener("submit", async (e) => {
     if (form.enable_extraction) {
         body.enable_extraction = form.enable_extraction.checked;
     }
+    if (form.enable_satellite_profiles) {
+        body.enable_satellite_profiles = form.enable_satellite_profiles.checked;
+    }
     if (form.extraction_threshold && form.extraction_threshold.value !== "") {
         body.extraction_threshold = parseFloat(form.extraction_threshold.value);
     }
@@ -1892,16 +1904,36 @@ function renderCalibrationStatus(s) {
     }
 }
 
+function renderAdaptiveThresholds(map) {
+    const el = $("#adaptive-thresholds-list");
+    if (!el) return;
+    const names = Object.keys(map);
+    if (names.length === 0) {
+        el.textContent = t("calibration.adaptive_none");
+        return;
+    }
+    el.innerHTML = names
+        .sort()
+        .map((n) =>
+            `<span class="badge">${escapeHtml(n)}: ${map[n].toFixed(3)}</span>`)
+        .join(" ");
+}
+
 $("#calibration-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
+    const body = { enable_calibration: form.enable_calibration.checked };
+    if (form.enable_adaptive_thresholds) {
+        body.enable_adaptive_thresholds = form.enable_adaptive_thresholds.checked;
+    }
     try {
         const s = await api("/api/settings", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ enable_calibration: form.enable_calibration.checked }),
+            body: JSON.stringify(body),
         });
         renderCalibrationStatus(s);
+        renderAdaptiveThresholds(s.adaptive_thresholds || {});
         setStatus(t("calibration.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");

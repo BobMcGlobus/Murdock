@@ -278,6 +278,11 @@
                         <input type="number" step="0.1" min="0" max="5" name="extraction_min_region_sec">
                         <small class="meta" data-i18n="settings.extraction_min_region_hint">Speech regions shorter than this aren't scored (too short to embed reliably). Default: 0.6 s.</small>
                     </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_satellite_profiles">
+                        <span data-i18n="settings.satellite_profiles">Per-satellite voice profiles</span>
+                        <small class="meta" data-i18n="settings.satellite_profiles_hint">Builds an extra voiceprint per (speaker, satellite) from same-mic samples and matches against the better one — removes microphone bias between satellites. Needs ≥3 samples tagged with that satellite.</small>
+                    </label>
                     <label>
                         <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
                         <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">
@@ -397,11 +402,17 @@
                         <input type="checkbox" name="enable_calibration">
                         <span data-i18n="calibration.enabled">Enable calibrated confidence</span>
                     </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_adaptive_thresholds">
+                        <span data-i18n="calibration.adaptive_enabled">Adaptive per-speaker thresholds</span>
+                        <small class="meta" data-i18n="calibration.adaptive_hint">Each speaker gets a threshold derived from their own genuine/impostor score distributions, bounded to ±0.08 around the global value. Recomputed on every recalibration; speakers without enough data keep the global threshold.</small>
+                    </label>
                     <div class="row">
                         <button type="submit" data-i18n="calibration.save">Save</button>
                         <button type="button" id="recalibrate-btn" class="secondary" data-i18n="calibration.recalibrate">Recalibrate now</button>
                     </div>
                     <p class="meta" id="calibration-status"></p>
+                    <div id="adaptive-thresholds-list" class="meta"></div>
                 </form>
                 <div id="calibration-feedback" class="meta"></div>
             </div>

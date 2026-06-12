@@ -183,6 +183,8 @@ const I18N = (() => {
             "settings.extraction_threshold_hint": "Max cosine distance for a region to count as the target speaker. Keep below the verify threshold. Default: 0.25.",
             "settings.extraction_min_region": "Min region length (seconds)",
             "settings.extraction_min_region_hint": "Speech regions shorter than this aren't scored (too short to embed reliably). Default: 0.6 s.",
+            "settings.satellite_profiles": "Per-satellite voice profiles",
+            "settings.satellite_profiles_hint": "Builds an extra voiceprint per (speaker, satellite) from same-mic samples and matches against the better one — removes microphone bias between satellites. Needs ≥3 samples tagged with that satellite.",
             "settings.save": "Save",
             "settings.refresh_langs": "Refresh from upstream",
             "settings.ping": "Ping upstream",
@@ -206,6 +208,9 @@ const I18N = (() => {
             "calibration.status_fitted": "Fitted from {genuine} genuine and {impostor} impostor pairs.",
             "calibration.fit_ok": "Calibrated from {genuine} genuine / {impostor} impostor pairs.",
             "calibration.fit_insufficient": "Not enough data — need at least two enrolled speakers with samples.",
+            "calibration.adaptive_enabled": "Adaptive per-speaker thresholds",
+            "calibration.adaptive_hint": "Each speaker gets a threshold derived from their own genuine/impostor score distributions, bounded to ±0.08 around the global value. Recomputed on every recalibration; speakers without enough data keep the global threshold.",
+            "calibration.adaptive_none": "No per-speaker thresholds yet — they appear after a recalibration with at least two speakers (≥4 samples each).",
 
             // -- MQTT --
             "mqtt.title": "MQTT (recommended)",
@@ -610,6 +615,8 @@ const I18N = (() => {
             "settings.extraction_threshold_hint": "Maximale Kosinus-Distanz, damit eine Region als Ziel-Sprecher zählt. Unter der Verify-Schwelle halten. Standard: 0.25.",
             "settings.extraction_min_region": "Minimale Regionlänge (Sekunden)",
             "settings.extraction_min_region_hint": "Kürzere Sprachregionen werden nicht bewertet (zu kurz für zuverlässiges Embedding). Standard: 0.6 s.",
+            "settings.satellite_profiles": "Stimmprofile pro Satellit",
+            "settings.satellite_profiles_hint": "Baut pro (Sprecher, Satellit) einen zusätzlichen Voiceprint aus Samples desselben Mikrofons und matcht gegen den besseren — beseitigt Mikrofon-Bias zwischen Satelliten. Braucht ≥3 Samples mit diesem Satellit-Tag.",
             "settings.save": "Speichern",
             "settings.refresh_langs": "Von Upstream aktualisieren",
             "settings.ping": "Upstream testen",
@@ -633,6 +640,9 @@ const I18N = (() => {
             "calibration.status_fitted": "Gefittet aus {genuine} genuine- und {impostor} impostor-Paaren.",
             "calibration.fit_ok": "Kalibriert aus {genuine} genuine / {impostor} impostor-Paaren.",
             "calibration.fit_insufficient": "Zu wenig Daten — mindestens zwei angelernte Sprecher mit Samples nötig.",
+            "calibration.adaptive_enabled": "Adaptive Schwellen pro Sprecher",
+            "calibration.adaptive_hint": "Jeder Sprecher bekommt eine Schwelle aus seinen eigenen genuine/impostor-Verteilungen, begrenzt auf ±0.08 um den globalen Wert. Wird bei jeder Neukalibrierung neu berechnet; Sprecher ohne genug Daten behalten die globale Schwelle.",
+            "calibration.adaptive_none": "Noch keine Sprecher-Schwellen — sie erscheinen nach einer Neukalibrierung mit mindestens zwei Sprechern (je ≥4 Samples).",
 
             // -- MQTT --
             "mqtt.title": "MQTT (empfohlen)",

@@ -39,6 +39,9 @@ class SettingsOut(BaseModel):
     calibration_n_genuine: int = 0
     calibration_n_impostor: int = 0
     calibration_fitted_at: float = 0.0
+    enable_satellite_profiles: bool = True
+    enable_adaptive_thresholds: bool = True
+    adaptive_thresholds: dict = {}
     upstream_uri: str
     upstream_uri_default: str
     upstream_uri_source: str  # "env" | "override"
@@ -90,6 +93,8 @@ class SettingsPatch(BaseModel):
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     enable_calibration: Optional[bool] = None
+    enable_satellite_profiles: Optional[bool] = None
+    enable_adaptive_thresholds: Optional[bool] = None
     # None → field not touched
     # ""   → clear override, fall back to env default
     # "…"  → set override (host:port accepted, tcp:// auto-prefixed)
@@ -161,6 +166,9 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         calibration_n_genuine=ctx.get_calibrator().n_genuine,
         calibration_n_impostor=ctx.get_calibrator().n_impostor,
         calibration_fitted_at=ctx.get_calibrator().fitted_at,
+        enable_satellite_profiles=ctx.get_enable_satellite_profiles(),
+        enable_adaptive_thresholds=ctx.get_enable_adaptive_thresholds(),
+        adaptive_thresholds=ctx.get_adaptive_thresholds(),
         upstream_uri=ctx.get_upstream_uri(),
         upstream_uri_default=ctx.settings.upstream_uri,
         upstream_uri_source=ctx.get_upstream_uri_source(),
@@ -232,6 +240,10 @@ async def patch_settings(
         ctx.set_extraction_min_region_sec(body.extraction_min_region_sec)
     if body.enable_calibration is not None:
         ctx.set_enable_calibration(body.enable_calibration)
+    if body.enable_satellite_profiles is not None:
+        ctx.set_enable_satellite_profiles(body.enable_satellite_profiles)
+    if body.enable_adaptive_thresholds is not None:
+        ctx.set_enable_adaptive_thresholds(body.enable_adaptive_thresholds)
     if body.upstream_uri is not None:
         ctx.set_upstream_uri(body.upstream_uri)
     if body.advertised_languages is not None:
@@ -488,6 +500,7 @@ class CalibrationOut(BaseModel):
     fitted_at: float
     a: float
     b: float
+    adaptive_thresholds: dict = {}
 
 
 @router.post("/recalibrate", response_model=CalibrationOut)
@@ -496,7 +509,8 @@ async def recalibrate(ctx: AppContext = Depends(get_context)):
 
     Synchronous (the caller asked for it) but offloaded to a thread so the
     event loop keeps serving. Re-embeds every stored sample, so it can
-    take a few seconds with many speakers.
+    take a few seconds with many speakers. Also recomputes the adaptive
+    per-speaker thresholds from the same pass.
     """
     calibrator = await asyncio.to_thread(ctx.recalibrate)
     return CalibrationOut(
@@ -506,6 +520,7 @@ async def recalibrate(ctx: AppContext = Depends(get_context)):
         fitted_at=calibrator.fitted_at,
         a=calibrator.a,
         b=calibrator.b,
+        adaptive_thresholds=ctx.get_adaptive_thresholds(),
     )
 
 

@@ -250,13 +250,64 @@ class AppContext:
 
         Heavy (re-embeds every stored sample), so call it off the event
         loop (``asyncio.to_thread``) or via :meth:`schedule_recalibration`.
-        Persists the result to the settings table.
+        Persists the result to the settings table — including the
+        adaptive per-speaker thresholds derived from the same pass.
         """
-        distances, labels = self.speakers.collect_calibration_data()
+        from .calibration import compute_adaptive_thresholds
+
+        distances, labels, per_speaker = self.speakers.collect_calibration_data()
         calibrator = calibrator_from_pairs(distances, labels)
         self._calibrator = calibrator
         set_setting(self.db, "calibration", json.dumps(calibrator.to_dict()))
+        adaptive = compute_adaptive_thresholds(
+            per_speaker, self.get_verify_threshold()
+        )
+        set_setting(self.db, "adaptive_thresholds", json.dumps(adaptive))
+        if adaptive:
+            _LOGGER.info(
+                "Adaptive thresholds updated: %s",
+                ", ".join(f"{n}={t}" for n, t in adaptive.items()),
+            )
         return calibrator
+
+    # ------------------------------------------------------------------
+    # Adaptive per-speaker thresholds + per-satellite voice profiles
+    # ------------------------------------------------------------------
+
+    def get_enable_adaptive_thresholds(self) -> bool:
+        override = get_setting(self.db, "enable_adaptive_thresholds")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_adaptive_thresholds
+
+    def set_enable_adaptive_thresholds(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_adaptive_thresholds", "true" if enabled else "false"
+        )
+
+    def get_adaptive_thresholds(self) -> dict:
+        """Return ``{speaker_name: threshold}`` (empty when none computed)."""
+        raw = get_setting(self.db, "adaptive_thresholds")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            return {
+                str(k): float(v) for k, v in data.items()
+            } if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def get_enable_satellite_profiles(self) -> bool:
+        override = get_setting(self.db, "enable_satellite_profiles")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_satellite_profiles
+
+    def set_enable_satellite_profiles(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_satellite_profiles", "true" if enabled else "false"
+        )
 
     def schedule_recalibration(self) -> None:
         """Fire-and-forget a recalibration on the running loop, debounced.

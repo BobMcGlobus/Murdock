@@ -100,6 +100,18 @@ class Settings(BaseSettings):
     # (and is the groundwork for adaptive thresholds / context fusion).
     enable_calibration: bool = Field(default=True)
 
+    # Per-satellite voice sub-profiles: build an extra centroid per
+    # (speaker, satellite) from same-mic samples and match against the
+    # better of global/sub. Removes systematic microphone bias (e.g. a
+    # satellite with fewer mics / no beamforming).
+    enable_satellite_profiles: bool = Field(default=True)
+
+    # Adaptive per-speaker thresholds derived from each speaker's own
+    # genuine/impostor distributions at calibration time, bounded to a
+    # small band around the global threshold. Recomputed on every
+    # calibration refit.
+    enable_adaptive_thresholds: bool = Field(default=True)
+
     # VAD
     vad_min_speech_ratio: float = Field(default=0.6)
     vad_speech_threshold: float = Field(default=0.5)

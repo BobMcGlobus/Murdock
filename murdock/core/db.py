@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+-- Per-satellite sub-centroids: one voiceprint per (speaker, microphone).
+-- Different satellites color the embedding differently (mic count,
+-- beamforming, room); matching against a same-mic centroid removes that
+-- bias. Few rows (speakers × satellites), so plain BLOBs + numpy cosine
+-- are plenty — no vec0 needed.
+CREATE TABLE IF NOT EXISTS speaker_satellite_centroids (
+    speaker_id INTEGER NOT NULL REFERENCES speakers(id) ON DELETE CASCADE,
+    satellite_id TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    sample_count INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (speaker_id, satellite_id)
+);
+
 CREATE TABLE IF NOT EXISTS recognition_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at REAL NOT NULL,
