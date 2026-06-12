@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0
+
+Smarter gating: microphone-aware profiles, per-speaker thresholds, and
+an opt-in early reject.
+
+- **Per-satellite voice profiles** — an extra voiceprint per (speaker,
+  satellite) built from same-mic samples (≥3 tagged); verification
+  scores against the better of global/same-mic. Removes systematic
+  microphone bias between satellites (e.g. fewer mics, no beamforming).
+  Auto-maintained on enroll, auto-enroll and sample deletion. Default on.
+- **Adaptive per-speaker thresholds** — each speaker's gate derives from
+  their own genuine/impostor score distributions, recomputed on every
+  calibration refit and bounded to ±0.08 around the global threshold.
+  Per-satellite overrides keep applying as a delta on top; media
+  tightening still subtracts. Values are shown in the calibration card.
+  Default on.
+- **Early reject (opt-in, default off)** — after ~1.5 s of clean voice,
+  sessions catastrophically far from every profile (distance ≥ threshold
+  + margin, default 0.25) are dropped: STT forwarding stops immediately
+  (no CPU wasted, unknown audio stops leaving the house on cloud STT)
+  and the satellite gets its empty transcript instantly at stream end.
+  Media playing in the room (MQTT context) halves the margin. Rejected
+  audio still lands in Unknown voices for one-click training. New
+  recognition-log outcome "blocked-early-reject".
+- **Default change:** "Require speaker match" is now OFF by default —
+  the hard gate made fresh installs unusable before any speakers were
+  enrolled. Existing installs keep their stored setting. Combine with
+  early reject to drop TV/radio while unknown humans still pass.
+
 ## 0.4.1
 
 - **Logo** — Murdock has a face: a crimson devil-horned head with a
