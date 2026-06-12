@@ -59,7 +59,11 @@ class Settings(BaseSettings):
     # ESPHome/Wyoming-satellite notification tone. Audio forwarded to
     # the STT upstream is NOT trimmed — the chime is harmless for ASR.
     skip_leading_seconds: float = Field(default=1.0)
-    require_speaker_match: bool = Field(default=True)
+    # When True, unknown voices get an empty transcript (hard gate). OFF
+    # by default since 0.5: with no/few enrollments a hard gate makes the
+    # satellite unusable — recognition results still publish either way,
+    # and the early-reject below (opt-in) covers the TV/radio case.
+    require_speaker_match: bool = Field(default=False)
     # Minimum liveness score (0–1) for the audio to be considered a real
     # voice. Below this the session is classified as TV / background noise
     # and blocked. Set to 0 to disable this gate entirely.
@@ -111,6 +115,18 @@ class Settings(BaseSettings):
     # small band around the global threshold. Recomputed on every
     # calibration refit.
     enable_adaptive_thresholds: bool = Field(default=True)
+
+    # Early reject (opt-in): after ~1.5 s of clean voice, kill sessions
+    # whose distance is catastrophically far from every profile —
+    # distance ≥ effective_threshold + early_reject_margin. Murdock then
+    # stops forwarding to the STT immediately and answers with an empty
+    # transcript at stream end. Works independently of
+    # require_speaker_match, so unknown *humans* can still pass while TV
+    # and radio get dropped. When media is playing in the satellite's
+    # room (MQTT context), the margin is halved — the reject gets bolder
+    # exactly when background audio is the likely culprit.
+    enable_early_reject: bool = Field(default=False)
+    early_reject_margin: float = Field(default=0.25)
 
     # VAD
     vad_min_speech_ratio: float = Field(default=0.6)

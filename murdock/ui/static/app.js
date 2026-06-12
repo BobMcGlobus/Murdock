@@ -1244,6 +1244,14 @@ async function loadSettings() {
         if (form.enable_satellite_profiles) {
             form.enable_satellite_profiles.checked = !!s.enable_satellite_profiles;
         }
+        // Early reject (new fields — backwards-compatible)
+        if (form.enable_early_reject) {
+            form.enable_early_reject.checked = !!s.enable_early_reject;
+        }
+        if (form.early_reject_margin) {
+            form.early_reject_margin.value =
+                (s.early_reject_margin ?? 0.25).toFixed(2);
+        }
         // Confidence calibration (new section — backwards-compatible)
         const calForm = $("#calibration-form");
         if (calForm && calForm.enable_calibration) {
@@ -1732,6 +1740,12 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.enable_satellite_profiles) {
         body.enable_satellite_profiles = form.enable_satellite_profiles.checked;
+    }
+    if (form.enable_early_reject) {
+        body.enable_early_reject = form.enable_early_reject.checked;
+    }
+    if (form.early_reject_margin && form.early_reject_margin.value !== "") {
+        body.early_reject_margin = parseFloat(form.early_reject_margin.value);
     }
     if (form.extraction_threshold && form.extraction_threshold.value !== "") {
         body.extraction_threshold = parseFloat(form.extraction_threshold.value);

@@ -32,6 +32,7 @@ OUTCOME_BLOCKED_EMBED_FAILED = "blocked-embed-failed"
 OUTCOME_PASSTHROUGH_SHORT = "passthrough-short"
 OUTCOME_PASSTHROUGH_NO_SPEAKERS = "passthrough-no-speakers"
 OUTCOME_BLOCKED_TV_NOISE = "blocked-tv-noise"
+OUTCOME_BLOCKED_EARLY_REJECT = "blocked-early-reject"
 OUTCOME_EMPTY = "empty"
 
 

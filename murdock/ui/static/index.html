@@ -283,6 +283,16 @@
                         <span data-i18n="settings.satellite_profiles">Per-satellite voice profiles</span>
                         <small class="meta" data-i18n="settings.satellite_profiles_hint">Builds an extra voiceprint per (speaker, satellite) from same-mic samples and matches against the better one — removes microphone bias between satellites. Needs ≥3 samples tagged with that satellite.</small>
                     </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_early_reject">
+                        <span data-i18n="settings.early_reject">Early reject (experimental TV/radio killer)</span>
+                        <small class="meta" data-i18n="settings.early_reject_hint">After ~1.5 s of clean voice, sessions that are catastrophically far from every profile are dropped: STT forwarding stops immediately and the satellite gets an empty transcript at stream end. Works even with "Require speaker match" off — unknown humans pass, TV doesn't. Media playing in the room (MQTT) halves the margin. Rejected audio still lands in Unknown voices for one-click training.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="settings.early_reject_margin">Early-reject margin (distance above threshold)</span>
+                        <input type="number" step="0.01" min="0.05" max="1" name="early_reject_margin">
+                        <small class="meta" data-i18n="settings.early_reject_margin_hint">Reject only when distance ≥ threshold + margin. Bigger = safer (fewer false rejects). Default: 0.25.</small>
+                    </label>
                     <label>
                         <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
                         <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">

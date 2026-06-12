@@ -47,6 +47,7 @@ from murdock.core.extraction import extract_target_speaker
 from murdock.core.info_cache import UpstreamInfoCache
 from murdock.core.liveness import analyze_pcm as analyze_liveness
 from murdock.core.recognition_log import (
+    OUTCOME_BLOCKED_EARLY_REJECT,
     OUTCOME_BLOCKED_EMBED_FAILED,
     OUTCOME_BLOCKED_NO_MATCH,
     OUTCOME_BLOCKED_NO_SPEAKERS,
@@ -63,6 +64,30 @@ _LOGGER = logging.getLogger("murdock.wyoming.handler")
 # Embedder is not thread-safe when the underlying ORT session is shared,
 # so serialise calls across connections.
 _MODEL_LOCK = asyncio.Lock()
+
+# When media is playing in the satellite's room, the early-reject margin
+# is multiplied by this — background audio is the likely culprit, so the
+# reject may get bolder.
+_EARLY_REJECT_MEDIA_FACTOR = 0.5
+
+
+def early_reject_decision(
+    distance: float,
+    effective_threshold: float,
+    margin: float,
+    media_playing: bool,
+) -> bool:
+    """Decide whether an utterance is catastrophically off-profile.
+
+    Deliberately conservative: the reject bar sits a full ``margin``
+    above the (already satellite/speaker-resolved) accept threshold, so
+    an enrolled user on a bad day lands between the two and simply runs
+    through the normal full verification. Media in the room halves the
+    margin.
+    """
+    if media_playing:
+        margin *= _EARLY_REJECT_MEDIA_FACTOR
+    return distance >= effective_threshold + margin
 
 
 class MurdockHandler(AsyncEventHandler):
@@ -107,6 +132,15 @@ class MurdockHandler(AsyncEventHandler):
         self._early_match_id: Optional[int] = None
         self._early_distance: Optional[float] = None
         self._early_probed: bool = False  # True after first probe attempt
+
+        # Early-reject state (opt-in). Once rejected we stop buffering and
+        # forwarding; the empty transcript goes out at stream end.
+        self._reject_probe_task: Optional[asyncio.Task] = None
+        self._reject_probed: bool = False
+        self._early_rejected: bool = False
+        self._reject_distance: Optional[float] = None
+        self._reject_bar: Optional[float] = None
+        self._reject_nearest: Optional[str] = None
 
     @property
     def upstream_uri(self) -> str:
@@ -165,6 +199,10 @@ class MurdockHandler(AsyncEventHandler):
             return True
 
         if AudioChunk.is_type(event.type):
+            # After an early reject the session is decided: stop buffering
+            # and forwarding, just drain the stream until AudioStop.
+            if self._early_rejected or self._responded:
+                return True
             chunk = AudioChunk.from_event(event)
             self._audio_rate = chunk.rate
             self._audio_width = chunk.width
@@ -208,6 +246,27 @@ class MurdockHandler(AsyncEventHandler):
                     self._early_probe_task = asyncio.create_task(
                         self._run_early_probe(snapshot)
                     )
+
+            # --- Early reject (opt-in) ---
+            # Fires once there are ~1.5 s of voice AFTER the chime trim,
+            # i.e. later than the accept probe — a reject needs more
+            # evidence than a confirm. With no speakers enrolled there is
+            # nothing to be "far away from", so the probe never arms.
+            if (
+                not self._reject_probed
+                and not self._early_match
+                and self.context.get_enable_early_reject()
+            ):
+                skip_bytes = int(
+                    self.context.get_skip_leading_seconds() * 16000 * 2
+                )
+                if len(self._audio_buffer) >= skip_bytes + 48000:
+                    self._reject_probed = True
+                    if len(self.context.speakers.list_speakers()) > 0:
+                        snapshot = bytes(self._audio_buffer)
+                        self._reject_probe_task = asyncio.create_task(
+                            self._run_early_reject(snapshot)
+                        )
             return True
 
         if AudioStop.is_type(event.type):
@@ -234,6 +293,12 @@ class MurdockHandler(AsyncEventHandler):
         self._early_match_id = None
         self._early_distance = None
         self._early_probed = False
+        self._reject_probe_task = None
+        self._reject_probed = False
+        self._early_rejected = False
+        self._reject_distance = None
+        self._reject_bar = None
+        self._reject_nearest = None
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -418,6 +483,115 @@ class MurdockHandler(AsyncEventHandler):
             return
         except Exception:
             _LOGGER.debug("[%s] Early probe failed", sid, exc_info=True)
+
+    async def _run_early_reject(self, audio_snapshot: bytes) -> None:
+        """Background task: drop the session early when the voice is
+        catastrophically far from every enrolled profile.
+
+        The reject bar is ``effective_threshold + margin`` — far above
+        the accept threshold, so enrolled users on a bad day fall in the
+        gap and proceed to the normal full verification. Media playing in
+        the satellite's room (MQTT context) halves the margin. On reject
+        we stop forwarding to the STT immediately (CPU/cloud saved, no
+        unknown audio leaves the house) and answer instantly at stream
+        end; the rejected audio still lands in the unknown postbox so a
+        false reject is one click from becoming training data.
+        """
+        sid = self._session_id
+        try:
+            from murdock.core.audio import to_mono_16k_pcm
+            audio_16k = to_mono_16k_pcm(
+                audio_snapshot, self._audio_rate,
+                self._audio_width, self._audio_channels,
+            )
+            skip_seconds = self.context.get_skip_leading_seconds()
+            if skip_seconds > 0:
+                skip_bytes = int(skip_seconds * 16000 * 2)
+                skip_bytes -= skip_bytes % 2
+                if skip_bytes < len(audio_16k):
+                    audio_16k = audio_16k[skip_bytes:]
+            # Need a meaningful window: ≥1 s of voice after the trim.
+            if len(audio_16k) < 16000 * 2:
+                return
+
+            self._resolve_satellite_id()
+            threshold = self.context.get_verify_threshold(self._satellite_id)
+            margin = self.context.get_early_reject_margin()
+            media_tighten = await self.context.compute_media_tightening(
+                self._satellite_id, self._satellite_area
+            )
+            verify_kwargs = self._verify_kwargs()
+
+            async with _MODEL_LOCK:
+                loop = asyncio.get_running_loop()
+                embedding = await loop.run_in_executor(
+                    None, self.context.embedder.embed_pcm, audio_16k,
+                )
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: self.context.speakers.verify_embedding(
+                        embedding, threshold, **verify_kwargs
+                    ),
+                )
+
+            if result is None or result.is_match or self._early_match:
+                return
+            if not early_reject_decision(
+                result.distance, result.threshold, margin,
+                media_playing=media_tighten > 0,
+            ):
+                _LOGGER.debug(
+                    "[%s] Early-reject probe: not far enough (d=%.4f)",
+                    sid, result.distance,
+                )
+                return
+
+            bar = result.threshold + (
+                margin * _EARLY_REJECT_MEDIA_FACTOR if media_tighten > 0 else margin
+            )
+            nearest = next(iter(result.all_distances), None)
+            self._early_rejected = True
+            self._reject_distance = result.distance
+            self._reject_bar = bar
+            self._reject_nearest = nearest
+            _LOGGER.info(
+                "[%s] EARLY REJECT: d=%.4f ≥ bar=%.3f (th=%.3f, media=%s) — "
+                "stopping STT forward",
+                sid, result.distance, bar, result.threshold,
+                media_tighten > 0,
+            )
+            await self._close_upstream(send_stop=False)
+            # Capture for training + notify HA right away.
+            if self.context.get_unknown_logging():
+                try:
+                    liveness = await asyncio.to_thread(analyze_liveness, audio_16k)
+                    await asyncio.to_thread(
+                        self.context.unknown.record,
+                        self._session_id,
+                        audio_16k,
+                        embedding,
+                        len(audio_16k) / (16000 * 2),
+                        result.distance,
+                        nearest,
+                        self._satellite_id,
+                        float(liveness.score),
+                    )
+                except Exception:
+                    _LOGGER.debug("[%s] Early-reject capture failed", sid,
+                                  exc_info=True)
+            self.context.publish_recognition(
+                speaker="unknown",
+                confidence=self.context.confidence_for(result.distance),
+                satellite_id=self._satellite_id,
+                is_known=False,
+                distance=result.distance,
+                threshold=bar,
+                nearest_speaker=nearest,
+            )
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            _LOGGER.debug("[%s] Early-reject probe failed", sid, exc_info=True)
 
     async def _maybe_extract(self, verify_audio: bytes) -> bytes:
         """Run adaptive speaker extraction, returning the audio to verify.
@@ -630,6 +804,23 @@ class MurdockHandler(AsyncEventHandler):
 
         duration = len(audio_16k) / (16000 * 2) if audio_16k else 0.0
         _LOGGER.debug("[%s] Audio stop: %.2fs (%d bytes)", sid, duration, len(audio_16k))
+
+        # Early reject already decided this session: STT was cut off
+        # mid-stream, so the empty transcript is ready instantly.
+        if self._early_rejected:
+            await self._send_transcript_to_satellite("", label="block:early-reject")
+            self._responded = True
+            await self._close_upstream(send_stop=False)
+            self._record_event(
+                outcome=OUTCOME_BLOCKED_EARLY_REJECT,
+                duration_sec=duration,
+                matched_speaker=self._reject_nearest,
+                distance=self._reject_distance,
+                threshold=self._reject_bar,
+                transcript="",
+            )
+            self._log_total_latency("blocked-early-reject")
+            return
 
         settings = self.context.settings
         speaker_count = len(self.context.speakers.list_speakers())
@@ -1193,7 +1384,11 @@ class MurdockHandler(AsyncEventHandler):
             await self._close_upstream(send_stop=False)
         except Exception:
             pass
-        for task in (self._upstream_reader_task, self._early_probe_task):
+        for task in (
+            self._upstream_reader_task,
+            self._early_probe_task,
+            self._reject_probe_task,
+        ):
             if task is not None and not task.done():
                 task.cancel()
                 try:

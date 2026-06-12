@@ -309,6 +309,35 @@ class AppContext:
             self.db, "enable_satellite_profiles", "true" if enabled else "false"
         )
 
+    # ------------------------------------------------------------------
+    # Early reject (opt-in TV/radio killer)
+    # ------------------------------------------------------------------
+
+    def get_enable_early_reject(self) -> bool:
+        override = get_setting(self.db, "enable_early_reject")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_early_reject
+
+    def set_enable_early_reject(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_early_reject", "true" if enabled else "false"
+        )
+
+    def get_early_reject_margin(self) -> float:
+        override = get_setting(self.db, "early_reject_margin")
+        if override is not None:
+            try:
+                return max(0.05, float(override))
+            except ValueError:
+                pass
+        return max(0.05, float(self.settings.early_reject_margin))
+
+    def set_early_reject_margin(self, value: float) -> None:
+        set_setting(
+            self.db, "early_reject_margin", f"{max(0.05, float(value)):.3f}"
+        )
+
     def schedule_recalibration(self) -> None:
         """Fire-and-forget a recalibration on the running loop, debounced.
 

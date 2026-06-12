@@ -53,6 +53,14 @@ cluster, and tag the sample later.
   entirely, so the common case adds only one cheap VAD pass.
 - **Liveness heuristic** — spectral rolloff / crest factor / HF ratio
   label samples as "likely live" or "likely TV".
+- **Early reject (opt-in)** — after ~1.5 s of clean voice, sessions
+  catastrophically far from every profile (distance ≥ threshold +
+  margin) are dropped: STT forwarding stops immediately and the
+  satellite gets its empty transcript at stream end. Independent of the
+  hard "require match" gate, so unknown humans can still pass while TV
+  and radio get killed; media playing in the room (MQTT context) halves
+  the margin. Rejected audio still lands in the unknown postbox for
+  one-click training. Default off.
 - **Auto-enroll with smart replacement** — high-confidence matches add
   fresh embeddings to the profile, replacing the lowest-quality sample
   when the cap is reached so the profile ages with the user's voice.
@@ -351,9 +359,6 @@ TV entity — live in the UI and survive restarts.
 - Presence prior — push likely person presence/absence over MQTT and
   fold it into the match probability as a soft, bounded Bayesian prior
   (nudge, never override a strong voice match)
-- Fast wake-window reject — a conservative early-reject on the first
-  second of audio so unknown voices are dropped in ~50 ms instead of
-  after the full utterance
 - Parakeet STT bridge / integration notes
 - ML-trained liveness classifier (using gathered TV samples)
 - Multi-modal identity fusion (voice + phone presence + room + mmWave)

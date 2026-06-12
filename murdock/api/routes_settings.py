@@ -42,6 +42,8 @@ class SettingsOut(BaseModel):
     enable_satellite_profiles: bool = True
     enable_adaptive_thresholds: bool = True
     adaptive_thresholds: dict = {}
+    enable_early_reject: bool = False
+    early_reject_margin: float = 0.25
     upstream_uri: str
     upstream_uri_default: str
     upstream_uri_source: str  # "env" | "override"
@@ -95,6 +97,8 @@ class SettingsPatch(BaseModel):
     enable_calibration: Optional[bool] = None
     enable_satellite_profiles: Optional[bool] = None
     enable_adaptive_thresholds: Optional[bool] = None
+    enable_early_reject: Optional[bool] = None
+    early_reject_margin: Optional[float] = Field(default=None, ge=0.05, le=1.0)
     # None → field not touched
     # ""   → clear override, fall back to env default
     # "…"  → set override (host:port accepted, tcp:// auto-prefixed)
@@ -169,6 +173,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         enable_satellite_profiles=ctx.get_enable_satellite_profiles(),
         enable_adaptive_thresholds=ctx.get_enable_adaptive_thresholds(),
         adaptive_thresholds=ctx.get_adaptive_thresholds(),
+        enable_early_reject=ctx.get_enable_early_reject(),
+        early_reject_margin=ctx.get_early_reject_margin(),
         upstream_uri=ctx.get_upstream_uri(),
         upstream_uri_default=ctx.settings.upstream_uri,
         upstream_uri_source=ctx.get_upstream_uri_source(),
@@ -244,6 +250,10 @@ async def patch_settings(
         ctx.set_enable_satellite_profiles(body.enable_satellite_profiles)
     if body.enable_adaptive_thresholds is not None:
         ctx.set_enable_adaptive_thresholds(body.enable_adaptive_thresholds)
+    if body.enable_early_reject is not None:
+        ctx.set_enable_early_reject(body.enable_early_reject)
+    if body.early_reject_margin is not None:
+        ctx.set_early_reject_margin(body.early_reject_margin)
     if body.upstream_uri is not None:
         ctx.set_upstream_uri(body.upstream_uri)
     if body.advertised_languages is not None:
