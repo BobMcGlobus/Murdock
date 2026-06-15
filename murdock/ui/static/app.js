@@ -1263,15 +1263,15 @@ async function loadSettings() {
             renderCalibrationStatus(s);
             renderAdaptiveThresholds(s.adaptive_thresholds || {});
         }
-        // Transcript augmentation (new section — backwards-compatible)
+        // Speaker context delivery (new section — backwards-compatible)
         const tplForm = $("#transcript-tpl-form");
-        if (tplForm && tplForm.enable_transcript_template) {
-            tplForm.enable_transcript_template.checked =
-                !!s.enable_transcript_template;
+        if (tplForm && tplForm.speaker_context_mode) {
+            tplForm.speaker_context_mode.value = s.speaker_context_mode || "none";
             tplForm.transcript_template_known.value =
                 s.transcript_template_known || "";
             tplForm.transcript_template_unknown.value =
                 s.transcript_template_unknown || "";
+            updateSpeakerContextMode();
         }
         if (s.upstream_uri_source === "override") {
             form.upstream_uri.value = s.upstream_uri || "";
@@ -1964,6 +1964,21 @@ $("#calibration-form").addEventListener("submit", async (e) => {
     }
 });
 
+function updateSpeakerContextMode() {
+    const sel = $("#speaker-context-mode");
+    if (!sel) return;
+    const mode = sel.value;
+    const fields = $("#transcript-tpl-fields");
+    if (fields) fields.hidden = mode !== "transcript";
+    const help = $("#speaker-context-mode-help");
+    if (help) help.textContent = t("transcript_tpl.help_" + mode);
+}
+
+const speakerModeSel = $("#speaker-context-mode");
+if (speakerModeSel) {
+    speakerModeSel.addEventListener("change", updateSpeakerContextMode);
+}
+
 $("#transcript-tpl-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -1973,7 +1988,7 @@ $("#transcript-tpl-form").addEventListener("submit", async (e) => {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                enable_transcript_template: form.enable_transcript_template.checked,
+                speaker_context_mode: form.speaker_context_mode.value,
                 transcript_template_known: form.transcript_template_known.value,
                 transcript_template_unknown: form.transcript_template_unknown.value,
             }),

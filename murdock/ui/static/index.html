@@ -363,36 +363,41 @@
             </div>
 
             <div class="card">
-                <h2 data-i18n="transcript_tpl.title">Transcript augmentation</h2>
+                <h2 data-i18n="transcript_tpl.title">Speaker context to the conversation agent</h2>
                 <p class="meta" data-i18n="transcript_tpl.description">
-                    Inject the recognition context directly into the transcript
-                    Murdock returns, so the speaker, role and confidence reach
-                    your conversation agent fresh on every utterance — the HA
-                    system prompt is cached per conversation and can report a
-                    stale speaker after someone else talks. For LLM agents;
-                    will break rigid intent matching. Placeholders:
-                    <code>{{ transcript }}</code> (alias <code>{{ tts }}</code>),
-                    <code>{{ speaker }}</code>, <code>{{ role }}</code>,
-                    <code>{{ confidence }}</code>, <code>{{ nearest }}</code>,
-                    <code>{{ distance }}</code>, <code>{{ satellite }}</code>.
+                    How the recognised speaker reaches your conversation agent.
+                    Pick the mode that matches how you run Assist.
                 </p>
                 <form id="transcript-tpl-form">
-                    <label class="switch">
-                        <input type="checkbox" name="enable_transcript_template">
-                        <span data-i18n="transcript_tpl.enable">Augment the transcript with speaker info</span>
-                    </label>
                     <label>
-                        <span data-i18n="transcript_tpl.known">Known speaker template</span>
-                        <textarea name="transcript_template_known" rows="4" spellcheck="false"></textarea>
+                        <span data-i18n="transcript_tpl.mode">Delivery mode</span>
+                        <select name="speaker_context_mode" id="speaker-context-mode">
+                            <option value="none" data-i18n="transcript_tpl.mode_none">MQTT / system prompt — keeps local intents</option>
+                            <option value="transcript" data-i18n="transcript_tpl.mode_transcript">Transcript augmentation — fresh per turn, LLM only</option>
+                        </select>
                     </label>
-                    <label>
-                        <span data-i18n="transcript_tpl.unknown">Unknown speaker template</span>
-                        <textarea name="transcript_template_unknown" rows="4" spellcheck="false"></textarea>
-                    </label>
+                    <p class="meta" id="speaker-context-mode-help"></p>
+                    <div id="transcript-tpl-fields">
+                        <p class="meta" data-i18n="transcript_tpl.placeholders">
+                            Placeholders: <code>{{ transcript }}</code> (alias
+                            <code>{{ tts }}</code>), <code>{{ speaker }}</code>,
+                            <code>{{ role }}</code>, <code>{{ confidence }}</code>,
+                            <code>{{ nearest }}</code>, <code>{{ distance }}</code>,
+                            <code>{{ satellite }}</code>.
+                        </p>
+                        <label>
+                            <span data-i18n="transcript_tpl.known">Known speaker template</span>
+                            <textarea name="transcript_template_known" rows="4" spellcheck="false"></textarea>
+                        </label>
+                        <label>
+                            <span data-i18n="transcript_tpl.unknown">Unknown speaker template</span>
+                            <textarea name="transcript_template_unknown" rows="4" spellcheck="false"></textarea>
+                        </label>
+                        <p class="meta" data-i18n="transcript_tpl.tip">Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.</p>
+                    </div>
                     <div class="row">
                         <button type="submit" data-i18n="generic.save">Save</button>
                     </div>
-                    <p class="meta" data-i18n="transcript_tpl.tip">Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.</p>
                 </form>
                 <div id="transcript-tpl-feedback" class="feedback"></div>
             </div>

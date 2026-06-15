@@ -44,7 +44,7 @@ class SettingsOut(BaseModel):
     adaptive_thresholds: dict = {}
     enable_early_reject: bool = False
     early_reject_margin: float = 0.25
-    enable_transcript_template: bool = False
+    speaker_context_mode: str = "none"  # "none" | "transcript"
     transcript_template_known: str = ""
     transcript_template_unknown: str = ""
     upstream_uri: str
@@ -102,7 +102,7 @@ class SettingsPatch(BaseModel):
     enable_adaptive_thresholds: Optional[bool] = None
     enable_early_reject: Optional[bool] = None
     early_reject_margin: Optional[float] = Field(default=None, ge=0.05, le=1.0)
-    enable_transcript_template: Optional[bool] = None
+    speaker_context_mode: Optional[str] = None  # "none" | "transcript"
     transcript_template_known: Optional[str] = None
     transcript_template_unknown: Optional[str] = None
     # None → field not touched
@@ -181,7 +181,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         adaptive_thresholds=ctx.get_adaptive_thresholds(),
         enable_early_reject=ctx.get_enable_early_reject(),
         early_reject_margin=ctx.get_early_reject_margin(),
-        enable_transcript_template=ctx.get_enable_transcript_template(),
+        speaker_context_mode=ctx.get_speaker_context_mode(),
         transcript_template_known=ctx.get_transcript_template_known(),
         transcript_template_unknown=ctx.get_transcript_template_unknown(),
         upstream_uri=ctx.get_upstream_uri(),
@@ -263,8 +263,11 @@ async def patch_settings(
         ctx.set_enable_early_reject(body.enable_early_reject)
     if body.early_reject_margin is not None:
         ctx.set_early_reject_margin(body.early_reject_margin)
-    if body.enable_transcript_template is not None:
-        ctx.set_enable_transcript_template(body.enable_transcript_template)
+    if body.speaker_context_mode is not None:
+        try:
+            ctx.set_speaker_context_mode(body.speaker_context_mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
     if body.transcript_template_known is not None:
         ctx.set_transcript_template_known(body.transcript_template_known)
     if body.transcript_template_unknown is not None:

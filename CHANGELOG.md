@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1
+
+- **Speaker context delivery mode** — a dropdown under *Settings →
+  Speaker context to the conversation agent* picks how the recognised
+  speaker reaches your agent:
+  - **MQTT / system prompt** (default): transcript untouched, speaker via
+    sensors; HA's local intent matching keeps working.
+  - **Transcript augmentation**: inject the recognition context straight
+    into the returned transcript (known/unknown templates with
+    `{{ speaker }}`, `{{ role }}`, `{{ confidence }}`, `{{ nearest }}`, …)
+    so it's fresh on every utterance with no MQTT and no system-prompt
+    cache staleness — at the cost of HA's local intent matching, so it's
+    for LLM-driven setups.
+
+  Each mode is explained inline in the UI and on the new
+  [Speaker Context](https://github.com/BobMcGlobus/Murdock/wiki/Speaker-Context)
+  wiki page. The dropdown leaves room for a future third mode.
+
 ## 0.5.0
 
 Smarter gating: microphone-aware profiles, per-speaker thresholds, and

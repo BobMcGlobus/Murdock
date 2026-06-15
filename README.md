@@ -132,13 +132,16 @@ cluster, and tag the sample later.
   vs. the old REST path, so Murdock never needs a long-lived token.
 - **REST + token (legacy)** — the original push-via-`input_text`/event
   path is still available for users who can't run a broker.
-- **Transcript augmentation (opt-in)** — inject the recognition context
-  (`{{ speaker }}`, `{{ role }}`, `{{ confidence }}`, `{{ nearest }}`, …)
-  straight into the transcript Murdock returns, via separate known/unknown
-  templates. Unlike the HA system prompt — which the conversation agent
-  caches per conversation, so it can report a stale speaker after someone
-  else talks — this arrives fresh with every utterance and needs no MQTT.
-  For LLM agents; breaks rigid intent matching, so it's off by default.
+- **Speaker context delivery (selectable)** — how the recognised speaker
+  reaches your conversation agent, as a mode dropdown:
+  - **MQTT / system prompt** (default) — transcript untouched, speaker
+    flows via sensors; HA's local intent matching keeps working.
+  - **Transcript augmentation** — inject the recognition context
+    (`{{ speaker }}`, `{{ role }}`, `{{ confidence }}`, `{{ nearest }}`, …)
+    straight into the returned transcript via separate known/unknown
+    templates, so it's fresh on every utterance with no MQTT and no
+    system-prompt cache staleness. Trade-off: breaks HA's local intent
+    matching, so it's for LLM-driven setups.
 
 ### Deployment
 - **Home Assistant add-on** — one-click install from this repo as a
@@ -363,6 +366,9 @@ TV entity — live in the UI and survive restarts.
 
 - Fold trustworthy recognition events into the calibration fit (not just
   enrollment-derived pairs)
+- Multiple Wyoming listen addresses — expose several ports with
+  independent settings, so differently-configured Assist pipelines (e.g.
+  strict gate vs. transcript-augmented LLM) can run in parallel
 - Presence prior — push likely person presence/absence over MQTT and
   fold it into the match probability as a soft, bounded Bayesian prior
   (nudge, never override a strong voice match)

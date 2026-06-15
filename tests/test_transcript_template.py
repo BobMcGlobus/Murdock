@@ -63,5 +63,43 @@ def test_default_templates_render_with_full_context():
     assert "{{" not in unknown
 
 
-def test_template_defaults_off():
-    assert Settings().enable_transcript_template is False
+def test_speaker_context_mode_defaults_to_none():
+    assert Settings().speaker_context_mode == "none"
+
+
+def _ctx(tmp_path):
+    from types import SimpleNamespace
+
+    from murdock.core.context import AppContext
+    from murdock.core.db import open_db
+
+    db = open_db(tmp_path / "m.db")
+    settings = SimpleNamespace(speaker_context_mode="none")
+    return AppContext(
+        settings=settings, db=db, embedder=None, vad=None, speakers=None,
+        unknown=None, ha=None, mqtt=None, recognition=None,
+    )
+
+
+def test_context_mode_get_set(tmp_path):
+    ctx = _ctx(tmp_path)
+    assert ctx.get_speaker_context_mode() == "none"
+    ctx.set_speaker_context_mode("transcript")
+    assert ctx.get_speaker_context_mode() == "transcript"
+
+
+def test_context_mode_rejects_invalid(tmp_path):
+    import pytest
+
+    ctx = _ctx(tmp_path)
+    with pytest.raises(ValueError):
+        ctx.set_speaker_context_mode("bogus")
+
+
+def test_context_mode_legacy_flag_maps_to_transcript(tmp_path):
+    from murdock.core.db import set_setting
+
+    ctx = _ctx(tmp_path)
+    # A pre-release install that had the old boolean flag enabled.
+    set_setting(ctx.db, "enable_transcript_template", "true")
+    assert ctx.get_speaker_context_mode() == "transcript"

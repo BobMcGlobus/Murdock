@@ -1157,7 +1157,7 @@ class MurdockHandler(AsyncEventHandler):
         the system prompt is cached per conversation, so it can otherwise
         report a stale speaker after a different person talks.
         """
-        if not transcript or not self.context.get_enable_transcript_template():
+        if not transcript or self.context.get_speaker_context_mode() != "transcript":
             return transcript
         template = (
             self.context.get_transcript_template_known() if is_known

@@ -128,17 +128,22 @@ class Settings(BaseSettings):
     enable_early_reject: bool = Field(default=False)
     early_reject_margin: float = Field(default=0.25)
 
-    # Transcript augmentation (opt-in): instead of relying on the HA
-    # system prompt (which the conversation agent caches per conversation,
-    # so speaker/confidence can go stale between turns), inject the
-    # recognition context straight into the transcript Murdock returns —
-    # so it arrives fresh with every single user utterance, no MQTT
-    # needed. Two templates (known / unknown speaker); placeholders use
-    # {{ var }} with: transcript (alias tts), speaker, role, confidence
-    # (percent), distance, nearest, satellite. Intended for LLM
-    # conversation agents — it will break rigid intent matching, hence
-    # default off.
-    enable_transcript_template: bool = Field(default=False)
+    # How the recognised speaker reaches the conversation agent:
+    #   "none"       — Murdock returns the raw transcript untouched; the
+    #                  speaker flows out-of-band via MQTT sensors / REST
+    #                  and you read it in the HA system prompt. Keeps HA's
+    #                  local intent matching ("turn on the light") intact.
+    #                  Caveat: HA caches the system prompt within a
+    #                  conversation, so the value can lag between turns.
+    #   "transcript" — inject the recognition context straight into the
+    #                  transcript Murdock returns (templates below), so it
+    #                  arrives fresh on every utterance with no MQTT.
+    #                  Breaks HA's local intent matching → for LLM agents.
+    # A dropdown rather than a bool so a third delivery mode can slot in
+    # later. Placeholders in the templates use {{ var }}: transcript
+    # (alias tts), speaker, role, confidence (percent), distance,
+    # nearest, satellite.
+    speaker_context_mode: str = Field(default="none")
     transcript_template_known: str = Field(
         default=(
             "{{ transcript }}\n\n"

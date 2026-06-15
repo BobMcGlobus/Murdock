@@ -342,16 +342,28 @@ class AppContext:
     # Transcript augmentation (inject recognition context into the text)
     # ------------------------------------------------------------------
 
-    def get_enable_transcript_template(self) -> bool:
-        override = get_setting(self.db, "enable_transcript_template")
-        if override is not None:
-            return override.lower() in ("1", "true", "yes", "on")
-        return self.settings.enable_transcript_template
+    SPEAKER_CONTEXT_MODES = ("none", "transcript")
 
-    def set_enable_transcript_template(self, enabled: bool) -> None:
-        set_setting(
-            self.db, "enable_transcript_template", "true" if enabled else "false"
-        )
+    def get_speaker_context_mode(self) -> str:
+        """How the speaker reaches the conversation agent: none | transcript."""
+        override = get_setting(self.db, "speaker_context_mode")
+        if override in self.SPEAKER_CONTEXT_MODES:
+            return override
+        # Back-compat with the pre-release boolean flag.
+        legacy = get_setting(self.db, "enable_transcript_template")
+        if legacy is not None and legacy.lower() in ("1", "true", "yes", "on"):
+            return "transcript"
+        if self.settings.speaker_context_mode in self.SPEAKER_CONTEXT_MODES:
+            return self.settings.speaker_context_mode
+        return "none"
+
+    def set_speaker_context_mode(self, mode: str) -> None:
+        if mode not in self.SPEAKER_CONTEXT_MODES:
+            raise ValueError(
+                f"Invalid speaker_context_mode: {mode!r} "
+                f"(allowed: {', '.join(self.SPEAKER_CONTEXT_MODES)})"
+            )
+        set_setting(self.db, "speaker_context_mode", mode)
 
     def get_transcript_template_known(self) -> str:
         override = get_setting(self.db, "transcript_template_known")
