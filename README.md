@@ -133,15 +133,18 @@ cluster, and tag the sample later.
 - **REST + token (legacy)** — the original push-via-`input_text`/event
   path is still available for users who can't run a broker.
 - **Speaker context delivery (selectable)** — how the recognised speaker
-  reaches your conversation agent, as a mode dropdown:
-  - **MQTT / system prompt** (default) — transcript untouched, speaker
-    flows via sensors; HA's local intent matching keeps working.
+  reaches your conversation agent, as a mode dropdown. Either way the
+  MQTT sensor entities keep publishing — the mode only changes the
+  agent hand-off:
+  - **Transcript untouched** (default) — speaker flows via the system
+    prompt (reading the MQTT/REST sensors); HA's local intent matching
+    keeps working.
   - **Transcript augmentation** — inject the recognition context
     (`{{ speaker }}`, `{{ role }}`, `{{ confidence }}`, `{{ nearest }}`, …)
     straight into the returned transcript via separate known/unknown
-    templates, so it's fresh on every utterance with no MQTT and no
-    system-prompt cache staleness. Trade-off: breaks HA's local intent
-    matching, so it's for LLM-driven setups.
+    templates, so it's fresh on every utterance with no system-prompt
+    cache staleness. Trade-off: breaks HA's local intent matching, so
+    it's for LLM-driven setups.
 
 ### Deployment
 - **Home Assistant add-on** — one-click install from this repo as a

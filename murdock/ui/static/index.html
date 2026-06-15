@@ -366,14 +366,16 @@
                 <h2 data-i18n="transcript_tpl.title">Speaker context to the conversation agent</h2>
                 <p class="meta" data-i18n="transcript_tpl.description">
                     How the recognised speaker reaches your conversation agent.
-                    Pick the mode that matches how you run Assist.
+                    Pick the mode that matches how you run Assist. This only
+                    changes the agent hand-off — the MQTT sensor entities keep
+                    updating in both modes whenever MQTT is enabled.
                 </p>
                 <form id="transcript-tpl-form">
                     <label>
                         <span data-i18n="transcript_tpl.mode">Delivery mode</span>
                         <select name="speaker_context_mode" id="speaker-context-mode">
-                            <option value="none" data-i18n="transcript_tpl.mode_none">MQTT / system prompt — keeps local intents</option>
-                            <option value="transcript" data-i18n="transcript_tpl.mode_transcript">Transcript augmentation — fresh per turn, LLM only</option>
+                            <option value="none" data-i18n="transcript_tpl.mode_none">Transcript untouched (via system prompt) — keeps local intents</option>
+                            <option value="transcript" data-i18n="transcript_tpl.mode_transcript">Augment transcript — fresh per turn, LLM only</option>
                         </select>
                     </label>
                     <p class="meta" id="speaker-context-mode-help"></p>
