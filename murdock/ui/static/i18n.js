@@ -216,6 +216,13 @@ const I18N = (() => {
             "calibration.adaptive_enabled": "Adaptive per-speaker thresholds",
             "calibration.adaptive_hint": "Each speaker gets a threshold derived from their own genuine/impostor score distributions, bounded to ±0.08 around the global value. Recomputed on every recalibration; speakers without enough data keep the global threshold.",
             "calibration.adaptive_none": "No per-speaker thresholds yet — they appear after a recalibration with at least two speakers (≥4 samples each).",
+            "transcript_tpl.title": "Transcript augmentation",
+            "transcript_tpl.description": "Inject recognition context into the transcript Murdock returns, so speaker/role/confidence reach the conversation agent fresh on every utterance (the HA system prompt is cached per conversation). For LLM agents; breaks rigid intent matching.",
+            "transcript_tpl.enable": "Augment the transcript with speaker info",
+            "transcript_tpl.known": "Known speaker template",
+            "transcript_tpl.unknown": "Unknown speaker template",
+            "transcript_tpl.saved": "Transcript template saved",
+            "transcript_tpl.tip": "Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.",
 
             // -- MQTT --
             "mqtt.title": "MQTT (recommended)",
@@ -653,6 +660,13 @@ const I18N = (() => {
             "calibration.adaptive_enabled": "Adaptive Schwellen pro Sprecher",
             "calibration.adaptive_hint": "Jeder Sprecher bekommt eine Schwelle aus seinen eigenen genuine/impostor-Verteilungen, begrenzt auf ±0.08 um den globalen Wert. Wird bei jeder Neukalibrierung neu berechnet; Sprecher ohne genug Daten behalten die globale Schwelle.",
             "calibration.adaptive_none": "Noch keine Sprecher-Schwellen — sie erscheinen nach einer Neukalibrierung mit mindestens zwei Sprechern (je ≥4 Samples).",
+            "transcript_tpl.title": "Transkript-Anreicherung",
+            "transcript_tpl.description": "Reichert das von Murdock zurückgegebene Transkript um den Erkennungs-Kontext an, damit Sprecher/Rolle/Konfidenz bei jeder Äußerung frisch beim Konversationsagenten ankommen (der HA-System-Prompt wird pro Konversation gecacht). Für LLM-Agenten; bricht starres Intent-Matching.",
+            "transcript_tpl.enable": "Transkript um Sprecher-Infos erweitern",
+            "transcript_tpl.known": "Vorlage für bekannten Sprecher",
+            "transcript_tpl.unknown": "Vorlage für unbekannten Sprecher",
+            "transcript_tpl.saved": "Transkript-Vorlage gespeichert",
+            "transcript_tpl.tip": "Tipp: Erkläre im System-Prompt deines Agenten, dass Zeilen in Klammern Erkennungs-Metadaten sind, nicht vom Nutzer gesprochen.",
 
             // -- MQTT --
             "mqtt.title": "MQTT (empfohlen)",

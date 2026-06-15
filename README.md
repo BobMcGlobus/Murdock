@@ -132,6 +132,13 @@ cluster, and tag the sample later.
   vs. the old REST path, so Murdock never needs a long-lived token.
 - **REST + token (legacy)** — the original push-via-`input_text`/event
   path is still available for users who can't run a broker.
+- **Transcript augmentation (opt-in)** — inject the recognition context
+  (`{{ speaker }}`, `{{ role }}`, `{{ confidence }}`, `{{ nearest }}`, …)
+  straight into the transcript Murdock returns, via separate known/unknown
+  templates. Unlike the HA system prompt — which the conversation agent
+  caches per conversation, so it can report a stale speaker after someone
+  else talks — this arrives fresh with every utterance and needs no MQTT.
+  For LLM agents; breaks rigid intent matching, so it's off by default.
 
 ### Deployment
 - **Home Assistant add-on** — one-click install from this repo as a

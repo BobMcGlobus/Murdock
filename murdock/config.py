@@ -128,6 +128,32 @@ class Settings(BaseSettings):
     enable_early_reject: bool = Field(default=False)
     early_reject_margin: float = Field(default=0.25)
 
+    # Transcript augmentation (opt-in): instead of relying on the HA
+    # system prompt (which the conversation agent caches per conversation,
+    # so speaker/confidence can go stale between turns), inject the
+    # recognition context straight into the transcript Murdock returns —
+    # so it arrives fresh with every single user utterance, no MQTT
+    # needed. Two templates (known / unknown speaker); placeholders use
+    # {{ var }} with: transcript (alias tts), speaker, role, confidence
+    # (percent), distance, nearest, satellite. Intended for LLM
+    # conversation agents — it will break rigid intent matching, hence
+    # default off.
+    enable_transcript_template: bool = Field(default=False)
+    transcript_template_known: str = Field(
+        default=(
+            "{{ transcript }}\n\n"
+            "[Recognized speaker: {{ speaker }} (role: {{ role }}), "
+            "confidence {{ confidence }}%.]"
+        )
+    )
+    transcript_template_unknown: str = Field(
+        default=(
+            "{{ transcript }}\n\n"
+            "[Speaker not recognized. Closest match: {{ nearest }} "
+            "at {{ confidence }}%.]"
+        )
+    )
+
     # VAD
     vad_min_speech_ratio: float = Field(default=0.6)
     vad_speech_threshold: float = Field(default=0.5)

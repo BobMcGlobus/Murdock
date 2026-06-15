@@ -1263,6 +1263,16 @@ async function loadSettings() {
             renderCalibrationStatus(s);
             renderAdaptiveThresholds(s.adaptive_thresholds || {});
         }
+        // Transcript augmentation (new section — backwards-compatible)
+        const tplForm = $("#transcript-tpl-form");
+        if (tplForm && tplForm.enable_transcript_template) {
+            tplForm.enable_transcript_template.checked =
+                !!s.enable_transcript_template;
+            tplForm.transcript_template_known.value =
+                s.transcript_template_known || "";
+            tplForm.transcript_template_unknown.value =
+                s.transcript_template_unknown || "";
+        }
         if (s.upstream_uri_source === "override") {
             form.upstream_uri.value = s.upstream_uri || "";
         } else {
@@ -1951,6 +1961,29 @@ $("#calibration-form").addEventListener("submit", async (e) => {
         setStatus(t("calibration.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");
+    }
+});
+
+$("#transcript-tpl-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fb = $("#transcript-tpl-feedback");
+    try {
+        await api("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                enable_transcript_template: form.enable_transcript_template.checked,
+                transcript_template_known: form.transcript_template_known.value,
+                transcript_template_unknown: form.transcript_template_unknown.value,
+            }),
+        });
+        fb.className = "feedback ok";
+        fb.textContent = t("transcript_tpl.saved");
+        setStatus(t("transcript_tpl.saved"), "ok");
+    } catch (err) {
+        fb.className = "feedback err";
+        fb.textContent = err.message;
     }
 });
 

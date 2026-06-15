@@ -338,6 +338,39 @@ class AppContext:
             self.db, "early_reject_margin", f"{max(0.05, float(value)):.3f}"
         )
 
+    # ------------------------------------------------------------------
+    # Transcript augmentation (inject recognition context into the text)
+    # ------------------------------------------------------------------
+
+    def get_enable_transcript_template(self) -> bool:
+        override = get_setting(self.db, "enable_transcript_template")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_transcript_template
+
+    def set_enable_transcript_template(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_transcript_template", "true" if enabled else "false"
+        )
+
+    def get_transcript_template_known(self) -> str:
+        override = get_setting(self.db, "transcript_template_known")
+        if override is not None:
+            return override
+        return self.settings.transcript_template_known
+
+    def set_transcript_template_known(self, value: str) -> None:
+        set_setting(self.db, "transcript_template_known", value or "")
+
+    def get_transcript_template_unknown(self) -> str:
+        override = get_setting(self.db, "transcript_template_unknown")
+        if override is not None:
+            return override
+        return self.settings.transcript_template_unknown
+
+    def set_transcript_template_unknown(self, value: str) -> None:
+        set_setting(self.db, "transcript_template_unknown", value or "")
+
     def schedule_recalibration(self) -> None:
         """Fire-and-forget a recalibration on the running loop, debounced.
 

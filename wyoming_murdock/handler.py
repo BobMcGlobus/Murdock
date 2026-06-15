@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from typing import Optional
@@ -69,6 +70,20 @@ _MODEL_LOCK = asyncio.Lock()
 # is multiplied by this — background audio is the likely culprit, so the
 # reject may get bolder.
 _EARLY_REJECT_MEDIA_FACTOR = 0.5
+
+
+_TEMPLATE_VAR = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+
+
+def render_transcript_template(template: str, values: dict) -> str:
+    """Substitute ``{{ var }}`` placeholders in a transcript template.
+
+    Plain variable substitution — NOT Jinja2: no conditions or loops
+    (the known/unknown split is handled by picking the right template).
+    Unknown placeholders render empty, so a typo can't leak ``{{ foo }}``
+    into the text the LLM sees.
+    """
+    return _TEMPLATE_VAR.sub(lambda m: str(values.get(m.group(1), "")), template)
 
 
 def early_reject_decision(
@@ -915,8 +930,17 @@ class MurdockHandler(AsyncEventHandler):
             )
             # HA events already fired in _run_early_probe. Just get transcript.
             transcript = await self._get_transcript(verify_audio)
+            early_spk = (
+                self.context.speakers.get_speaker(self._early_match_id)
+                if self._early_match_id is not None else None
+            )
             await self._send_transcript_to_satellite(
-                transcript, label=f"match:{self._early_match}"
+                self._augment_transcript(
+                    transcript, is_known=True, speaker=self._early_match,
+                    role=early_spk.role if early_spk else None,
+                    distance=self._early_distance, nearest=self._early_match,
+                ),
+                label=f"match:{self._early_match}",
             )
             self._responded = True
             await self._close_upstream(send_stop=False)
@@ -1003,7 +1027,12 @@ class MurdockHandler(AsyncEventHandler):
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
             transcript = await self._get_transcript(verify_audio)
             await self._send_transcript_to_satellite(
-                transcript, label=f"match:{result.matched_speaker}"
+                self._augment_transcript(
+                    transcript, is_known=True, speaker=result.matched_speaker,
+                    role=spk.role if spk else None,
+                    distance=result.distance, nearest=result.matched_speaker,
+                ),
+                label=f"match:{result.matched_speaker}",
             )
             self._responded = True
             await self._close_upstream(send_stop=False)
@@ -1076,7 +1105,11 @@ class MurdockHandler(AsyncEventHandler):
             _LOGGER.info("[%s] require_match=false → forwarding anyway", sid)
             transcript = await self._get_transcript(verify_audio)
             await self._send_transcript_to_satellite(
-                transcript, label="unknown-forwarded"
+                self._augment_transcript(
+                    transcript, is_known=False,
+                    distance=result.distance, nearest=best_speaker,
+                ),
+                label="unknown-forwarded",
             )
             self._responded = True
             await self._close_upstream(send_stop=False)
@@ -1104,6 +1137,55 @@ class MurdockHandler(AsyncEventHandler):
     # ------------------------------------------------------------------
     # Response helpers
     # ------------------------------------------------------------------
+
+    def _augment_transcript(
+        self,
+        transcript: str,
+        *,
+        is_known: bool,
+        speaker: Optional[str] = None,
+        role: Optional[str] = None,
+        distance: Optional[float] = None,
+        nearest: Optional[str] = None,
+    ) -> str:
+        """Wrap the transcript with the recognition context, if enabled.
+
+        Returns the transcript unchanged when the feature is off or the
+        chosen template is blank. Injecting the speaker/confidence into
+        the transcript (rather than the HA system prompt) guarantees the
+        values reach the conversation agent fresh on every utterance —
+        the system prompt is cached per conversation, so it can otherwise
+        report a stale speaker after a different person talks.
+        """
+        if not transcript or not self.context.get_enable_transcript_template():
+            return transcript
+        template = (
+            self.context.get_transcript_template_known() if is_known
+            else self.context.get_transcript_template_unknown()
+        )
+        if not template.strip():
+            return transcript
+        conf = (
+            self.context.confidence_for(distance) if distance is not None else 0.0
+        )
+        values = {
+            "transcript": transcript,
+            "tts": transcript,
+            "speaker": speaker or "",
+            "role": role or "",
+            "confidence": f"{conf * 100:.1f}",
+            "distance": f"{distance:.4f}" if distance is not None else "",
+            "nearest": nearest or "",
+            "satellite": self._satellite_id or "",
+        }
+        try:
+            return render_transcript_template(template, values)
+        except Exception:
+            _LOGGER.debug(
+                "[%s] Transcript template render failed; sending raw",
+                self._session_id, exc_info=True,
+            )
+            return transcript
 
     async def _send_transcript_to_satellite(
         self, text: str, *, label: str
