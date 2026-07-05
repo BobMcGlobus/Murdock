@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2
+
+- **Clarified speaker-context modes** — MQTT was never switched off by
+  the delivery mode (the mode only controls the transcript hand-off),
+  but the old option label "MQTT / system prompt" suggested otherwise.
+  Modes are now labelled "Transcript untouched (via system prompt)" and
+  "Augment transcript"; the UI, README and wiki state explicitly that
+  the MQTT sensor entities keep publishing in both modes whenever MQTT
+  is enabled. Labels/docs only — no behaviour change.
+
 ## 0.5.1
 
 - **Speaker context delivery mode** — a dropdown under *Settings →
