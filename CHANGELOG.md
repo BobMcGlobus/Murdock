@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1
+
+- **OpenRouter support** in the OpenAI-compatible STT backend. OpenRouter
+  offers `whisper-large-v3-turbo` and routes to Groq's fast inference —
+  usable without a Groq account. Their endpoint deviates from the OpenAI
+  shape (JSON body with base64 audio, provider-prefixed model slugs, API
+  root under `/api`); Murdock now detects `openrouter.ai` in the base URL
+  and adapts automatically. Preset: base URL `https://openrouter.ai`,
+  model `openai/whisper-large-v3-turbo` (note the prefix). All other
+  endpoints keep the standard multipart format.
+
 ## 0.6.0
 
 Pluggable STT — pick, fall back, and A/B-test your transcription engine.
