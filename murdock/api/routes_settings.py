@@ -74,6 +74,7 @@ class SettingsOut(BaseModel):
     shadow_stt_backend: str = "none"  # none | upstream | voxtral | openai
     shadow_upstream_uri: str = ""
     shadow_mistral_model: str = "voxtral-small-latest"
+    shadow_mistral_api_key_set: bool = False
     shadow_openai_base_url: str = ""
     shadow_openai_api_key_set: bool = False
     shadow_openai_model: str = ""
@@ -152,6 +153,7 @@ class SettingsPatch(BaseModel):
     shadow_stt_backend: Optional[str] = None
     shadow_upstream_uri: Optional[str] = None
     shadow_mistral_model: Optional[str] = None
+    shadow_mistral_api_key: Optional[str] = None
     shadow_openai_base_url: Optional[str] = None
     shadow_openai_api_key: Optional[str] = None
     shadow_openai_model: Optional[str] = None
@@ -221,6 +223,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         shadow_stt_backend=ctx.get_shadow_stt_backend(),
         shadow_upstream_uri=ctx.get_shadow_upstream_uri(),
         shadow_mistral_model=ctx.get_shadow_mistral_model(),
+        shadow_mistral_api_key_set=ctx.has_shadow_mistral_api_key(),
         shadow_openai_base_url=ctx.get_shadow_openai_base_url(),
         shadow_openai_api_key_set=ctx.has_shadow_openai_api_key(),
         shadow_openai_model=ctx.get_shadow_openai_model(),
@@ -373,6 +376,8 @@ async def patch_settings(
         ctx.set_shadow_upstream_uri(body.shadow_upstream_uri)
     if body.shadow_mistral_model is not None:
         ctx.set_shadow_mistral_model(body.shadow_mistral_model)
+    if body.shadow_mistral_api_key is not None:
+        ctx.set_shadow_mistral_api_key(body.shadow_mistral_api_key)
     if body.shadow_openai_base_url is not None:
         ctx.set_shadow_openai_base_url(body.shadow_openai_base_url)
     if body.shadow_openai_api_key is not None:

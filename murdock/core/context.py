@@ -1007,6 +1007,19 @@ class AppContext:
     def set_shadow_mistral_model(self, value: str) -> None:
         set_setting(self.db, "shadow_mistral_model", (value or "").strip())
 
+    def get_shadow_mistral_api_key(self) -> str:
+        """Shadow Voxtral key; empty falls back to the primary mistral key."""
+        override = get_setting(self.db, "shadow_mistral_api_key")
+        if override:
+            return override
+        return self.settings.shadow_mistral_api_key or self.get_mistral_api_key()
+
+    def has_shadow_mistral_api_key(self) -> bool:
+        return bool(get_setting(self.db, "shadow_mistral_api_key"))
+
+    def set_shadow_mistral_api_key(self, value: str) -> None:
+        set_setting(self.db, "shadow_mistral_api_key", value or "")
+
     def get_shadow_openai_base_url(self) -> str:
         override = get_setting(self.db, "shadow_openai_base_url")
         if override:
@@ -1049,7 +1062,7 @@ class AppContext:
 
         kind = self.get_shadow_stt_backend()
         if kind == "voxtral":
-            api_key = self.get_mistral_api_key()
+            api_key = self.get_shadow_mistral_api_key()
             if not api_key:
                 return None
             return VoxtralBackend(

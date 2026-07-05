@@ -1366,6 +1366,9 @@ async function loadSettings() {
                 sttForm.shadow_stt_backend.value = s.shadow_stt_backend || "none";
                 sttForm.shadow_upstream_uri.value = s.shadow_upstream_uri || "";
                 sttForm.shadow_mistral_model.value = s.shadow_mistral_model || "";
+                if (sttForm.shadow_mistral_api_key) {
+                    sttForm.shadow_mistral_api_key.value = "";
+                }
                 sttForm.shadow_openai_base_url.value = s.shadow_openai_base_url || "";
                 sttForm.shadow_openai_api_key.value = "";
                 sttForm.shadow_openai_model.value = s.shadow_openai_model || "";
@@ -1373,6 +1376,11 @@ async function loadSettings() {
                 if (shHint) {
                     shHint.textContent = s.shadow_openai_api_key_set
                         ? t("stt.key_set") : t("stt.key_empty");
+                }
+                const shMistralHint = $("#shadow-mistral-key-hint");
+                if (shMistralHint) {
+                    shMistralHint.textContent = s.shadow_mistral_api_key_set
+                        ? t("stt.key_set") : t("stt.shadow_mistral_key_empty");
                 }
             }
             updateSttFieldVisibility();
@@ -1716,6 +1724,10 @@ if (sttForm) {
             body.shadow_openai_model = sttForm.shadow_openai_model.value.trim();
             const shKey = sttForm.shadow_openai_api_key.value;
             if (shKey) body.shadow_openai_api_key = shKey;
+            if (sttForm.shadow_mistral_api_key) {
+                const shMKey = sttForm.shadow_mistral_api_key.value;
+                if (shMKey) body.shadow_mistral_api_key = shMKey;
+            }
         }
         try {
             await api("/api/settings", {
@@ -1736,6 +1748,7 @@ if (sttForm) {
             sttForm.mistral_api_key.value = "";
             if (sttForm.openai_api_key) sttForm.openai_api_key.value = "";
             if (sttForm.shadow_openai_api_key) sttForm.shadow_openai_api_key.value = "";
+            if (sttForm.shadow_mistral_api_key) sttForm.shadow_mistral_api_key.value = "";
             loadSettings();
         } catch (err) {
             if (fb) {

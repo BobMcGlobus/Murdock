@@ -29,6 +29,7 @@ def _ctx(tmp_path):
         shadow_stt_backend="none",
         shadow_upstream_uri=None,
         shadow_mistral_model="voxtral-small-latest",
+        shadow_mistral_api_key=None,
         shadow_openai_base_url="", shadow_openai_api_key=None,
         shadow_openai_model="",
         upstream_uri="tcp://localhost:10300",
@@ -158,7 +159,19 @@ def test_shadow_voxtral_uses_own_model_and_main_key(tmp_path):
     b = ctx.get_shadow_backend()
     assert isinstance(b, VoxtralBackend)
     assert b.model == "voxtral-small-latest"
-    assert b.api_key == "mk"  # primary Mistral key
+    assert b.api_key == "mk"  # primary Mistral key (fallback)
+
+
+def test_shadow_voxtral_own_key_wins(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.set_shadow_stt_backend("voxtral")
+    assert ctx.has_shadow_mistral_api_key() is False
+    ctx.set_shadow_mistral_api_key("shadow-mk")
+    assert ctx.has_shadow_mistral_api_key() is True
+    assert ctx.get_shadow_backend().api_key == "shadow-mk"
+    # Clearing falls back to the primary key again.
+    ctx.set_shadow_mistral_api_key("")
+    assert ctx.get_shadow_backend().api_key == "mk"
 
 
 def test_shadow_openai_key_falls_back_to_primary(tmp_path):

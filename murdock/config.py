@@ -230,6 +230,9 @@ class Settings(BaseSettings):
     shadow_stt_backend: str = Field(default="none")
     shadow_upstream_uri: Optional[str] = Field(default=None)
     shadow_mistral_model: str = Field(default="voxtral-small-latest")
+    # Own key for the Voxtral shadow (e.g. a second Mistral account /
+    # billing separation). Empty = fall back to the primary mistral key.
+    shadow_mistral_api_key: Optional[str] = Field(default=None)
     shadow_openai_base_url: str = Field(default="")
     shadow_openai_api_key: Optional[str] = Field(default=None)
     shadow_openai_model: str = Field(default="")

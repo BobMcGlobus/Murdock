@@ -378,7 +378,11 @@
                         <label>
                             <span data-i18n="stt.shadow_model">Shadow model</span>
                             <input type="text" name="shadow_mistral_model" placeholder="voxtral-small-latest">
-                            <small class="meta" data-i18n="stt.shadow_voxtral_hint">Uses your Mistral API key from above.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="stt.shadow_mistral_key">API key (empty = primary Mistral key)</span>
+                            <input type="password" name="shadow_mistral_api_key" autocomplete="off" data-i18n-ph="stt.ph_api_key" placeholder="paste key here">
+                            <small id="shadow-mistral-key-hint" class="meta"></small>
                         </label>
                     </div>
                     <div id="shadow-openai-fields" hidden>
