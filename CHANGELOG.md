@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+Pluggable STT — pick, fall back, and A/B-test your transcription engine.
+
+- **OpenAI-compatible backend** — new `stt_backend` option "openai"
+  talks to any `/v1/audio/transcriptions` endpoint: OpenAI
+  (`https://api.openai.com` + `gpt-4o-transcribe`), Groq
+  (`https://api.groq.com/openai` + `whisper-large-v3-turbo`) or a local
+  OpenAI-compatible server such as speaches (empty API key allowed).
+- **Voxtral model selectable** — switch e.g. to `voxtral-small-latest`
+  (more accurate than mini) straight from the UI or add-on options.
+- **Local fallback (opt-in)** — when the cloud STT fails (internet down,
+  provider outage), the buffered audio is transcribed one-shot over the
+  Wyoming upstream instead of returning an empty transcript.
+- **A/B shadow engine** — transcribe every utterance with a *second*
+  engine in the background (another Wyoming server, another Voxtral
+  model, or another OpenAI-compatible endpoint). Never returned to Home
+  Assistant and adds zero latency — the shadow transcript appears next
+  to the primary one in the recognition log with differences
+  highlighted, so you can compare engines on your real commands before
+  switching.
+- Backends now signal failures explicitly instead of silently returning
+  an empty transcript (which the fallback builds on).
+
 ## 0.5.2
 
 - **Clarified speaker-context modes** — MQTT was never switched off by
