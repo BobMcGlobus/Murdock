@@ -47,6 +47,41 @@ def test_openai_backend_label_and_base_url():
                                 base_url="https://api.groq.com/openai/")
     assert b.base_url == "https://api.groq.com/openai"
     assert b.label == "openai:whisper-large-v3-turbo"
+    assert b.is_openrouter is False
+
+
+def test_openrouter_detected_and_api_root_normalised():
+    # Bare host → /api appended so /v1/audio/transcriptions resolves.
+    b = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                base_url="https://openrouter.ai")
+    assert b.is_openrouter is True
+    assert b.base_url == "https://openrouter.ai/api"
+    # Already-correct base stays untouched.
+    b2 = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                 base_url="https://openrouter.ai/api/")
+    assert b2.base_url == "https://openrouter.ai/api"
+
+
+def test_openrouter_request_is_json_base64():
+    import base64
+
+    b = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                base_url="https://openrouter.ai")
+    wav = b"RIFFfakewav"
+    kwargs = b._request_kwargs(wav, "de")
+    assert "files" not in kwargs
+    payload = kwargs["json"]
+    assert payload["model"] == "openai/whisper-large-v3-turbo"
+    assert payload["input_audio"]["format"] == "wav"
+    assert base64.b64decode(payload["input_audio"]["data"]) == wav
+
+
+def test_standard_request_is_multipart():
+    b = OpenAICompatibleBackend(api_key="k", model="gpt-4o-transcribe")
+    kwargs = b._request_kwargs(b"RIFFfakewav", "de")
+    assert "json" not in kwargs
+    assert kwargs["files"]["file"][0] == "audio.wav"
+    assert kwargs["data"] == {"model": "gpt-4o-transcribe", "language": "de"}
 
 
 def test_voxtral_is_openai_compatible():

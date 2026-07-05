@@ -82,8 +82,34 @@ class OpenAICompatibleBackend:
         self.language = language
         self.timeout = timeout
         self.base_url = (base_url or "https://api.openai.com").rstrip("/")
+        # OpenRouter deviates from the OpenAI shape: JSON body with
+        # base64 audio instead of a multipart file, model slugs carry a
+        # provider prefix (openai/whisper-large-v3-turbo), and the API
+        # root lives under /api. Detect it by host so the user can just
+        # paste https://openrouter.ai and their key.
+        self.is_openrouter = "openrouter.ai" in self.base_url
+        if self.is_openrouter and not self.base_url.endswith("/api"):
+            self.base_url += "/api"
         if name:
             self.name = name
+
+    def _request_kwargs(self, wav_data: bytes, lang: Optional[str]) -> dict:
+        """Build the httpx POST kwargs for this endpoint's request shape."""
+        if self.is_openrouter:
+            import base64
+            payload: dict = {
+                "model": self.model,
+                "input_audio": {
+                    "data": base64.b64encode(wav_data).decode("ascii"),
+                    "format": "wav",
+                },
+            }
+            return {"json": payload}
+        files = {"file": ("audio.wav", wav_data, "audio/wav")}
+        data: dict = {"model": self.model}
+        if lang:
+            data["language"] = lang
+        return {"files": files, "data": data}
 
     @property
     def label(self) -> str:
@@ -118,15 +144,9 @@ class OpenAICompatibleBackend:
                 headers=headers,
                 timeout=self.timeout,
             ) as client:
-                files = {"file": ("audio.wav", wav_data, "audio/wav")}
-                data: dict = {"model": self.model}
-                if lang:
-                    data["language"] = lang
-
                 resp = await client.post(
                     "/v1/audio/transcriptions",
-                    files=files,
-                    data=data,
+                    **self._request_kwargs(wav_data, lang),
                 )
 
                 elapsed_ms = (time.monotonic() - t0) * 1000

@@ -85,9 +85,11 @@ schema:
   # Voxtral model name, e.g. voxtral-mini-latest or voxtral-small-latest.
   mistral_model: str?
   # OpenAI-compatible endpoint (stt_backend "openai"). Examples:
-  #   OpenAI: https://api.openai.com + gpt-4o-transcribe
-  #   Groq:   https://api.groq.com/openai + whisper-large-v3-turbo
-  #   local:  http://<host>:8000 (speaches etc., key may stay empty)
+  #   OpenAI:     https://api.openai.com + gpt-4o-transcribe
+  #   Groq:       https://api.groq.com/openai + whisper-large-v3-turbo
+  #   OpenRouter: https://openrouter.ai + openai/whisper-large-v3-turbo
+  #               (deviating request format is auto-detected by host)
+  #   local:      http://<host>:8000 (speaches etc., key may stay empty)
   openai_base_url: str?
   openai_api_key: password?
   openai_model: str?
