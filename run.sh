@@ -25,6 +25,9 @@ STT_BACKEND="$(cfg stt_backend)"
 UPSTREAM_URI="$(cfg upstream_uri)"
 MISTRAL_API_KEY="$(cfg mistral_api_key)"
 MISTRAL_MODEL="$(cfg mistral_model)"
+OPENAI_BASE_URL="$(cfg openai_base_url)"
+OPENAI_API_KEY="$(cfg openai_api_key)"
+OPENAI_MODEL="$(cfg openai_model)"
 LOG_LEVEL="$(cfg log_level)"
 ADVERTISED="$(cfg advertised_languages)"
 MQTT_ENABLED="$(cfg mqtt_enabled)"
@@ -48,6 +51,17 @@ if [ -n "$MISTRAL_API_KEY" ]; then
 fi
 if [ -n "$MISTRAL_MODEL" ]; then
     export MISTRAL_MODEL
+fi
+
+# OpenAI-compatible endpoint settings (OpenAI / Groq / local speaches)
+if [ -n "$OPENAI_BASE_URL" ]; then
+    export OPENAI_BASE_URL
+fi
+if [ -n "$OPENAI_API_KEY" ]; then
+    export OPENAI_API_KEY
+fi
+if [ -n "$OPENAI_MODEL" ]; then
+    export OPENAI_MODEL
 fi
 
 # Empty means "auto-detect from upstream" — same semantics as the

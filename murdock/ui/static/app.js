@@ -1341,16 +1341,41 @@ async function loadSettings() {
             sttForm.stt_backend.value = s.stt_backend || "upstream";
             sttForm.mistral_api_key.value = "";
             sttForm.mistral_model.value = s.mistral_model || "voxtral-mini-latest";
-            const voxtralFields = $("#stt-voxtral-fields");
-            if (voxtralFields) {
-                voxtralFields.hidden = s.stt_backend !== "voxtral";
-            }
             const keyHint = $("#stt-key-hint");
             if (keyHint) {
                 keyHint.textContent = s.mistral_api_key_set
                     ? t("stt.key_set")
                     : t("stt.key_empty");
             }
+            // OpenAI-compatible backend (new fields — backwards-compatible)
+            if (sttForm.openai_base_url) {
+                sttForm.openai_base_url.value = s.openai_base_url || "";
+                sttForm.openai_api_key.value = "";
+                sttForm.openai_model.value = s.openai_model || "";
+                const oaHint = $("#stt-openai-key-hint");
+                if (oaHint) {
+                    oaHint.textContent = s.openai_api_key_set
+                        ? t("stt.key_set") : t("stt.key_empty");
+                }
+            }
+            if (sttForm.stt_local_fallback) {
+                sttForm.stt_local_fallback.checked = !!s.stt_local_fallback;
+            }
+            // A/B shadow engine
+            if (sttForm.shadow_stt_backend) {
+                sttForm.shadow_stt_backend.value = s.shadow_stt_backend || "none";
+                sttForm.shadow_upstream_uri.value = s.shadow_upstream_uri || "";
+                sttForm.shadow_mistral_model.value = s.shadow_mistral_model || "";
+                sttForm.shadow_openai_base_url.value = s.shadow_openai_base_url || "";
+                sttForm.shadow_openai_api_key.value = "";
+                sttForm.shadow_openai_model.value = s.shadow_openai_model || "";
+                const shHint = $("#shadow-openai-key-hint");
+                if (shHint) {
+                    shHint.textContent = s.shadow_openai_api_key_set
+                        ? t("stt.key_set") : t("stt.key_empty");
+                }
+            }
+            updateSttFieldVisibility();
         }
         // Emotion detection (experimental)
         const emotionForm = $("#emotion-form");
@@ -1633,17 +1658,36 @@ if (mediaRestrictRefresh) {
 
 // --- STT backend toggle ---------------------------------------------------
 
+function updateSttFieldVisibility() {
+    const form = $("#stt-form");
+    if (!form) return;
+    const backend = form.stt_backend.value;
+    const vox = $("#stt-voxtral-fields");
+    if (vox) vox.hidden = backend !== "voxtral";
+    const oa = $("#stt-openai-fields");
+    if (oa) oa.hidden = backend !== "openai";
+    // Local fallback only makes sense for buffering cloud backends.
+    const fb = $("#stt-fallback-row");
+    if (fb) fb.hidden = backend === "upstream";
+    // Shadow sub-fields per selected shadow engine.
+    const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
+    const su = $("#shadow-upstream-fields");
+    if (su) su.hidden = shadow !== "upstream";
+    const sv = $("#shadow-voxtral-fields");
+    if (sv) sv.hidden = shadow !== "voxtral";
+    const so = $("#shadow-openai-fields");
+    if (so) so.hidden = shadow !== "openai";
+}
+
 const sttForm = $("#stt-form");
 if (sttForm) {
     const sttSelect = sttForm.stt_backend;
-    const voxtralFields = $("#stt-voxtral-fields");
-
-    function toggleVoxtralFields() {
-        if (voxtralFields) {
-            voxtralFields.hidden = sttSelect.value !== "voxtral";
-        }
+    sttSelect.addEventListener("change", updateSttFieldVisibility);
+    if (sttForm.shadow_stt_backend) {
+        sttForm.shadow_stt_backend.addEventListener(
+            "change", updateSttFieldVisibility
+        );
     }
-    sttSelect.addEventListener("change", toggleVoxtralFields);
 
     sttForm.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -1654,6 +1698,24 @@ if (sttForm) {
             if (keyVal) body.mistral_api_key = keyVal;
             const modelVal = sttForm.mistral_model.value.trim();
             if (modelVal) body.mistral_model = modelVal;
+        }
+        if (sttSelect.value === "openai" && sttForm.openai_base_url) {
+            body.openai_base_url = sttForm.openai_base_url.value.trim();
+            body.openai_model = sttForm.openai_model.value.trim();
+            const oaKey = sttForm.openai_api_key.value;
+            if (oaKey) body.openai_api_key = oaKey;
+        }
+        if (sttForm.stt_local_fallback) {
+            body.stt_local_fallback = sttForm.stt_local_fallback.checked;
+        }
+        if (sttForm.shadow_stt_backend) {
+            body.shadow_stt_backend = sttForm.shadow_stt_backend.value;
+            body.shadow_upstream_uri = sttForm.shadow_upstream_uri.value.trim();
+            body.shadow_mistral_model = sttForm.shadow_mistral_model.value.trim();
+            body.shadow_openai_base_url = sttForm.shadow_openai_base_url.value.trim();
+            body.shadow_openai_model = sttForm.shadow_openai_model.value.trim();
+            const shKey = sttForm.shadow_openai_api_key.value;
+            if (shKey) body.shadow_openai_api_key = shKey;
         }
         try {
             await api("/api/settings", {
@@ -1672,6 +1734,8 @@ if (sttForm) {
                 }, 2500);
             }
             sttForm.mistral_api_key.value = "";
+            if (sttForm.openai_api_key) sttForm.openai_api_key.value = "";
+            if (sttForm.shadow_openai_api_key) sttForm.shadow_openai_api_key.value = "";
             loadSettings();
         } catch (err) {
             if (fb) {
@@ -2497,6 +2561,18 @@ function renderRecognitionEvent(e) {
     const transcript = e.transcript
         ? `<div class="transcript">&ldquo;${escapeHtml(e.transcript)}&rdquo;</div>`
         : `<div class="transcript muted">${escapeHtml(t("rec.no_transcript"))}</div>`;
+    // A/B shadow engine result (filled in asynchronously). Highlight when
+    // the two engines disagree — that's the signal the A/B test is for.
+    let shadow = "";
+    if (e.shadow_transcript != null && e.shadow_engine) {
+        const same = (e.transcript || "").trim().toLowerCase()
+            === (e.shadow_transcript || "").trim().toLowerCase();
+        shadow = `<div class="transcript shadow${same ? "" : " differs"}">
+            <span class="badge">${escapeHtml(t("rec.shadow"))} ${escapeHtml(e.shadow_engine)}</span>
+            &ldquo;${escapeHtml(e.shadow_transcript)}&rdquo;
+            ${same ? "" : `<span class="meta"> ${escapeHtml(t("rec.shadow_differs"))}</span>`}
+        </div>`;
+    }
     const sat = e.satellite_id
         ? ` · <code>${escapeHtml(e.satellite_id)}</code>`
         : "";
@@ -2522,6 +2598,7 @@ function renderRecognitionEvent(e) {
                 <span class="meta">${ts} · ${e.duration_sec.toFixed(2)}s${sat}</span>
             </div>
             ${transcript}
+            ${shadow}
             ${nearestHint}
             ${scoreLine ? `<div class="meta">${scoreLine}</div>` : ""}
             ${assignBtn ? `<div class="row">${assignBtn}</div>` : ""}

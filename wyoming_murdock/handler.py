@@ -165,8 +165,12 @@ class MurdockHandler(AsyncEventHandler):
 
     @property
     def _is_voxtral(self) -> bool:
-        """True when the active STT backend is Voxtral (Mistral Cloud)."""
-        return self.context.get_stt_backend() == "voxtral"
+        """True when the active backend is cloud/HTTP (Voxtral or
+        OpenAI-compatible) — i.e. buffered transcription instead of the
+        streaming Wyoming upstream. Name kept for the many call sites;
+        semantics are "is a buffering cloud backend".
+        """
+        return self.context.get_stt_backend() in ("voxtral", "openai")
 
     # ------------------------------------------------------------------
     # Wyoming event dispatch
@@ -681,32 +685,62 @@ class MurdockHandler(AsyncEventHandler):
             )
             return ""
 
-    async def _transcribe_voxtral(self, audio_16k: bytes) -> str:
-        """Transcribe audio via the Voxtral (Mistral Cloud) API.
+    async def _transcribe_cloud(self, audio_16k: bytes) -> str:
+        """Transcribe buffered audio via the active cloud backend.
 
-        Called instead of _wait_for_upstream_transcript when
-        stt_backend == 'voxtral'. Falls back to empty string on error.
+        On backend failure (network down, provider outage) and with the
+        local fallback enabled, the same audio is transcribed one-shot
+        over the Wyoming upstream instead of silently returning "".
         """
+        from murdock.core.stt_backend import (
+            STTBackendError,
+            transcribe_via_wyoming,
+        )
+
         sid = self._session_id
-        backend = self.context.get_voxtral_backend()
+        backend = self.context.get_active_cloud_backend()
+        failed = False
         if backend is None:
             _LOGGER.warning(
-                "[%s] Voxtral backend selected but no API key configured", sid
+                "[%s] Cloud backend %r selected but not configured "
+                "(missing API key / model)",
+                sid, self.context.get_stt_backend(),
             )
-            return ""
-        _LOGGER.info("[%s] Transcribing via Voxtral (%s)…", sid, backend.model)
-        return await backend.transcribe(
-            audio_16k,
-            rate=16000,
-            width=2,
-            channels=1,
-            language=self._language,
-        )
+            failed = True
+        else:
+            _LOGGER.info("[%s] Transcribing via %s…", sid, backend.label)
+            try:
+                return await backend.transcribe(
+                    audio_16k,
+                    rate=16000,
+                    width=2,
+                    channels=1,
+                    language=self._language,
+                )
+            except STTBackendError as exc:
+                _LOGGER.warning("[%s] Cloud STT failed: %s", sid, exc)
+                failed = True
+
+        if failed and self.context.get_stt_local_fallback():
+            uri = self.context.get_upstream_uri()
+            if uri:
+                _LOGGER.info(
+                    "[%s] Falling back to local Wyoming STT at %s", sid, uri
+                )
+                try:
+                    return await transcribe_via_wyoming(
+                        uri, audio_16k, language=self._language
+                    )
+                except STTBackendError as exc:
+                    _LOGGER.warning(
+                        "[%s] Local fallback also failed: %s", sid, exc
+                    )
+        return ""
 
     async def _get_transcript(self, audio_16k: bytes) -> str:
         """Obtain the transcript from whichever backend is active."""
         if self._is_voxtral:
-            return await self._transcribe_voxtral(audio_16k)
+            return await self._transcribe_cloud(audio_16k)
         return await self._wait_for_upstream_transcript()
 
     # ------------------------------------------------------------------
@@ -952,7 +986,7 @@ class MurdockHandler(AsyncEventHandler):
             emotion, emotion_conf = await self._classify_emotion(
                 verify_audio, duration,
             )
-            self._record_event(
+            event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
                 matched_speaker=self._early_match,
@@ -963,6 +997,7 @@ class MurdockHandler(AsyncEventHandler):
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
             )
+            self._spawn_shadow(event_id, verify_audio)
             # Auto-enroll on early match too.
             await self._maybe_auto_enroll(
                 self._early_match_id, self._early_match,
@@ -1058,7 +1093,7 @@ class MurdockHandler(AsyncEventHandler):
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
             )
-            self._record_event(
+            event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
                 matched_speaker=result.matched_speaker,
@@ -1069,6 +1104,7 @@ class MurdockHandler(AsyncEventHandler):
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
             )
+            self._spawn_shadow(event_id, verify_audio)
             # Aging / auto-enroll: add fresh embedding if distance is
             # informative (not too close, not borderline).
             await self._maybe_auto_enroll(
@@ -1114,7 +1150,7 @@ class MurdockHandler(AsyncEventHandler):
             self._responded = True
             await self._close_upstream(send_stop=False)
             self._log_total_latency("unknown-forwarded")
-            self._record_event(
+            event_id = self._record_event(
                 outcome=OUTCOME_UNKNOWN_FORWARDED,
                 duration_sec=duration,
                 matched_speaker=best_speaker,
@@ -1123,6 +1159,7 @@ class MurdockHandler(AsyncEventHandler):
                 verify_ms=verify_ms,
                 transcript=transcript,
             )
+            self._spawn_shadow(event_id, verify_audio)
         else:
             await self._block_response(
                 outcome=OUTCOME_BLOCKED_NO_MATCH,
@@ -1225,9 +1262,10 @@ class MurdockHandler(AsyncEventHandler):
         self._responded = True
         await self._close_upstream(send_stop=False)
         self._log_total_latency(f"passthrough:{reason}")
-        self._record_event(
+        event_id = self._record_event(
             outcome=outcome, duration_sec=duration, transcript=transcript
         )
+        self._spawn_shadow(event_id, audio_16k or b"")
 
     async def _block_response(
         self,
@@ -1363,10 +1401,12 @@ class MurdockHandler(AsyncEventHandler):
         transcript: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
-    ) -> None:
-        """Persist a recognition audit row. Never raises."""
+    ) -> int:
+        """Persist a recognition audit row. Never raises. Returns the row
+        id (0 on failure) so the A/B shadow can attach its transcript
+        later."""
         try:
-            self.context.recognition.record(
+            return self.context.recognition.record(
                 session_id=self._session_id,
                 satellite_id=self._satellite_id,
                 duration_sec=duration_sec,
@@ -1384,6 +1424,60 @@ class MurdockHandler(AsyncEventHandler):
                 "[%s] Failed to record audit row", self._session_id,
                 exc_info=True,
             )
+            return 0
+
+    def _spawn_shadow(self, event_id: int, audio_16k: bytes) -> None:
+        """Fire-and-forget the A/B shadow transcription for an event.
+
+        Runs after the primary transcript already went back to the
+        satellite, so it never adds latency; the result is attached to
+        the audit row and shown next to the primary transcript in the
+        recognition log.
+        """
+        if not event_id or not audio_16k:
+            return
+        if self.context.get_shadow_stt_backend() == "none":
+            return
+        asyncio.create_task(self._run_shadow(event_id, audio_16k))
+
+    async def _run_shadow(self, event_id: int, audio_16k: bytes) -> None:
+        from murdock.core.stt_backend import (
+            STTBackendError,
+            transcribe_via_wyoming,
+        )
+
+        sid = self._session_id
+        kind = self.context.get_shadow_stt_backend()
+        try:
+            if kind == "upstream":
+                uri = self.context.get_shadow_upstream_uri()
+                if not uri:
+                    return
+                engine = f"wyoming:{uri}"
+                text = await transcribe_via_wyoming(
+                    uri, audio_16k, language=self._language
+                )
+            else:
+                backend = self.context.get_shadow_backend()
+                if backend is None:
+                    return
+                engine = backend.label
+                text = await backend.transcribe(
+                    audio_16k, language=self._language
+                )
+        except STTBackendError as exc:
+            _LOGGER.info("[%s] Shadow STT failed: %s", sid, exc)
+            self.context.recognition.set_shadow(
+                event_id, f"⚠ {exc}", f"{kind} (failed)"
+            )
+            return
+        except Exception:
+            _LOGGER.debug("[%s] Shadow STT crashed", sid, exc_info=True)
+            return
+        _LOGGER.info(
+            "[%s] Shadow transcript (%s): %r", sid, engine, text[:80]
+        )
+        self.context.recognition.set_shadow(event_id, text, engine)
 
     async def _capture_for_training(self, audio_16k: bytes, duration: float) -> None:
         """Log an utterance to the unknown postbox so it can be assigned to

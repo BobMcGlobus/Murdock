@@ -51,6 +51,10 @@ class RecognitionEvent:
     transcript: Optional[str]
     emotion: Optional[str] = None
     emotion_confidence: Optional[float] = None
+    # A/B shadow: a second STT engine's transcript of the same audio,
+    # filled in asynchronously after the event was recorded.
+    shadow_transcript: Optional[str] = None
+    shadow_engine: Optional[str] = None
 
 
 class RecognitionLog:
@@ -164,7 +168,8 @@ class RecognitionLog:
             rows = self.conn.execute(
                 "SELECT id, created_at, session_id, satellite_id, duration_sec, "
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
-                "transcript, emotion, emotion_confidence "
+                "transcript, emotion, emotion_confidence, "
+                "shadow_transcript, shadow_engine "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -184,9 +189,33 @@ class RecognitionLog:
                 transcript=row["transcript"],
                 emotion=row["emotion"] if "emotion" in row.keys() else None,
                 emotion_confidence=row["emotion_confidence"] if "emotion_confidence" in row.keys() else None,
+                shadow_transcript=row["shadow_transcript"] if "shadow_transcript" in row.keys() else None,
+                shadow_engine=row["shadow_engine"] if "shadow_engine" in row.keys() else None,
             )
             for row in rows
         ]
+
+    def set_shadow(self, event_id: int, transcript: str, engine: str) -> bool:
+        """Attach the A/B shadow transcript to an already-recorded event.
+
+        The shadow engine runs after the main response went out, so this
+        is always a late UPDATE by id. Returns False when the row has
+        already been trimmed away.
+        """
+        if not event_id:
+            return False
+        with self._lock:
+            try:
+                cur = self.conn.execute(
+                    "UPDATE recognition_events "
+                    "SET shadow_transcript = ?, shadow_engine = ? WHERE id = ?",
+                    ((transcript or "")[:1024], engine, event_id),
+                )
+                self.conn.commit()
+                return cur.rowcount > 0
+            except Exception:
+                _LOGGER.exception("Failed to store shadow transcript")
+                return False
 
     def stats(self, *, since_seconds: float = 24 * 3600) -> dict:
         """Return counts per outcome and per speaker for the last window."""

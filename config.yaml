@@ -64,13 +64,17 @@ options:
   upstream_uri: "tcp://core-whisper:10300"
   mistral_api_key: ""
   mistral_model: "voxtral-mini-latest"
+  openai_base_url: "https://api.openai.com"
+  openai_api_key: ""
+  openai_model: "gpt-4o-transcribe"
   log_level: "info"
   advertised_languages: "de,en"
   mqtt_enabled: true
 schema:
-  # STT backend: "upstream" proxies to a Wyoming STT container,
-  # "voxtral" sends audio to the Mistral Cloud API (no local STT needed).
-  stt_backend: list(upstream|voxtral)
+  # STT backend: "upstream" proxies to a Wyoming STT container, "voxtral"
+  # sends audio to the Mistral Cloud API, "openai" to any OpenAI-compatible
+  # /v1/audio/transcriptions endpoint (OpenAI, Groq, local speaches, …).
+  stt_backend: list(upstream|voxtral|openai)
   # URL of the existing Wyoming STT server (faster-whisper, wyoming-whisper,
   # Parakeet bridge, …). Only used when stt_backend is "upstream".
   # Accepts host:port too — the proxy prepends tcp:// if missing.
@@ -78,8 +82,15 @@ schema:
   # Mistral API key for Voxtral transcription. Only needed when
   # stt_backend is "voxtral". Get yours at https://console.mistral.ai
   mistral_api_key: password?
-  # Voxtral model name. Default is fine for most users.
+  # Voxtral model name, e.g. voxtral-mini-latest or voxtral-small-latest.
   mistral_model: str?
+  # OpenAI-compatible endpoint (stt_backend "openai"). Examples:
+  #   OpenAI: https://api.openai.com + gpt-4o-transcribe
+  #   Groq:   https://api.groq.com/openai + whisper-large-v3-turbo
+  #   local:  http://<host>:8000 (speaches etc., key may stay empty)
+  openai_base_url: str?
+  openai_api_key: password?
+  openai_model: str?
   log_level: list(debug|info|warning|error)
   # Comma-separated language codes forced into the Wyoming info event.
   # Override only if auto-detect from the upstream doesn't surface the

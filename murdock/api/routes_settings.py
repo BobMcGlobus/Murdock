@@ -61,9 +61,22 @@ class SettingsOut(BaseModel):
     ha_nearest_entity: str = ""
     ha_role_entity: str = ""
     ha_emotion_entity: str = ""
-    stt_backend: str = "upstream"  # "upstream" | "voxtral"
+    stt_backend: str = "upstream"  # "upstream" | "voxtral" | "openai"
     mistral_api_key_set: bool = False
     mistral_model: str = "voxtral-mini-latest"
+    # OpenAI-compatible cloud backend (OpenAI, Groq, local speaches, …)
+    openai_base_url: str = "https://api.openai.com"
+    openai_api_key_set: bool = False
+    openai_model: str = "gpt-4o-transcribe"
+    # Local Wyoming fallback for cloud backend failures
+    stt_local_fallback: bool = False
+    # A/B shadow engine (transcript logged, never returned via Wyoming)
+    shadow_stt_backend: str = "none"  # none | upstream | voxtral | openai
+    shadow_upstream_uri: str = ""
+    shadow_mistral_model: str = "voxtral-small-latest"
+    shadow_openai_base_url: str = ""
+    shadow_openai_api_key_set: bool = False
+    shadow_openai_model: str = ""
     # MQTT integration (recommended over the REST/token path)
     mqtt_enabled: bool = False
     mqtt_host: str = ""
@@ -129,9 +142,19 @@ class SettingsPatch(BaseModel):
     enable_emotion: Optional[bool] = None
     quality_weights: Optional[dict] = None  # {"speech_ratio":0.25,...} — pass {} to reset
     # STT backend selection
-    stt_backend: Optional[str] = None  # "upstream" | "voxtral"
+    stt_backend: Optional[str] = None  # "upstream" | "voxtral" | "openai"
     mistral_api_key: Optional[str] = None
     mistral_model: Optional[str] = None
+    openai_base_url: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
+    stt_local_fallback: Optional[bool] = None
+    shadow_stt_backend: Optional[str] = None
+    shadow_upstream_uri: Optional[str] = None
+    shadow_mistral_model: Optional[str] = None
+    shadow_openai_base_url: Optional[str] = None
+    shadow_openai_api_key: Optional[str] = None
+    shadow_openai_model: Optional[str] = None
     # MQTT integration
     mqtt_enabled: Optional[bool] = None
     mqtt_host: Optional[str] = None
@@ -191,6 +214,16 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         stt_backend=ctx.get_stt_backend(),
         mistral_api_key_set=ctx.has_mistral_api_key(),
         mistral_model=ctx.get_mistral_model(),
+        openai_base_url=ctx.get_openai_base_url(),
+        openai_api_key_set=ctx.has_openai_api_key(),
+        openai_model=ctx.get_openai_model(),
+        stt_local_fallback=ctx.get_stt_local_fallback(),
+        shadow_stt_backend=ctx.get_shadow_stt_backend(),
+        shadow_upstream_uri=ctx.get_shadow_upstream_uri(),
+        shadow_mistral_model=ctx.get_shadow_mistral_model(),
+        shadow_openai_base_url=ctx.get_shadow_openai_base_url(),
+        shadow_openai_api_key_set=ctx.has_shadow_openai_api_key(),
+        shadow_openai_model=ctx.get_shadow_openai_model(),
         mqtt_enabled=ctx.get_mqtt_enabled(),
         mqtt_host=ctx.get_mqtt_host(),
         mqtt_port=ctx.get_mqtt_port(),
@@ -319,9 +352,33 @@ async def patch_settings(
             ctx.set_quality_weights(body.quality_weights)
     # STT backend selection
     if body.stt_backend is not None:
-        if body.stt_backend not in ("upstream", "voxtral"):
-            raise HTTPException(status_code=400, detail="stt_backend must be 'upstream' or 'voxtral'")
-        ctx.set_stt_backend(body.stt_backend)
+        try:
+            ctx.set_stt_backend(body.stt_backend)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if body.openai_base_url is not None:
+        ctx.set_openai_base_url(body.openai_base_url)
+    if body.openai_api_key is not None:
+        ctx.set_openai_api_key(body.openai_api_key)
+    if body.openai_model is not None:
+        ctx.set_openai_model(body.openai_model)
+    if body.stt_local_fallback is not None:
+        ctx.set_stt_local_fallback(body.stt_local_fallback)
+    if body.shadow_stt_backend is not None:
+        try:
+            ctx.set_shadow_stt_backend(body.shadow_stt_backend)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if body.shadow_upstream_uri is not None:
+        ctx.set_shadow_upstream_uri(body.shadow_upstream_uri)
+    if body.shadow_mistral_model is not None:
+        ctx.set_shadow_mistral_model(body.shadow_mistral_model)
+    if body.shadow_openai_base_url is not None:
+        ctx.set_shadow_openai_base_url(body.shadow_openai_base_url)
+    if body.shadow_openai_api_key is not None:
+        ctx.set_shadow_openai_api_key(body.shadow_openai_api_key)
+    if body.shadow_openai_model is not None:
+        ctx.set_shadow_openai_model(body.shadow_openai_model)
     if body.mistral_api_key is not None:
         ctx.set_mistral_api_key(body.mistral_api_key)
     if body.mistral_model is not None:

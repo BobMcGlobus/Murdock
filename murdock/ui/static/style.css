@@ -320,6 +320,19 @@ button.disabled:hover {
     font-weight: bold;
 }
 
+/* ── A/B shadow transcript in the recognition log ───────── */
+
+.transcript.shadow {
+    opacity: 0.85;
+    font-size: 0.9em;
+    border-left: 2px solid var(--border);
+    padding-left: 0.5rem;
+    border-radius: 0;
+}
+.transcript.shadow.differs {
+    border-left-color: var(--accent);
+}
+
 /* ── Speaker health panel ───────────────────────────────── */
 
 .health-panel {

@@ -1,20 +1,26 @@
 """STT backend abstraction.
 
-Murdock can obtain transcripts from two sources:
+Murdock can obtain transcripts from three sources:
 
 - **upstream** (default): proxy the audio to an external Wyoming STT
-  service (faster-whisper, whisper, etc.) over a TCP socket.
-- **voxtral**: send the buffered audio to the Mistral Cloud API
-  (Voxtral endpoint) and receive a transcript directly.
+  service (faster-whisper, whisper, etc.) over a TCP socket, streaming
+  live while the user is still speaking.
+- **voxtral**: send the buffered audio to the Mistral Cloud API.
+- **openai**: send the buffered audio to any OpenAI-compatible
+  ``/v1/audio/transcriptions`` endpoint — OpenAI itself
+  (gpt-4o-transcribe), Groq (whisper-large-v3-turbo), or a local
+  OpenAI-compatible server such as speaches.
 
-The handler asks ``get_stt_backend(ctx)`` for the active backend. Each
-backend exposes a single awaitable: given raw PCM audio → return text.
-The Wyoming proxy path is handled implicitly by the handler (existing
-streaming logic), so this module only provides the *cloud* backends.
+The handler asks the context for the active backend. Each cloud backend
+exposes a single awaitable: given raw PCM audio → return text; failures
+raise :class:`STTBackendError` so the caller can distinguish "the model
+heard silence" from "the internet is down" — which is what makes the
+local Wyoming fallback and the A/B shadow transcription possible.
 """
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import struct
@@ -24,6 +30,10 @@ from typing import Optional
 import httpx
 
 _LOGGER = logging.getLogger("murdock.stt_backend")
+
+
+class STTBackendError(RuntimeError):
+    """A cloud transcription attempt failed (network, HTTP, timeout)."""
 
 
 def _pcm_to_wav(pcm: bytes, rate: int = 16000, width: int = 2, channels: int = 1) -> bytes:
@@ -46,21 +56,39 @@ def _pcm_to_wav(pcm: bytes, rate: int = 16000, width: int = 2, channels: int = 1
     return buf.getvalue()
 
 
-class VoxtralBackend:
-    """Transcribe audio via the Mistral /v1/audio/transcriptions API."""
+class OpenAICompatibleBackend:
+    """Transcribe audio via an OpenAI-compatible transcriptions endpoint.
+
+    One implementation covers OpenAI (gpt-4o-transcribe), Groq
+    (whisper-large-v3-turbo), Mistral/Voxtral and self-hosted
+    OpenAI-compatible servers (speaches, LocalAI, …) — they all speak
+    multipart POST ``/v1/audio/transcriptions`` with ``file`` + ``model``.
+    """
+
+    #: Human-readable engine label used in logs and the A/B shadow column.
+    name = "openai"
 
     def __init__(
         self,
         api_key: str,
-        model: str = "voxtral-mini-latest",
+        model: str,
+        base_url: str = "https://api.openai.com",
         language: Optional[str] = None,
         timeout: float = 30.0,
+        name: Optional[str] = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.language = language
         self.timeout = timeout
-        self._base_url = "https://api.mistral.ai"
+        self.base_url = (base_url or "https://api.openai.com").rstrip("/")
+        if name:
+            self.name = name
+
+    @property
+    def label(self) -> str:
+        """Engine tag for logs / the shadow column, e.g. ``openai:whisper``."""
+        return f"{self.name}:{self.model}"
 
     async def transcribe(
         self,
@@ -71,30 +99,25 @@ class VoxtralBackend:
         channels: int = 1,
         language: Optional[str] = None,
     ) -> str:
-        """Send audio to Voxtral and return the transcript text.
+        """Send audio to the endpoint and return the transcript text.
 
-        Args:
-            pcm_audio: Raw PCM bytes (mono 16-bit 16 kHz expected).
-            rate: Sample rate.
-            width: Sample width in bytes.
-            channels: Channel count.
-            language: ISO language hint (e.g. "de"). Falls back to
-                instance default if not set.
-
-        Returns:
-            Transcript text, or empty string on failure.
+        Raises :class:`STTBackendError` on any transport/HTTP failure so
+        callers can trigger the local fallback. A successful call that
+        heard nothing legitimately returns ``""``.
         """
         lang = language or self.language
         wav_data = _pcm_to_wav(pcm_audio, rate, width, channels)
         t0 = time.monotonic()
 
         try:
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             async with httpx.AsyncClient(
-                base_url=self._base_url,
-                headers={"Authorization": f"Bearer {self.api_key}"},
+                base_url=self.base_url,
+                headers=headers,
                 timeout=self.timeout,
             ) as client:
-                # Build multipart form data
                 files = {"file": ("audio.wav", wav_data, "audio/wav")}
                 data: dict = {"model": self.model}
                 if lang:
@@ -110,28 +133,113 @@ class VoxtralBackend:
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
-                        "Voxtral API error: HTTP %d — %s (%.0fms)",
-                        resp.status_code, resp.text[:200], elapsed_ms,
+                        "%s API error: HTTP %d — %s (%.0fms)",
+                        self.label, resp.status_code, resp.text[:200], elapsed_ms,
                     )
-                    return ""
+                    raise STTBackendError(
+                        f"{self.label}: HTTP {resp.status_code}"
+                    )
 
                 result = resp.json()
                 text = result.get("text", "")
-                usage = result.get("usage", {})
-                audio_sec = usage.get("prompt_audio_seconds", 0)
                 _LOGGER.info(
-                    "Voxtral transcript (%.0fms, %.1fs audio): %r",
-                    elapsed_ms, audio_sec, text[:100],
+                    "%s transcript (%.0fms): %r",
+                    self.label, elapsed_ms, text[:100],
                 )
                 return text
 
-        except httpx.TimeoutException:
+        except STTBackendError:
+            raise
+        except httpx.TimeoutException as exc:
             elapsed_ms = (time.monotonic() - t0) * 1000
-            _LOGGER.warning("Voxtral API timeout after %.0fms", elapsed_ms)
-            return ""
+            _LOGGER.warning("%s timeout after %.0fms", self.label, elapsed_ms)
+            raise STTBackendError(f"{self.label}: timeout") from exc
         except Exception as exc:
             elapsed_ms = (time.monotonic() - t0) * 1000
             _LOGGER.warning(
-                "Voxtral API request failed (%.0fms): %s", elapsed_ms, exc
+                "%s request failed (%.0fms): %s", self.label, elapsed_ms, exc
             )
-            return ""
+            raise STTBackendError(f"{self.label}: {exc}") from exc
+
+
+class VoxtralBackend(OpenAICompatibleBackend):
+    """Transcribe audio via the Mistral /v1/audio/transcriptions API."""
+
+    name = "voxtral"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "voxtral-mini-latest",
+        language: Optional[str] = None,
+        timeout: float = 30.0,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            model=model,
+            base_url="https://api.mistral.ai",
+            language=language,
+            timeout=timeout,
+        )
+
+
+async def transcribe_via_wyoming(
+    uri: str,
+    pcm_audio: bytes,
+    *,
+    rate: int = 16000,
+    width: int = 2,
+    channels: int = 1,
+    language: Optional[str] = None,
+    timeout: float = 20.0,
+) -> str:
+    """One-shot transcription of buffered audio over a Wyoming socket.
+
+    Used for the local fallback (cloud backend unreachable) and for the
+    A/B shadow when the shadow engine is a Wyoming server: open, send
+    Transcribe + AudioStart + chunks + AudioStop, wait for the
+    Transcript. Raises :class:`STTBackendError` on failure.
+    """
+    from wyoming.asr import Transcribe, Transcript
+    from wyoming.audio import AudioChunk, AudioStart, AudioStop
+    from wyoming.client import AsyncClient
+
+    t0 = time.monotonic()
+    chunk_bytes = 4096
+
+    async def _run() -> str:
+        async with AsyncClient.from_uri(uri) as client:
+            await client.write_event(Transcribe(language=language).event())
+            await client.write_event(
+                AudioStart(rate=rate, width=width, channels=channels).event()
+            )
+            for i in range(0, len(pcm_audio), chunk_bytes):
+                await client.write_event(
+                    AudioChunk(
+                        audio=pcm_audio[i:i + chunk_bytes],
+                        rate=rate, width=width, channels=channels,
+                    ).event()
+                )
+            await client.write_event(AudioStop().event())
+            while True:
+                event = await client.read_event()
+                if event is None:
+                    raise STTBackendError(
+                        f"wyoming {uri}: closed without transcript"
+                    )
+                if Transcript.is_type(event.type):
+                    return Transcript.from_event(event).text or ""
+
+    try:
+        text = await asyncio.wait_for(_run(), timeout=timeout)
+        _LOGGER.info(
+            "wyoming one-shot transcript via %s (%.0fms): %r",
+            uri, (time.monotonic() - t0) * 1000, text[:100],
+        )
+        return text
+    except STTBackendError:
+        raise
+    except asyncio.TimeoutError as exc:
+        raise STTBackendError(f"wyoming {uri}: timeout") from exc
+    except Exception as exc:
+        raise STTBackendError(f"wyoming {uri}: {exc}") from exc

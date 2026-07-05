@@ -207,6 +207,33 @@ class Settings(BaseSettings):
     mistral_api_key: Optional[str] = Field(default=None)
     mistral_model: str = Field(default="voxtral-mini-latest")
 
+    # OpenAI-compatible STT (stt_backend = "openai"). One backend covers
+    # OpenAI itself, Groq, and self-hosted OpenAI-compatible servers:
+    #   OpenAI: https://api.openai.com  + gpt-4o-transcribe
+    #   Groq:   https://api.groq.com/openai + whisper-large-v3-turbo
+    #   local:  http://<host>:8000 (speaches etc.), key may stay empty
+    openai_base_url: str = Field(default="https://api.openai.com")
+    openai_api_key: Optional[str] = Field(default=None)
+    openai_model: str = Field(default="gpt-4o-transcribe")
+
+    # Local fallback: when a *cloud* backend (voxtral/openai) fails —
+    # internet down, provider outage — transcribe the buffered audio via
+    # the Wyoming upstream instead of returning an empty transcript.
+    # Opt-in; needs a reachable upstream_uri.
+    stt_local_fallback: bool = Field(default=False)
+
+    # A/B shadow engine: transcribe the same utterance with a second STT
+    # in the background. The shadow result is never returned over
+    # Wyoming — it only lands next to the primary transcript in the
+    # recognition log, so two engines can be compared on real commands.
+    #   none | upstream | voxtral | openai
+    shadow_stt_backend: str = Field(default="none")
+    shadow_upstream_uri: Optional[str] = Field(default=None)
+    shadow_mistral_model: str = Field(default="voxtral-small-latest")
+    shadow_openai_base_url: str = Field(default="")
+    shadow_openai_api_key: Optional[str] = Field(default=None)
+    shadow_openai_model: str = Field(default="")
+
     # Logging
     log_level: str = Field(default="info")
 

@@ -853,15 +853,17 @@ class AppContext:
     # STT backend selection (upstream Wyoming vs. Voxtral cloud)
     # ------------------------------------------------------------------
 
+    STT_BACKENDS = ("upstream", "voxtral", "openai")
+
     def get_stt_backend(self) -> str:
-        """Return the active STT backend: 'upstream' or 'voxtral'."""
+        """Return the active STT backend: 'upstream', 'voxtral' or 'openai'."""
         override = get_setting(self.db, "stt_backend")
-        if override and override in ("upstream", "voxtral"):
+        if override and override in self.STT_BACKENDS:
             return override
         return self.settings.stt_backend
 
     def set_stt_backend(self, value: str) -> None:
-        if value not in ("upstream", "voxtral"):
+        if value not in self.STT_BACKENDS:
             raise ValueError(f"Invalid stt_backend: {value!r}")
         set_setting(self.db, "stt_backend", value)
 
@@ -896,6 +898,174 @@ class AppContext:
             api_key=api_key,
             model=self.get_mistral_model(),
         )
+
+    # ------------------------------------------------------------------
+    # OpenAI-compatible STT backend (OpenAI, Groq, local speaches, …)
+    # ------------------------------------------------------------------
+
+    def get_openai_base_url(self) -> str:
+        override = get_setting(self.db, "openai_base_url")
+        if override:
+            return override
+        return self.settings.openai_base_url
+
+    def set_openai_base_url(self, value: str) -> None:
+        set_setting(self.db, "openai_base_url", (value or "").strip())
+
+    def get_openai_api_key(self) -> str:
+        override = get_setting(self.db, "openai_api_key")
+        if override is not None:
+            return override
+        return self.settings.openai_api_key or ""
+
+    def has_openai_api_key(self) -> bool:
+        return bool(self.get_openai_api_key())
+
+    def set_openai_api_key(self, value: str) -> None:
+        set_setting(self.db, "openai_api_key", value or "")
+
+    def get_openai_model(self) -> str:
+        override = get_setting(self.db, "openai_model")
+        if override:
+            return override
+        return self.settings.openai_model
+
+    def set_openai_model(self, value: str) -> None:
+        set_setting(self.db, "openai_model", (value or "").strip())
+
+    def get_openai_backend(self):
+        """Return a configured OpenAI-compatible backend, or None.
+
+        Unlike Voxtral, an empty API key is allowed — self-hosted
+        OpenAI-compatible servers (speaches, LocalAI) usually run without
+        auth. A model name is required.
+        """
+        from .stt_backend import OpenAICompatibleBackend
+        model = self.get_openai_model()
+        if not model:
+            return None
+        return OpenAICompatibleBackend(
+            api_key=self.get_openai_api_key(),
+            model=model,
+            base_url=self.get_openai_base_url(),
+        )
+
+    def get_active_cloud_backend(self):
+        """Return the backend for the active cloud stt_backend, or None."""
+        backend = self.get_stt_backend()
+        if backend == "voxtral":
+            return self.get_voxtral_backend()
+        if backend == "openai":
+            return self.get_openai_backend()
+        return None
+
+    # ------------------------------------------------------------------
+    # Local fallback + A/B shadow engine
+    # ------------------------------------------------------------------
+
+    def get_stt_local_fallback(self) -> bool:
+        override = get_setting(self.db, "stt_local_fallback")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.stt_local_fallback
+
+    def set_stt_local_fallback(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "stt_local_fallback", "true" if enabled else "false"
+        )
+
+    SHADOW_BACKENDS = ("none", "upstream", "voxtral", "openai")
+
+    def get_shadow_stt_backend(self) -> str:
+        override = get_setting(self.db, "shadow_stt_backend")
+        if override in self.SHADOW_BACKENDS:
+            return override
+        if self.settings.shadow_stt_backend in self.SHADOW_BACKENDS:
+            return self.settings.shadow_stt_backend
+        return "none"
+
+    def set_shadow_stt_backend(self, value: str) -> None:
+        if value not in self.SHADOW_BACKENDS:
+            raise ValueError(f"Invalid shadow_stt_backend: {value!r}")
+        set_setting(self.db, "shadow_stt_backend", value)
+
+    def get_shadow_upstream_uri(self) -> str:
+        override = get_setting(self.db, "shadow_upstream_uri")
+        if override:
+            return _normalize_wyoming_uri(override)
+        return _normalize_wyoming_uri(self.settings.shadow_upstream_uri or "")
+
+    def set_shadow_upstream_uri(self, value: str) -> None:
+        set_setting(self.db, "shadow_upstream_uri", (value or "").strip())
+
+    def get_shadow_mistral_model(self) -> str:
+        override = get_setting(self.db, "shadow_mistral_model")
+        if override:
+            return override
+        return self.settings.shadow_mistral_model
+
+    def set_shadow_mistral_model(self, value: str) -> None:
+        set_setting(self.db, "shadow_mistral_model", (value or "").strip())
+
+    def get_shadow_openai_base_url(self) -> str:
+        override = get_setting(self.db, "shadow_openai_base_url")
+        if override:
+            return override
+        return self.settings.shadow_openai_base_url or self.get_openai_base_url()
+
+    def set_shadow_openai_base_url(self, value: str) -> None:
+        set_setting(self.db, "shadow_openai_base_url", (value or "").strip())
+
+    def get_shadow_openai_api_key(self) -> str:
+        """Shadow key; empty falls back to the primary OpenAI key."""
+        override = get_setting(self.db, "shadow_openai_api_key")
+        if override:
+            return override
+        return self.settings.shadow_openai_api_key or self.get_openai_api_key()
+
+    def has_shadow_openai_api_key(self) -> bool:
+        return bool(get_setting(self.db, "shadow_openai_api_key"))
+
+    def set_shadow_openai_api_key(self, value: str) -> None:
+        set_setting(self.db, "shadow_openai_api_key", value or "")
+
+    def get_shadow_openai_model(self) -> str:
+        override = get_setting(self.db, "shadow_openai_model")
+        if override:
+            return override
+        return self.settings.shadow_openai_model
+
+    def set_shadow_openai_model(self, value: str) -> None:
+        set_setting(self.db, "shadow_openai_model", (value or "").strip())
+
+    def get_shadow_backend(self):
+        """Return the HTTP backend for a cloud shadow kind, or None.
+
+        The "upstream" shadow kind is handled by the caller via
+        :func:`murdock.core.stt_backend.transcribe_via_wyoming` with
+        :meth:`get_shadow_upstream_uri`.
+        """
+        from .stt_backend import OpenAICompatibleBackend, VoxtralBackend
+
+        kind = self.get_shadow_stt_backend()
+        if kind == "voxtral":
+            api_key = self.get_mistral_api_key()
+            if not api_key:
+                return None
+            return VoxtralBackend(
+                api_key=api_key, model=self.get_shadow_mistral_model()
+            )
+        if kind == "openai":
+            model = self.get_shadow_openai_model()
+            if not model:
+                return None
+            return OpenAICompatibleBackend(
+                api_key=self.get_shadow_openai_api_key(),
+                model=model,
+                base_url=self.get_shadow_openai_base_url(),
+                name="shadow-openai",
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Advertised languages (Wyoming Info)

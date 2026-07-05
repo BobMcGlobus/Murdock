@@ -41,6 +41,15 @@ cluster, and tag the sample later.
 
 ### Core recognition
 - **Wyoming proxy** — registers as an ASR provider; HA auto-discovers it.
+- **Pluggable STT backends** — Wyoming upstream (streaming,
+  faster-whisper etc.), Voxtral (Mistral Cloud), or any
+  **OpenAI-compatible** endpoint: OpenAI `gpt-4o-transcribe`, Groq
+  `whisper-large-v3-turbo`, or a local OpenAI-compatible server
+  (speaches). Optional **local Wyoming fallback** when the cloud backend
+  fails, and an **A/B shadow engine** that transcribes every utterance
+  with a second engine in the background — the shadow result is never
+  returned to HA, it appears next to the primary transcript in the
+  recognition log so two engines can be compared on real commands.
 - **CAM++ ONNX** — 7 M params, 192-dim embeddings, <20 ms inference on
   CPU (no GPU needed).
 - **sqlite-vec** — single-file database with SIMD-accelerated KNN.

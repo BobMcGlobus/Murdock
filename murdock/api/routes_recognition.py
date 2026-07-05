@@ -31,6 +31,9 @@ class RecognitionEventOut(BaseModel):
     # Set when a captured (untagged) unknown sample exists for this
     # session, so the UI can offer "assign to speaker" on blocked entries.
     unknown_sample_id: Optional[int] = None
+    # A/B shadow engine result, filled in asynchronously.
+    shadow_transcript: Optional[str] = None
+    shadow_engine: Optional[str] = None
 
 
 class RecognitionListOut(BaseModel):
@@ -79,6 +82,8 @@ async def list_events(
                 emotion=e.emotion,
                 emotion_confidence=e.emotion_confidence,
                 unknown_sample_id=session_map.get(e.session_id),
+                shadow_transcript=e.shadow_transcript,
+                shadow_engine=e.shadow_engine,
             )
             for e in events
         ]
