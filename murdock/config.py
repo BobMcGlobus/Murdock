@@ -237,6 +237,26 @@ class Settings(BaseSettings):
     shadow_openai_api_key: Optional[str] = Field(default=None)
     shadow_openai_model: str = Field(default="")
 
+    # --- Transcript quality tiers (all opt-in) ---
+    # Tier 1: vocabulary biasing. The terms are sent as the OpenAI
+    # `prompt` field to whisper-family endpoints, fixing custom names
+    # ("Fehenlichter", "Bed-Lightstrip") at the source. Ignored by
+    # backends that don't document the field (Voxtral, OpenRouter).
+    enable_stt_vocabulary: bool = Field(default=False)
+    stt_vocabulary: str = Field(default="")
+    # Tier 2: correction dictionary for known misrecognitions. One entry
+    # per line: "wrong -> right" replaces (deterministic, keeps local
+    # intents working), "wrong ~> right" annotates with "[oder: right]"
+    # for an LLM agent. "#" starts a comment.
+    enable_stt_dictionary: bool = Field(default=False)
+    stt_dictionary: str = Field(default="")
+    # Tier 3: dual transcript. Run the shadow engine *blocking* in
+    # parallel with the primary and merge both transcripts, marking
+    # disagreements inline as "primary [oder: shadow]". Costs the max of
+    # both engines' latency and is LLM-only (breaks rigid intents).
+    # Only effective when a shadow engine is configured.
+    enable_dual_transcript: bool = Field(default=False)
+
     # Logging
     log_level: str = Field(default="info")
 

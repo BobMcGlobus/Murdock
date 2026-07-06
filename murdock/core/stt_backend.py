@@ -67,6 +67,10 @@ class OpenAICompatibleBackend:
 
     #: Human-readable engine label used in logs and the A/B shadow column.
     name = "openai"
+    #: Whether the endpoint honours the OpenAI ``prompt`` field for
+    #: vocabulary biasing. Whisper-family endpoints do; Mistral's
+    #: transcription API does not document it, so Voxtral opts out.
+    supports_prompt = True
 
     def __init__(
         self,
@@ -76,11 +80,13 @@ class OpenAICompatibleBackend:
         language: Optional[str] = None,
         timeout: float = 30.0,
         name: Optional[str] = None,
+        prompt: Optional[str] = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.language = language
         self.timeout = timeout
+        self.prompt = (prompt or "").strip() or None
         self.base_url = (base_url or "https://api.openai.com").rstrip("/")
         # OpenRouter deviates from the OpenAI shape: JSON body with
         # base64 audio instead of a multipart file, model slugs carry a
@@ -109,6 +115,12 @@ class OpenAICompatibleBackend:
         data: dict = {"model": self.model}
         if lang:
             data["language"] = lang
+        # Vocabulary biasing: hand the custom terms to whisper-family
+        # endpoints so names like "Fehenlichter" are recognised at the
+        # source. Skipped where the field isn't documented (Voxtral) —
+        # an unknown form field could fail the whole request.
+        if self.prompt and self.supports_prompt:
+            data["prompt"] = self.prompt
         return {"files": files, "data": data}
 
     @property
@@ -186,6 +198,7 @@ class VoxtralBackend(OpenAICompatibleBackend):
     """Transcribe audio via the Mistral /v1/audio/transcriptions API."""
 
     name = "voxtral"
+    supports_prompt = False  # Mistral doesn't document the prompt field
 
     def __init__(
         self,

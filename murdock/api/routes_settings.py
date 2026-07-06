@@ -78,6 +78,12 @@ class SettingsOut(BaseModel):
     shadow_openai_base_url: str = ""
     shadow_openai_api_key_set: bool = False
     shadow_openai_model: str = ""
+    # Transcript quality tiers
+    enable_stt_vocabulary: bool = False
+    stt_vocabulary: str = ""
+    enable_stt_dictionary: bool = False
+    stt_dictionary: str = ""
+    enable_dual_transcript: bool = False
     # MQTT integration (recommended over the REST/token path)
     mqtt_enabled: bool = False
     mqtt_host: str = ""
@@ -157,6 +163,11 @@ class SettingsPatch(BaseModel):
     shadow_openai_base_url: Optional[str] = None
     shadow_openai_api_key: Optional[str] = None
     shadow_openai_model: Optional[str] = None
+    enable_stt_vocabulary: Optional[bool] = None
+    stt_vocabulary: Optional[str] = None
+    enable_stt_dictionary: Optional[bool] = None
+    stt_dictionary: Optional[str] = None
+    enable_dual_transcript: Optional[bool] = None
     # MQTT integration
     mqtt_enabled: Optional[bool] = None
     mqtt_host: Optional[str] = None
@@ -227,6 +238,11 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         shadow_openai_base_url=ctx.get_shadow_openai_base_url(),
         shadow_openai_api_key_set=ctx.has_shadow_openai_api_key(),
         shadow_openai_model=ctx.get_shadow_openai_model(),
+        enable_stt_vocabulary=ctx.get_enable_stt_vocabulary(),
+        stt_vocabulary=ctx.get_stt_vocabulary(),
+        enable_stt_dictionary=ctx.get_enable_stt_dictionary(),
+        stt_dictionary=ctx.get_stt_dictionary(),
+        enable_dual_transcript=ctx.get_enable_dual_transcript(),
         mqtt_enabled=ctx.get_mqtt_enabled(),
         mqtt_host=ctx.get_mqtt_host(),
         mqtt_port=ctx.get_mqtt_port(),
@@ -384,6 +400,16 @@ async def patch_settings(
         ctx.set_shadow_openai_api_key(body.shadow_openai_api_key)
     if body.shadow_openai_model is not None:
         ctx.set_shadow_openai_model(body.shadow_openai_model)
+    if body.enable_stt_vocabulary is not None:
+        ctx.set_enable_stt_vocabulary(body.enable_stt_vocabulary)
+    if body.stt_vocabulary is not None:
+        ctx.set_stt_vocabulary(body.stt_vocabulary)
+    if body.enable_stt_dictionary is not None:
+        ctx.set_enable_stt_dictionary(body.enable_stt_dictionary)
+    if body.stt_dictionary is not None:
+        ctx.set_stt_dictionary(body.stt_dictionary)
+    if body.enable_dual_transcript is not None:
+        ctx.set_enable_dual_transcript(body.enable_dual_transcript)
     if body.mistral_api_key is not None:
         ctx.set_mistral_api_key(body.mistral_api_key)
     if body.mistral_model is not None:

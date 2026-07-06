@@ -1383,6 +1383,16 @@ async function loadSettings() {
                         ? t("stt.key_set") : t("stt.shadow_mistral_key_empty");
                 }
             }
+            // Transcript quality tiers
+            if (sttForm.enable_stt_vocabulary) {
+                sttForm.enable_stt_vocabulary.checked = !!s.enable_stt_vocabulary;
+                sttForm.stt_vocabulary.value = s.stt_vocabulary || "";
+                sttForm.enable_stt_dictionary.checked = !!s.enable_stt_dictionary;
+                sttForm.stt_dictionary.value = s.stt_dictionary || "";
+            }
+            if (sttForm.enable_dual_transcript) {
+                sttForm.enable_dual_transcript.checked = !!s.enable_dual_transcript;
+            }
             updateSttFieldVisibility();
         }
         // Emotion detection (experimental)
@@ -1685,6 +1695,12 @@ function updateSttFieldVisibility() {
     if (sv) sv.hidden = shadow !== "voxtral";
     const so = $("#shadow-openai-fields");
     if (so) so.hidden = shadow !== "openai";
+    // Dual transcript needs a configured shadow engine.
+    if (form.enable_dual_transcript) {
+        const noShadow = shadow === "none";
+        form.enable_dual_transcript.disabled = noShadow;
+        if (noShadow) form.enable_dual_transcript.checked = false;
+    }
 }
 
 const sttForm = $("#stt-form");
@@ -1728,6 +1744,15 @@ if (sttForm) {
                 const shMKey = sttForm.shadow_mistral_api_key.value;
                 if (shMKey) body.shadow_mistral_api_key = shMKey;
             }
+        }
+        if (sttForm.enable_stt_vocabulary) {
+            body.enable_stt_vocabulary = sttForm.enable_stt_vocabulary.checked;
+            body.stt_vocabulary = sttForm.stt_vocabulary.value;
+            body.enable_stt_dictionary = sttForm.enable_stt_dictionary.checked;
+            body.stt_dictionary = sttForm.stt_dictionary.value;
+        }
+        if (sttForm.enable_dual_transcript) {
+            body.enable_dual_transcript = sttForm.enable_dual_transcript.checked;
         }
         try {
             await api("/api/settings", {

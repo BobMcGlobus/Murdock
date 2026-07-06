@@ -357,6 +357,25 @@
                         <span data-i18n="stt.local_fallback">Local fallback via Wyoming upstream</span>
                         <small class="meta" data-i18n="stt.local_fallback_hint">If the cloud backend fails (internet down, provider outage), the buffered audio is transcribed by the Wyoming upstream instead of returning an empty transcript. Needs a reachable upstream URI.</small>
                     </label>
+                    <h3 data-i18n="stt.quality_title">Transcript quality</h3>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_stt_vocabulary">
+                        <span data-i18n="stt.vocab_enable">Custom vocabulary (bias the STT)</span>
+                        <small class="meta" data-i18n="stt.vocab_hint">Sent to whisper-family cloud backends as context, so custom names ("Fehenlichter", "Bed-Lightstrip") are recognised at the source. Not supported by Voxtral or OpenRouter — there the terms are simply ignored. For a local wyoming-faster-whisper, set initial_prompt on that container instead.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="stt.vocab_label">Vocabulary (comma-separated terms or a short sentence)</span>
+                        <textarea name="stt_vocabulary" rows="2" spellcheck="false" placeholder="Fehenlichter, Bed-Lightstrip, Sat1"></textarea>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_stt_dictionary">
+                        <span data-i18n="stt.dict_enable">Correction dictionary (known misrecognitions)</span>
+                        <small class="meta" data-i18n="stt.dict_hint">One entry per line. "wrong -> right" replaces deterministically (keeps HA's local intent matching working). "wrong ~> right" keeps the recognised text and appends "[oder: right]" for an LLM agent. "#" starts a comment. Matching is case-insensitive on word boundaries.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="stt.dict_label">Dictionary</span>
+                        <textarea name="stt_dictionary" rows="4" spellcheck="false" placeholder="fehlende Lichter -> Fehenlichter&#10;Bad-Lightstrip -> Bed-Lightstrip"></textarea>
+                    </label>
                     <h3 data-i18n="stt.shadow_title">A/B shadow engine</h3>
                     <p class="meta" data-i18n="stt.shadow_hint">Transcribe every utterance with a second engine in the background. The shadow result is never returned to Home Assistant — it appears next to the primary transcript in the recognition log, so you can compare two engines on your real commands before switching.</p>
                     <label>
@@ -400,6 +419,11 @@
                             <input type="text" name="shadow_openai_model" placeholder="whisper-large-v3-turbo">
                         </label>
                     </div>
+                    <label class="switch" id="dual-transcript-row">
+                        <input type="checkbox" name="enable_dual_transcript">
+                        <span data-i18n="stt.dual_enable">Dual transcript (merge primary + shadow)</span>
+                        <small class="meta" data-i18n="stt.dual_hint">Runs the shadow engine blocking in parallel and merges both readings — disagreements appear inline as "primary [oder: shadow]", so the LLM picks the plausible one. Engines fail on different words, so the union beats either alone. Costs the slower engine's latency (shadow capped at 6 s, then primary goes out alone) and breaks rigid intent matching — for LLM agents. Requires a configured shadow engine.</small>
+                    </label>
                     <div class="row" style="margin-top:0.5rem">
                         <button type="submit" data-i18n="generic.save">Save</button>
                     </div>

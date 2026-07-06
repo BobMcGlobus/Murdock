@@ -33,6 +33,9 @@ def _ctx(tmp_path):
         shadow_openai_base_url="", shadow_openai_api_key=None,
         shadow_openai_model="",
         upstream_uri="tcp://localhost:10300",
+        enable_stt_vocabulary=False, stt_vocabulary="",
+        enable_stt_dictionary=False, stt_dictionary="",
+        enable_dual_transcript=False,
     )
     return AppContext(
         settings=settings, db=db, embedder=None, vad=None, speakers=None,
@@ -83,6 +86,45 @@ def test_standard_request_is_multipart():
     assert "json" not in kwargs
     assert kwargs["files"]["file"][0] == "audio.wav"
     assert kwargs["data"] == {"model": "gpt-4o-transcribe", "language": "de"}
+
+
+def test_vocabulary_prompt_sent_where_supported():
+    b = OpenAICompatibleBackend(api_key="k", model="whisper-large-v3-turbo",
+                                prompt="Fehenlichter, Bed-Lightstrip")
+    kwargs = b._request_kwargs(b"RIFF", None)
+    assert kwargs["data"]["prompt"] == "Fehenlichter, Bed-Lightstrip"
+
+
+def test_vocabulary_prompt_skipped_for_voxtral_and_openrouter():
+    v = VoxtralBackend(api_key="k")
+    v.prompt = "Fehenlichter"
+    assert "prompt" not in v._request_kwargs(b"RIFF", None)["data"]
+    orb = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                  base_url="https://openrouter.ai",
+                                  prompt="Fehenlichter")
+    assert "prompt" not in orb._request_kwargs(b"RIFF", None)["json"]
+
+
+def test_context_injects_vocabulary_into_openai_backend(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.set_openai_model("whisper-large-v3-turbo")
+    assert ctx.get_openai_backend().prompt is None
+    ctx.set_enable_stt_vocabulary(True)
+    ctx.set_stt_vocabulary("Fehenlichter, Sat1")
+    assert ctx.get_openai_backend().prompt == "Fehenlichter, Sat1"
+    # Toggle off → prompt gone even though the text stays stored.
+    ctx.set_enable_stt_vocabulary(False)
+    assert ctx.get_openai_backend().prompt is None
+
+
+def test_dual_transcript_needs_shadow(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.set_enable_dual_transcript(True)
+    assert ctx.dual_transcript_active() is False  # no shadow engine
+    ctx.set_shadow_stt_backend("voxtral")
+    assert ctx.dual_transcript_active() is True
+    ctx.set_enable_dual_transcript(False)
+    assert ctx.dual_transcript_active() is False
 
 
 def test_voxtral_is_openai_compatible():

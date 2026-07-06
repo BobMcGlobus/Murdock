@@ -71,6 +71,12 @@ _MODEL_LOCK = asyncio.Lock()
 # reject may get bolder.
 _EARLY_REJECT_MEDIA_FACTOR = 0.5
 
+# Dual-transcript mode waits at most this long for the shadow engine
+# before answering with the primary transcript alone. Short commands
+# transcribe in ~1 s on the supported cloud backends, so this budget is
+# generous without ever hanging the pipeline on a dead second provider.
+_DUAL_SHADOW_TIMEOUT = 6.0
+
 
 _TEMPLATE_VAR = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
@@ -156,6 +162,10 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_distance: Optional[float] = None
         self._reject_bar: Optional[float] = None
         self._reject_nearest: Optional[str] = None
+
+        # Dual-transcript mode: cached (text, engine) of the blocking
+        # shadow run, so the audit logging doesn't transcribe twice.
+        self._dual_shadow: Optional[tuple[str, str]] = None
 
     @property
     def upstream_uri(self) -> str:
@@ -318,6 +328,7 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_distance = None
         self._reject_bar = None
         self._reject_nearest = None
+        self._dual_shadow = None
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -737,11 +748,83 @@ class MurdockHandler(AsyncEventHandler):
                     )
         return ""
 
-    async def _get_transcript(self, audio_16k: bytes) -> str:
-        """Obtain the transcript from whichever backend is active."""
+    async def _primary_transcript(self, audio_16k: bytes) -> str:
+        """Obtain the transcript from whichever primary backend is active."""
         if self._is_voxtral:
             return await self._transcribe_cloud(audio_16k)
         return await self._wait_for_upstream_transcript()
+
+    async def _get_transcript(self, audio_16k: bytes) -> str:
+        """Primary transcript, refined by the enabled quality tiers.
+
+        * **Dual transcript**: run the shadow engine blocking in
+          parallel and merge both readings, marking disagreements as
+          ``primary [oder: shadow]``. The shadow result is cached so the
+          post-response audit logging doesn't transcribe twice. A slow
+          or failing shadow never blocks: after ``_DUAL_SHADOW_TIMEOUT``
+          the primary goes out alone.
+        * **Correction dictionary**: applied to each transcript *before*
+          the merge, so a term both engines got wrong (or one engine's
+          known quirk) is corrected first and produces no false
+          disagreement.
+        """
+        sid = self._session_id
+        dictionary = self.context.get_dictionary_entries()
+
+        if self.context.dual_transcript_active() and audio_16k:
+            from murdock.core.transcript_tools import merge_transcripts
+
+            shadow_task = asyncio.create_task(
+                self._shadow_transcribe(audio_16k)
+            )
+            primary = await self._primary_transcript(audio_16k)
+            shadow_text: Optional[str] = None
+            try:
+                shadow_text, shadow_engine = await asyncio.wait_for(
+                    shadow_task, timeout=_DUAL_SHADOW_TIMEOUT
+                )
+                self._dual_shadow = (shadow_text, shadow_engine)
+            except asyncio.TimeoutError:
+                shadow_task.cancel()
+                _LOGGER.warning(
+                    "[%s] Dual: shadow timed out after %.0fs — primary only",
+                    sid, _DUAL_SHADOW_TIMEOUT,
+                )
+                self._dual_shadow = ("⚠ timeout", "dual (timed out)")
+            except Exception as exc:
+                _LOGGER.info("[%s] Dual: shadow failed: %s — primary only", sid, exc)
+                self._dual_shadow = (f"⚠ {exc}", "dual (failed)")
+
+            if dictionary:
+                from murdock.core.transcript_tools import (
+                    apply_correction_dictionary,
+                )
+                primary = apply_correction_dictionary(primary, dictionary)
+                if shadow_text:
+                    shadow_text = apply_correction_dictionary(
+                        shadow_text, dictionary
+                    )
+            if shadow_text:
+                merged = merge_transcripts(primary, shadow_text)
+                if merged != primary:
+                    _LOGGER.info(
+                        "[%s] Dual merge: %r", sid, merged[:120]
+                    )
+                return merged
+            return primary
+
+        transcript = await self._primary_transcript(audio_16k)
+        if dictionary and transcript:
+            from murdock.core.transcript_tools import (
+                apply_correction_dictionary,
+            )
+            corrected = apply_correction_dictionary(transcript, dictionary)
+            if corrected != transcript:
+                _LOGGER.info(
+                    "[%s] Dictionary applied: %r", sid, corrected[:120]
+                )
+            transcript = corrected
+        return transcript
 
     # ------------------------------------------------------------------
     # Gate + verify
@@ -1427,44 +1510,59 @@ class MurdockHandler(AsyncEventHandler):
             return 0
 
     def _spawn_shadow(self, event_id: int, audio_16k: bytes) -> None:
-        """Fire-and-forget the A/B shadow transcription for an event.
+        """Attach the A/B shadow transcription to an audit event.
 
-        Runs after the primary transcript already went back to the
-        satellite, so it never adds latency; the result is attached to
-        the audit row and shown next to the primary transcript in the
-        recognition log.
+        In dual mode the shadow already ran (blocking, before the
+        response) — its cached result is attached directly. Otherwise
+        the shadow is fired after the primary transcript already went
+        back to the satellite, so it never adds latency.
         """
-        if not event_id or not audio_16k:
+        if not event_id:
+            return
+        if self._dual_shadow is not None:
+            text, engine = self._dual_shadow
+            self._dual_shadow = None
+            self.context.recognition.set_shadow(event_id, text, engine)
+            return
+        if not audio_16k:
             return
         if self.context.get_shadow_stt_backend() == "none":
             return
         asyncio.create_task(self._run_shadow(event_id, audio_16k))
 
-    async def _run_shadow(self, event_id: int, audio_16k: bytes) -> None:
+    async def _shadow_transcribe(self, audio_16k: bytes) -> tuple[str, str]:
+        """Transcribe with the configured shadow engine → (text, engine).
+
+        Raises on failure/misconfiguration so callers (dual mode, the
+        post-response audit run) can handle it their own way.
+        """
         from murdock.core.stt_backend import (
             STTBackendError,
             transcribe_via_wyoming,
         )
 
+        kind = self.context.get_shadow_stt_backend()
+        if kind == "upstream":
+            uri = self.context.get_shadow_upstream_uri()
+            if not uri:
+                raise STTBackendError("shadow upstream URI not configured")
+            text = await transcribe_via_wyoming(
+                uri, audio_16k, language=self._language
+            )
+            return text, f"wyoming:{uri}"
+        backend = self.context.get_shadow_backend()
+        if backend is None:
+            raise STTBackendError(f"shadow backend {kind!r} not configured")
+        text = await backend.transcribe(audio_16k, language=self._language)
+        return text, backend.label
+
+    async def _run_shadow(self, event_id: int, audio_16k: bytes) -> None:
+        from murdock.core.stt_backend import STTBackendError
+
         sid = self._session_id
         kind = self.context.get_shadow_stt_backend()
         try:
-            if kind == "upstream":
-                uri = self.context.get_shadow_upstream_uri()
-                if not uri:
-                    return
-                engine = f"wyoming:{uri}"
-                text = await transcribe_via_wyoming(
-                    uri, audio_16k, language=self._language
-                )
-            else:
-                backend = self.context.get_shadow_backend()
-                if backend is None:
-                    return
-                engine = backend.label
-                text = await backend.transcribe(
-                    audio_16k, language=self._language
-                )
+            text, engine = await self._shadow_transcribe(audio_16k)
         except STTBackendError as exc:
             _LOGGER.info("[%s] Shadow STT failed: %s", sid, exc)
             self.context.recognition.set_shadow(

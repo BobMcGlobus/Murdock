@@ -900,6 +900,81 @@ class AppContext:
         )
 
     # ------------------------------------------------------------------
+    # Transcript quality tiers: vocabulary, dictionary, dual transcript
+    # ------------------------------------------------------------------
+
+    def get_enable_stt_vocabulary(self) -> bool:
+        override = get_setting(self.db, "enable_stt_vocabulary")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_stt_vocabulary
+
+    def set_enable_stt_vocabulary(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_stt_vocabulary", "true" if enabled else "false"
+        )
+
+    def get_stt_vocabulary(self) -> str:
+        override = get_setting(self.db, "stt_vocabulary")
+        if override is not None:
+            return override
+        return self.settings.stt_vocabulary
+
+    def set_stt_vocabulary(self, value: str) -> None:
+        set_setting(self.db, "stt_vocabulary", value or "")
+
+    def get_effective_vocabulary(self) -> str:
+        """Vocabulary prompt for the STT backends ("" when disabled)."""
+        if not self.get_enable_stt_vocabulary():
+            return ""
+        return self.get_stt_vocabulary().strip()
+
+    def get_enable_stt_dictionary(self) -> bool:
+        override = get_setting(self.db, "enable_stt_dictionary")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_stt_dictionary
+
+    def set_enable_stt_dictionary(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_stt_dictionary", "true" if enabled else "false"
+        )
+
+    def get_stt_dictionary(self) -> str:
+        override = get_setting(self.db, "stt_dictionary")
+        if override is not None:
+            return override
+        return self.settings.stt_dictionary
+
+    def set_stt_dictionary(self, value: str) -> None:
+        set_setting(self.db, "stt_dictionary", value or "")
+
+    def get_dictionary_entries(self) -> list:
+        """Parsed dictionary entries; empty when the tier is disabled."""
+        if not self.get_enable_stt_dictionary():
+            return []
+        from .transcript_tools import parse_correction_dictionary
+        return parse_correction_dictionary(self.get_stt_dictionary())
+
+    def get_enable_dual_transcript(self) -> bool:
+        override = get_setting(self.db, "enable_dual_transcript")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_dual_transcript
+
+    def set_enable_dual_transcript(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_dual_transcript", "true" if enabled else "false"
+        )
+
+    def dual_transcript_active(self) -> bool:
+        """Dual mode requires the toggle AND a configured shadow engine."""
+        return (
+            self.get_enable_dual_transcript()
+            and self.get_shadow_stt_backend() != "none"
+        )
+
+    # ------------------------------------------------------------------
     # OpenAI-compatible STT backend (OpenAI, Groq, local speaches, …)
     # ------------------------------------------------------------------
 
@@ -948,6 +1023,7 @@ class AppContext:
             api_key=self.get_openai_api_key(),
             model=model,
             base_url=self.get_openai_base_url(),
+            prompt=self.get_effective_vocabulary() or None,
         )
 
     def get_active_cloud_backend(self):
@@ -1077,6 +1153,7 @@ class AppContext:
                 model=model,
                 base_url=self.get_shadow_openai_base_url(),
                 name="shadow-openai",
+                prompt=self.get_effective_vocabulary() or None,
             )
         return None
 
