@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.2
+
+- **Shadow STT: full settings parity** — the A/B shadow engine now has
+  its own Mistral API key (empty = fall back to the primary key, as
+  before). Every shadow backend is thereby fully independently
+  configurable: Wyoming (own URI), Voxtral (own model + own key),
+  OpenAI-compatible (own base URL + key + model) — e.g. for a second
+  account or billing separation.
+
 ## 0.6.1
 
 - **OpenRouter support** in the OpenAI-compatible STT backend. OpenRouter
