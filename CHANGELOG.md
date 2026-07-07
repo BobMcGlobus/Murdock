@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.0
+
+Transcript quality tiers — three independently toggleable weapons
+against systematic STT misrecognitions (all default off, under
+*Settings → STT backend → Transcript quality*):
+
+- **Custom vocabulary** — your terms ("Fehenlichter, Bed-Lightstrip")
+  are sent to whisper-family cloud backends as context, so custom names
+  are recognised at the source. Automatically skipped where the field
+  isn't supported (Voxtral, OpenRouter) — never risks a failed request.
+- **Correction dictionary** — one entry per line:
+  `fehlende Lichter -> Fehenlichter` replaces deterministically (keeps
+  HA's local intent matching working), `Bad-Lightstrip ~> Bed-Lightstrip`
+  annotates with `[oder: …]` for an LLM agent. Case-insensitive,
+  word-boundary matching, `#` comments, longer phrases win.
+- **Dual transcript** — requires a configured shadow engine: the shadow
+  runs blocking in parallel and both readings are merged, marking real
+  disagreements inline as `primary [oder: shadow]` (shadow-only words as
+  `[oder zusätzlich: …]`). Casing/punctuation never fake a disagreement;
+  the shadow is capped at 6 s, then the primary answers alone; the
+  result is reused for the recognition log (no double transcription).
+  The dictionary applies to both sides *before* the merge. LLM-only —
+  breaks rigid intent matching.
+
 ## 0.6.2
 
 - **Shadow STT: full settings parity** — the A/B shadow engine now has
