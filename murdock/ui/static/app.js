@@ -1213,6 +1213,9 @@ async function loadSettings() {
         const s = await api("/api/settings");
         const form = $("#settings-form");
         form.verify_threshold.value = s.verify_threshold.toFixed(3);
+        if (form.margin_gate) {
+            form.margin_gate.value = (s.margin_gate ?? 0).toFixed(2);
+        }
         form.skip_leading_seconds.value =
             (s.skip_leading_seconds ?? 1).toFixed(1);
         form.unknown_logging.checked = s.unknown_logging;
@@ -1841,6 +1844,9 @@ $("#settings-form").addEventListener("submit", async (e) => {
         advertised_languages: parseLanguages(form.advertised_languages.value),
     };
     // New fields (backwards-compatible)
+    if (form.margin_gate && form.margin_gate.value !== "") {
+        body.margin_gate = parseFloat(form.margin_gate.value);
+    }
     if (form.min_liveness_score) {
         body.min_liveness_score = parseFloat(form.min_liveness_score.value);
     }

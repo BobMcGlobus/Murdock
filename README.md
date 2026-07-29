@@ -304,6 +304,43 @@ when `Transcribe.name` was empty, so a directly-connected
 as the payload so it lines up with the `murdock/context/<room>/…` topics
 used for per-room TV context.
 
+## Home Assistant custom integration (optional)
+
+`custom_components/murdock` is a companion integration that delivers the
+speaker to your conversation agent **per turn** — the add-on's MQTT and
+REST paths keep working unchanged, this is purely additive.
+
+What it adds over MQTT alone:
+
+- an **LLM API** contributing `Sprecher: Jonas (Konfidenz 0.94, Satellit
+  Wohnzimmer)` to every single turn (HA rebuilds that prompt per
+  request, so it can't go stale mid-conversation like
+  `extra_system_prompt` did)
+- **vocabulary mirroring** — names and aliases of your exposed entities,
+  areas and floors are pushed to Murdock and feed the STT bias prompt
+- per-satellite **speaker sensors** with confidence, margin and weight
+- `async_get_speaker(hass, device_id=…)` for other integrations, so
+  speaker attribution never has to travel through the model
+
+### Install
+
+1. Copy `custom_components/murdock` into your HA `/config/custom_components/`
+   (or unpack the ZIP from the [latest release](https://github.com/BobMcGlobus/Murdock/releases)).
+2. **Make the API reachable.** The integration talks to Murdock's REST
+   API, so the add-on needs its Web UI port published: *Murdock add-on →
+   Configuration → Network* → set `8099`, then restart the add-on.
+   Ingress alone is not enough — it only serves the browser.
+3. Restart Home Assistant, then *Settings → Devices & Services → Add
+   integration → Murdock*. Enter `http://<ha-host>:8099`; the flow tests
+   the connection and offers the satellite IDs Murdock has already seen.
+4. Map each satellite ID to its `assist_satellite` entity. This mapping
+   is deliberately explicit — guessing it would mean right speaker,
+   wrong room.
+5. Enable the API under *Settings → Voice assistants → your agent → LLM
+   APIs → Murdock*.
+
+Docker-compose users skip step 2 — port 8099 is already published.
+
 ## Configuration
 
 **Everything except the bootstrap knobs is configured in the Web UI**
@@ -356,6 +393,8 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── embedding_map.py      # 2-D PCA projection for the voice map
 │   │   ├── ha_integration.py     # HA REST client (legacy push path)
 │   │   ├── mqtt_integration.py   # MQTT discovery + context subscribe (recommended)
+│   │   ├── event_payload.py      # Canonical recognition-event shape
+│   │   ├── vocabulary_store.py   # Versioned HA registry snapshots
 │   │   ├── recognition_log.py    # Event log store
 │   │   ├── info_cache.py         # Wyoming Info cache + upstream describe
 │   │   └── context.py            # Shared app context
@@ -363,10 +402,12 @@ TV entity — live in the UI and survive restarts.
 │   │   ├── app.py
 │   │   ├── routes_speakers.py
 │   │   ├── routes_unknown.py     # + clustering + bulk-assign
-│   │   ├── routes_settings.py    # + per-satellite thresholds
+│   │   ├── routes_settings.py    # + per-satellite thresholds/margin gates
 │   │   ├── routes_recognition.py
+│   │   ├── routes_integration.py # version/satellites/state/vocabulary sync
 │   │   └── routes_backup.py
 │   └── ui/static/                # HTML/CSS/JS frontend (i18n: DE/EN)
+├── custom_components/murdock/    # HA custom integration (LLM API, sensors)
 ├── scripts/
 │   ├── enroll.py                 # CLI enrollment helper
 │   ├── entrypoint.sh             # Container entrypoint (model download)

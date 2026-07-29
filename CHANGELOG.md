@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.8.0
+
+**New: a Home Assistant custom integration** (`custom_components/murdock`,
+version 0.1.0) — the speaker now reaches your conversation agent *per
+turn* instead of once per conversation. Ships alongside the add-on;
+MQTT, REST and the token path all keep working exactly as before, the
+integration is purely additive.
+
+- **LLM API "Murdock"** — enable it under *Settings → Voice assistants →
+  your agent → LLM APIs*. Contributes one line to every turn:
+  `Sprecher: Jonas (Konfidenz 0.94, Satellit Wohnzimmer)`. The line is
+  never omitted — an unknown or ambiguous voice says so explicitly, so
+  the agent can't quietly assume the main user. Home Assistant rebuilds
+  the prompt on every turn, which is what makes this reliable where
+  `extra_system_prompt` went stale mid-conversation.
+- **Explicit satellite mapping** — each Murdock satellite ID is assigned
+  to its `assist_satellite` entity in the config flow; resolution is
+  device hit first, then area. Never guessed: a wrong mapping would mean
+  right speaker, wrong room.
+- **Vocabulary mirroring** — entity, area and floor names (including
+  aliases) of *exposed* entities are pushed to Murdock with a 5 s
+  debounce and feed the STT bias prompt. Murdock stores each push as a
+  versioned snapshot and keeps using the last one when HA is
+  unreachable — source, not dependency.
+- **Entities** — `sensor.murdock_<satellite>_speaker` (with confidence,
+  distance, nearest speaker, margin, weight, role) plus proxy
+  diagnostics: connection, last recognition, vocabulary version.
+- **Public helper** `async_get_speaker(hass, device_id=…)` for other
+  integrations, so speaker attribution can bypass the model entirely.
+
+**Margin gate** (off by default) — a match is only trusted when the
+second-best speaker is a minimum distance behind. Two voices that are
+plausibly the same now yield `unsicher` instead of a coin flip, both in
+the prompt line and the sensor. Configurable globally and per satellite.
+
+**Recognition events are now complete and honest** — the payload gained
+`nearest_distance`, `weight`, `margin`, `uncertain`, `reason` and
+`timestamp`, and it fires on **every** utterance including
+non-recognitions (`speaker: null`). Previously a blocked or unrecognised
+utterance left the last speaker standing.
+
+- Breaking for hand-written automations: on non-recognition `speaker` is
+  now `null` with the sentinel moved to `reason` (`unknown`, `uncertain`,
+  `tv-noise`, `early-reject`, `short`, `no-speakers`, `embed-failed`).
+  MQTT sensor states are unchanged.
+- New endpoints for the integration: `GET /api/version`,
+  `GET /api/satellites`, `GET /api/state`, `POST`/`GET /api/vocabulary`.
+- `recognition_events` records the speaker weight and margin, so "why
+  didn't that rule fire" stays answerable later.
+- 24 new tests (176 total).
+
+**Installing the integration:** copy `custom_components/murdock` into
+your HA `/config/custom_components/` (or unpack the ZIP attached to the
+GitHub release), restart HA, then add *Murdock* under Devices &
+Services. The integration talks to Murdock's REST API, so the add-on
+needs its Web UI port reachable: *Murdock add-on → Configuration →
+Network* → set `8099` and restart the add-on. Ingress alone is not
+enough.
+
 ## 0.7.0
 
 Transcript quality tiers — three independently toggleable weapons
