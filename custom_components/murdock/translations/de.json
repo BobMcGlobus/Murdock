@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit Murdock verbinden",
+        "description": "Adresse des Murdock-Proxys (Add-on-Standard: http://homeassistant.local:8099).",
+        "data": {
+          "base_url": "Basis-URL",
+          "token": "Token (optional)"
+        }
+      },
+      "satellite": {
+        "title": "Satellit zuordnen",
+        "description": "Ordne eine Murdock-Satelliten-ID ihrer assist_satellite-Entität zu. Die Zuordnung ist bewusst explizit — eine falsche Zuordnung heißt richtiger Sprecher, falscher Raum.",
+        "data": {
+          "satellite_id": "Murdock-Satelliten-ID",
+          "satellite_entity": "Assist-Satellite-Entität",
+          "add_another": "Weiteren Satelliten zuordnen"
+        }
+      },
+      "settings": {
+        "title": "Verhalten",
+        "data": {
+          "context_mode": "Kontext-Modus",
+          "freshness_window": "Frischefenster des Sprechers",
+          "mirror_vocabulary": "Vokabular an Murdock spiegeln"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Murdock ist unter dieser Adresse nicht erreichbar."
+    },
+    "abort": {
+      "already_configured": "Diese Murdock-Instanz ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "settings": "Verhalten",
+          "satellites": "Satelliten neu zuordnen"
+        }
+      },
+      "settings": {
+        "title": "Verhalten",
+        "data": {
+          "context_mode": "Kontext-Modus",
+          "freshness_window": "Frischefenster des Sprechers",
+          "mirror_vocabulary": "Vokabular an Murdock spiegeln"
+        }
+      },
+      "satellites": {
+        "title": "Satelliten neu zuordnen",
+        "description": "Baut die Satelliten-Zuordnung neu auf.",
+        "data": {
+          "satellite_id": "Murdock-Satelliten-ID",
+          "satellite_entity": "Assist-Satellite-Entität",
+          "add_another": "Weiteren Satelliten zuordnen"
+        }
+      }
+    }
+  },
+  "selector": {
+    "context_mode": {
+      "options": {
+        "clean": "Clean — Transkript unangetastet",
+        "inline": "Inline — Hinweise im Transkript",
+        "sidecar": "Sidecar — Hinweise über die LLM-API (empfohlen)",
+        "auto": "Auto — Sidecar wenn möglich, sonst Inline"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "speaker": { "name": "Sprecher" },
+      "last_recognition": { "name": "Letzte Erkennung" },
+      "vocabulary_version": { "name": "Vokabular-Version" }
+    },
+    "binary_sensor": {
+      "connection": { "name": "Verbindung" }
+    }
+  }
+}

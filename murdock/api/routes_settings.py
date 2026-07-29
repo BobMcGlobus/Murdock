@@ -23,6 +23,9 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 class SettingsOut(BaseModel):
     verify_threshold: float
+    # Margin gate (plan §21): min distance between best and second-best
+    # speaker before a match counts; 0 = off.
+    margin_gate: float = 0.0
     unknown_logging: bool
     unknown_ttl_hours: int
     require_speaker_match: bool
@@ -108,6 +111,7 @@ class SettingsOut(BaseModel):
 
 class SettingsPatch(BaseModel):
     verify_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    margin_gate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     unknown_logging: Optional[bool] = None
     require_speaker_match: Optional[bool] = None
     passthrough_when_no_speakers: Optional[bool] = None
@@ -196,6 +200,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         source = "auto"
     return SettingsOut(
         verify_threshold=ctx.get_verify_threshold(),
+        margin_gate=ctx.get_margin_gate(),
         unknown_logging=ctx.get_unknown_logging(),
         unknown_ttl_hours=ctx.settings.unknown_ttl_hours,
         require_speaker_match=ctx.get_require_match(),
@@ -287,6 +292,8 @@ async def patch_settings(
         raise HTTPException(status_code=400, detail="No fields to update")
     if body.verify_threshold is not None:
         ctx.set_verify_threshold(body.verify_threshold)
+    if body.margin_gate is not None:
+        ctx.set_margin_gate(body.margin_gate)
     if body.unknown_logging is not None:
         ctx.set_unknown_logging(body.unknown_logging)
     if body.require_speaker_match is not None:
@@ -818,6 +825,67 @@ async def patch_satellite_threshold(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return await list_satellite_thresholds(ctx)
+
+
+# ----------------------------------------------------------------------
+# Per-satellite margin-gate overrides (plan §21)
+# ----------------------------------------------------------------------
+
+
+class SatelliteMarginEntry(BaseModel):
+    satellite_id: str
+    margin: Optional[float] = None     # None = no override, falls back to global
+    seen_events: int = 0
+    last_seen: Optional[float] = None
+
+
+class SatelliteMarginList(BaseModel):
+    default_margin: float
+    entries: List[SatelliteMarginEntry]
+
+
+class SatelliteMarginPatch(BaseModel):
+    satellite_id: str
+    # null → clear the override; float → set it
+    margin: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+@router.get("/satellite-margin-gates", response_model=SatelliteMarginList)
+async def list_satellite_margin_gates(ctx: AppContext = Depends(get_context)):
+    """Known satellites + their per-satellite margin-gate overrides."""
+    overrides = ctx.get_satellite_margin_gates()
+    known = _list_known_satellites(ctx)
+    entries: List[SatelliteMarginEntry] = []
+    covered: set[str] = set()
+    for sid, count, last in known:
+        entries.append(
+            SatelliteMarginEntry(
+                satellite_id=sid,
+                margin=overrides.get(sid),
+                seen_events=count,
+                last_seen=last,
+            )
+        )
+        covered.add(sid)
+    for sid, mg in overrides.items():
+        if sid not in covered:
+            entries.append(SatelliteMarginEntry(satellite_id=sid, margin=mg))
+    return SatelliteMarginList(
+        default_margin=ctx.get_margin_gate(),
+        entries=entries,
+    )
+
+
+@router.patch("/satellite-margin-gates", response_model=SatelliteMarginList)
+async def patch_satellite_margin_gate(
+    body: SatelliteMarginPatch, ctx: AppContext = Depends(get_context)
+):
+    """Set or clear a per-satellite margin-gate override (null clears)."""
+    try:
+        ctx.set_satellite_margin_gate(body.satellite_id, body.margin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return await list_satellite_margin_gates(ctx)
 
 
 # ----------------------------------------------------------------------

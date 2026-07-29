@@ -26,6 +26,10 @@ _MAX_ROWS_DEFAULT = 2000
 # Canonical outcome labels used across the handler + UI.
 OUTCOME_MATCH = "match"
 OUTCOME_UNKNOWN_FORWARDED = "unknown-forwarded"
+# Margin gate: best speaker matched the absolute threshold, but the
+# second-best speaker was too close behind to trust the identity.
+OUTCOME_UNCERTAIN_FORWARDED = "uncertain-forwarded"
+OUTCOME_BLOCKED_UNCERTAIN = "blocked-uncertain"
 OUTCOME_BLOCKED_NO_MATCH = "blocked-no-match"
 OUTCOME_BLOCKED_NO_SPEAKERS = "blocked-no-speakers"
 OUTCOME_BLOCKED_EMBED_FAILED = "blocked-embed-failed"
@@ -55,6 +59,11 @@ class RecognitionEvent:
     # filled in asynchronously after the event was recorded.
     shadow_transcript: Optional[str] = None
     shadow_engine: Optional[str] = None
+    # Speaker weight (plan §11) and best-vs-second-best margin used by
+    # the margin gate — logged so "why didn't the rule fire" stays
+    # answerable later.
+    weight: Optional[float] = None
+    margin: Optional[float] = None
 
 
 class RecognitionLog:
@@ -88,6 +97,8 @@ class RecognitionLog:
         transcript: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
     ) -> int:
         """Insert one event row and return its id."""
         now = time.time()
@@ -102,8 +113,9 @@ class RecognitionLog:
                     "INSERT INTO recognition_events("
                     "created_at, session_id, satellite_id, duration_sec, "
                     "outcome, matched_speaker, distance, threshold, "
-                    "verify_ms, transcript, emotion, emotion_confidence) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "verify_ms, transcript, emotion, emotion_confidence, "
+                    "weight, margin) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -117,6 +129,8 @@ class RecognitionLog:
                         safe_transcript,
                         emotion,
                         emotion_confidence,
+                        weight,
+                        margin,
                     ),
                 )
                 row_id = int(cur.lastrowid)
@@ -169,7 +183,7 @@ class RecognitionLog:
                 "SELECT id, created_at, session_id, satellite_id, duration_sec, "
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
                 "transcript, emotion, emotion_confidence, "
-                "shadow_transcript, shadow_engine "
+                "shadow_transcript, shadow_engine, weight, margin "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -191,6 +205,8 @@ class RecognitionLog:
                 emotion_confidence=row["emotion_confidence"] if "emotion_confidence" in row.keys() else None,
                 shadow_transcript=row["shadow_transcript"] if "shadow_transcript" in row.keys() else None,
                 shadow_engine=row["shadow_engine"] if "shadow_engine" in row.keys() else None,
+                weight=row["weight"] if "weight" in row.keys() else None,
+                margin=row["margin"] if "margin" in row.keys() else None,
             )
             for row in rows
         ]

@@ -13,6 +13,8 @@ from typing import Optional
 
 import httpx
 
+from murdock.core.event_payload import build_recognition_payload
+
 _LOGGER = logging.getLogger("murdock.ha")
 
 
@@ -126,6 +128,11 @@ class HomeAssistantClient:
         distance: Optional[float] = None,
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
+        nearest_distance: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
+        uncertain: bool = False,
+        reason: Optional[str] = None,
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
@@ -134,24 +141,23 @@ class HomeAssistantClient:
             return
         try:
             client = self._get_client()
-            payload = {
-                "speaker": speaker,
-                "confidence": round(confidence, 4),
-                "satellite_id": satellite_id,
-                "is_known": is_known,
-            }
-            if distance is not None:
-                payload["distance"] = round(distance, 4)
-            if threshold is not None:
-                payload["threshold"] = round(threshold, 4)
-            if nearest_speaker is not None:
-                payload["nearest_speaker"] = nearest_speaker
-            if role is not None:
-                payload["role"] = role
-            if emotion is not None:
-                payload["emotion"] = emotion
-            if emotion_confidence is not None:
-                payload["emotion_confidence"] = round(emotion_confidence, 4)
+            payload = build_recognition_payload(
+                speaker=speaker,
+                is_known=is_known,
+                confidence=confidence,
+                satellite_id=satellite_id,
+                distance=distance,
+                threshold=threshold,
+                nearest_speaker=nearest_speaker,
+                nearest_distance=nearest_distance,
+                weight=weight,
+                margin=margin,
+                uncertain=uncertain,
+                reason=reason,
+                role=role,
+                emotion=emotion,
+                emotion_confidence=emotion_confidence,
+            )
             response = await client.post(
                 "/api/events/speaker_recognition_detected",
                 json=payload,
@@ -209,6 +215,11 @@ class HomeAssistantClient:
         distance: Optional[float] = None,
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
+        nearest_distance: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
+        uncertain: bool = False,
+        reason: Optional[str] = None,
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
@@ -245,6 +256,11 @@ class HomeAssistantClient:
             distance=distance,
             threshold=threshold,
             nearest_speaker=nearest_speaker,
+            nearest_distance=nearest_distance,
+            weight=weight,
+            margin=margin,
+            uncertain=uncertain,
+            reason=reason,
             role=role,
             emotion=emotion,
             emotion_confidence=emotion_confidence,

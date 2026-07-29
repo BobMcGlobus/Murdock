@@ -46,6 +46,15 @@ def _normalize_wyoming_uri(value: str) -> str:
 
 _LOGGER = logging.getLogger("murdock.context")
 
+# Speaker weight (plan §11): distance above the verify threshold decays
+# the weight linearly, reaching 0.0 at threshold + this delta. Matches
+# the plan's worked example (th=0.380, ceiling≈0.53).
+_WEIGHT_CEILING_DELTA = 0.15
+
+# Cap on HA registry terms merged into the STT bias prompt (plan §10:
+# ~20–30; more terms raise the false-replacement rate on noisy input).
+_HA_VOCAB_TERM_CAP = 25
+
 
 @dataclass
 class AppContext:
@@ -122,6 +131,81 @@ class AppContext:
             set_setting(self.db, f"threshold_sat_{sid}", "")
         else:
             set_setting(self.db, f"threshold_sat_{sid}", f"{float(value):.4f}")
+
+    # ------------------------------------------------------------------
+    # Margin gate + speaker weight (integration plan §11/§21)
+    # ------------------------------------------------------------------
+
+    def get_margin_gate(self, satellite_id: Optional[str] = None) -> float:
+        """Minimum required distance between best and second-best speaker.
+
+        0.0 disables the gate. Same fallback chain as the verify
+        threshold: per-satellite override → global setting → off.
+        """
+        if satellite_id:
+            sat_override = get_setting(self.db, f"margin_gate_sat_{satellite_id}")
+            if sat_override:
+                try:
+                    return float(sat_override)
+                except ValueError:
+                    pass
+        override = get_setting(self.db, "margin_gate")
+        if override:
+            try:
+                return float(override)
+            except ValueError:
+                pass
+        return 0.0
+
+    def set_margin_gate(self, value: float) -> None:
+        set_setting(self.db, "margin_gate", f"{float(value):.4f}")
+
+    def get_satellite_margin_gates(self) -> dict:
+        """Return ``{satellite_id: margin}`` for all explicit overrides."""
+        cur = self.db.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'margin_gate_sat_%' AND value != ''"
+        )
+        out: dict = {}
+        for key, value in cur.fetchall():
+            sid = key[len("margin_gate_sat_"):]
+            if not sid or not value:
+                continue
+            try:
+                out[sid] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def set_satellite_margin_gate(
+        self, satellite_id: str, value: Optional[float]
+    ) -> None:
+        sid = (satellite_id or "").strip()
+        if not sid:
+            raise ValueError("satellite_id is required")
+        if value is None:
+            set_setting(self.db, f"margin_gate_sat_{sid}", "")
+        else:
+            set_setting(self.db, f"margin_gate_sat_{sid}", f"{float(value):.4f}")
+
+    def compute_speaker_weight(
+        self, distance: Optional[float], threshold: Optional[float]
+    ) -> Optional[float]:
+        """Speaker weight per plan §11: 1.0 when verified, decaying
+        linearly to 0.0 at ``threshold + _WEIGHT_CEILING_DELTA``.
+
+        A near-miss (short command, blurry embedding) keeps a partial
+        weight instead of dropping to zero — speaker-bound dictionary
+        entries then require a stricter lexical match rather than being
+        switched off entirely.
+        """
+        if distance is None or threshold is None:
+            return None
+        ceiling = threshold + _WEIGHT_CEILING_DELTA
+        if distance <= threshold:
+            return 1.0
+        if distance >= ceiling:
+            return 0.0
+        return (ceiling - distance) / (ceiling - threshold)
 
     def get_unknown_logging(self) -> bool:
         override = get_setting(self.db, "unknown_logging")
@@ -726,6 +810,11 @@ class AppContext:
         distance: Optional[float] = None,
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
+        nearest_distance: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
+        uncertain: bool = False,
+        reason: Optional[str] = None,
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
@@ -736,6 +825,8 @@ class AppContext:
         are scheduled as background tasks so neither blocks the Wyoming
         pipeline.
         """
+        if weight is None:
+            weight = self.compute_speaker_weight(distance, threshold)
         kwargs = dict(
             speaker=speaker,
             confidence=confidence,
@@ -744,6 +835,11 @@ class AppContext:
             distance=distance,
             threshold=threshold,
             nearest_speaker=nearest_speaker,
+            nearest_distance=nearest_distance,
+            weight=weight,
+            margin=margin,
+            uncertain=uncertain,
+            reason=reason,
             role=role,
             emotion=emotion,
             emotion_confidence=emotion_confidence,
@@ -923,11 +1019,41 @@ class AppContext:
     def set_stt_vocabulary(self, value: str) -> None:
         set_setting(self.db, "stt_vocabulary", value or "")
 
+    def get_vocabulary_store(self):
+        """Lazily created store for HA registry vocabulary snapshots."""
+        store = getattr(self, "_vocab_store", None)
+        if store is None:
+            from murdock.core.vocabulary_store import VocabularyStore
+
+            store = VocabularyStore(self.db)
+            self._vocab_store = store
+        return store
+
     def get_effective_vocabulary(self) -> str:
-        """Vocabulary prompt for the STT backends ("" when disabled)."""
+        """Vocabulary prompt for the STT backends ("" when disabled).
+
+        Manual terms first, then registry terms pushed by the HA
+        integration — capped so the bias prompt stays a nudge (plan §10:
+        an oversized list raises false replacements on noisy input).
+        """
         if not self.get_enable_stt_vocabulary():
             return ""
-        return self.get_stt_vocabulary().strip()
+        manual = self.get_stt_vocabulary().strip()
+        try:
+            ha_terms = self.get_vocabulary_store().terms(
+                limit=_HA_VOCAB_TERM_CAP
+            )
+        except Exception:
+            _LOGGER.debug("Vocabulary snapshot unavailable", exc_info=True)
+            ha_terms = []
+        if not ha_terms:
+            return manual
+        manual_lower = manual.lower()
+        extra = [t for t in ha_terms if t.lower() not in manual_lower]
+        if not extra:
+            return manual
+        joined = ", ".join(extra)
+        return f"{manual}, {joined}" if manual else joined
 
     def get_enable_stt_dictionary(self) -> bool:
         override = get_setting(self.db, "enable_stt_dictionary")

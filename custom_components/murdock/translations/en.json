@@ -1,0 +1,84 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Murdock",
+        "description": "Address of the Murdock proxy (add-on default: http://homeassistant.local:8099).",
+        "data": {
+          "base_url": "Base URL",
+          "token": "Token (optional)"
+        }
+      },
+      "satellite": {
+        "title": "Map a satellite",
+        "description": "Assign a Murdock satellite ID to its assist_satellite entity. The mapping is explicit on purpose — a wrong mapping means right speaker, wrong room.",
+        "data": {
+          "satellite_id": "Murdock satellite ID",
+          "satellite_entity": "Assist satellite entity",
+          "add_another": "Map another satellite"
+        }
+      },
+      "settings": {
+        "title": "Behaviour",
+        "data": {
+          "context_mode": "Context mode",
+          "freshness_window": "Speaker freshness window",
+          "mirror_vocabulary": "Mirror vocabulary to Murdock"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach Murdock at this address."
+    },
+    "abort": {
+      "already_configured": "This Murdock instance is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "settings": "Behaviour",
+          "satellites": "Remap satellites"
+        }
+      },
+      "settings": {
+        "title": "Behaviour",
+        "data": {
+          "context_mode": "Context mode",
+          "freshness_window": "Speaker freshness window",
+          "mirror_vocabulary": "Mirror vocabulary to Murdock"
+        }
+      },
+      "satellites": {
+        "title": "Remap satellites",
+        "description": "Rebuilds the satellite mapping from scratch.",
+        "data": {
+          "satellite_id": "Murdock satellite ID",
+          "satellite_entity": "Assist satellite entity",
+          "add_another": "Map another satellite"
+        }
+      }
+    }
+  },
+  "selector": {
+    "context_mode": {
+      "options": {
+        "clean": "Clean — transcript untouched",
+        "inline": "Inline — hints inside the transcript",
+        "sidecar": "Sidecar — hints via LLM API (recommended)",
+        "auto": "Auto — sidecar when possible, inline otherwise"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "speaker": { "name": "Speaker" },
+      "last_recognition": { "name": "Last recognition" },
+      "vocabulary_version": { "name": "Vocabulary version" }
+    },
+    "binary_sensor": {
+      "connection": { "name": "Connection" }
+    }
+  }
+}

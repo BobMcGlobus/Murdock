@@ -1,0 +1,13 @@
+{
+  "domain": "murdock",
+  "name": "Murdock",
+  "codeowners": ["@BobMcGlobus"],
+  "config_flow": true,
+  "dependencies": ["conversation", "assist_satellite", "homeassistant"],
+  "documentation": "https://github.com/BobMcGlobus/Murdock",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/BobMcGlobus/Murdock/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

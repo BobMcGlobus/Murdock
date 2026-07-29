@@ -53,10 +53,12 @@ from murdock.core.recognition_log import (
     OUTCOME_BLOCKED_NO_MATCH,
     OUTCOME_BLOCKED_NO_SPEAKERS,
     OUTCOME_BLOCKED_TV_NOISE,
+    OUTCOME_BLOCKED_UNCERTAIN,
     OUTCOME_EMPTY,
     OUTCOME_MATCH,
     OUTCOME_PASSTHROUGH_NO_SPEAKERS,
     OUTCOME_PASSTHROUGH_SHORT,
+    OUTCOME_UNCERTAIN_FORWARDED,
     OUTCOME_UNKNOWN_FORWARDED,
 )
 
@@ -484,7 +486,15 @@ class MurdockHandler(AsyncEventHandler):
             # Only declare early if clearly under the effective threshold
             # (extra margin against the short-window noise).
             early_threshold = result.threshold * 0.75 if result else 0.0
-            if result is not None and result.is_match and result.distance <= early_threshold:
+            margin, uncertain = self._margin_gate_uncertain(result)
+            if uncertain:
+                # An ambiguous identity must never take the early
+                # shortcut — fall through to the full verify on stop.
+                _LOGGER.debug(
+                    "[%s] Early probe: margin %.4f below gate — no early match",
+                    sid, margin,
+                )
+            elif result is not None and result.is_match and result.distance <= early_threshold:
                 self._early_match = result.matched_speaker
                 self._early_match_id = result.matched_speaker_id
                 self._early_distance = result.distance
@@ -494,6 +504,7 @@ class MurdockHandler(AsyncEventHandler):
                 )
                 # Push all recognition data to HA + MQTT immediately.
                 spk = self.context.speakers.get_speaker(result.matched_speaker_id)
+                nearest, nearest_d = self._nearest_of(result)
                 self.context.publish_recognition(
                     speaker=result.matched_speaker,
                     confidence=self.context.confidence_for(result.distance),
@@ -501,7 +512,9 @@ class MurdockHandler(AsyncEventHandler):
                     is_known=True,
                     distance=result.distance,
                     threshold=result.threshold,
-                    nearest_speaker=result.matched_speaker,
+                    nearest_speaker=nearest,
+                    nearest_distance=nearest_d,
+                    margin=margin,
                     role=spk.role if spk else None,
                 )
             else:
@@ -617,6 +630,9 @@ class MurdockHandler(AsyncEventHandler):
                 distance=result.distance,
                 threshold=bar,
                 nearest_speaker=nearest,
+                nearest_distance=result.distance,
+                margin=self._margin_of(result),
+                reason="early-reject",
             )
         except asyncio.CancelledError:
             return
@@ -885,6 +901,51 @@ class MurdockHandler(AsyncEventHandler):
             )
         return kwargs
 
+    @staticmethod
+    def _margin_of(result) -> Optional[float]:
+        """Distance gap between the best and second-best speaker.
+
+        None with fewer than two enrolled profiles — the margin gate
+        can't say anything then and stays out of the way.
+        """
+        if not result or len(result.all_distances) < 2:
+            return None
+        dists = sorted(result.all_distances.values())
+        return float(dists[1] - dists[0])
+
+    @staticmethod
+    def _nearest_of(result) -> tuple[Optional[str], Optional[float]]:
+        """(name, distance) of the nearest profile for the event payload.
+
+        For a match that's the runner-up (feeds the margin gate on the
+        consumer side); for a non-match it's the best candidate.
+        """
+        if not result or not result.all_distances:
+            return None, None
+        items = sorted(result.all_distances.items(), key=lambda kv: kv[1])
+        if result.is_match:
+            if len(items) < 2:
+                return None, None
+            name, dist = items[1]
+        else:
+            name, dist = items[0]
+        return name, float(dist)
+
+    def _margin_gate_uncertain(self, result) -> tuple[Optional[float], bool]:
+        """Apply the margin gate: (margin, uncertain).
+
+        A match whose runner-up is closer than the configured minimum
+        margin is downgraded to "uncertain" — right absolute distance,
+        but two profiles are plausibly the same voice.
+        """
+        margin = self._margin_of(result)
+        if not result or not result.is_match:
+            return margin, False
+        gate = self.context.get_margin_gate(self._satellite_id)
+        if gate > 0 and margin is not None and margin < gate:
+            return margin, True
+        return margin, False
+
     async def _finish_session(self) -> None:
         sid = self._session_id
         self._resolve_satellite_id()
@@ -963,6 +1024,15 @@ class MurdockHandler(AsyncEventHandler):
                 "[%s] SHORT (%.2fs < %.2fs) — passthrough",
                 sid, duration, settings.min_verify_seconds,
             )
+            # Fire a null-speaker event so downstream state resets: this
+            # utterance was never verified (plan §21).
+            self.context.publish_recognition(
+                speaker="unknown",
+                confidence=0.0,
+                satellite_id=self._satellite_id,
+                is_known=False,
+                reason="short",
+            )
             await self._passthrough_response(
                 reason="short",
                 outcome=OUTCOME_PASSTHROUGH_SHORT,
@@ -978,6 +1048,13 @@ class MurdockHandler(AsyncEventHandler):
             # postbox so the user can assign it to a (new) speaker from the
             # UI and train entirely over the voice satellite.
             await self._capture_for_training(audio_16k, duration)
+            self.context.publish_recognition(
+                speaker="unknown",
+                confidence=0.0,
+                satellite_id=self._satellite_id,
+                is_known=False,
+                reason="no-speakers",
+            )
             if self.context.get_passthrough_when_empty():
                 _LOGGER.info("[%s] NO SPEAKERS — passthrough (opt-in)", sid)
                 await self._passthrough_response(
@@ -1069,16 +1146,20 @@ class MurdockHandler(AsyncEventHandler):
             emotion, emotion_conf = await self._classify_emotion(
                 verify_audio, duration,
             )
+            early_threshold = self.context.get_verify_threshold(self._satellite_id)
             event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
                 matched_speaker=self._early_match,
                 distance=self._early_distance,
-                threshold=self.context.get_verify_threshold(self._satellite_id),
+                threshold=early_threshold,
                 verify_ms=0.0,
                 transcript=transcript,
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
+                weight=self.context.compute_speaker_weight(
+                    self._early_distance, early_threshold
+                ),
             )
             self._spawn_shadow(event_id, verify_audio)
             # Auto-enroll on early match too.
@@ -1127,6 +1208,13 @@ class MurdockHandler(AsyncEventHandler):
 
         if result is None:
             _LOGGER.info("[%s] Embedding unavailable — blocking", sid)
+            self.context.publish_recognition(
+                speaker="unknown",
+                confidence=0.0,
+                satellite_id=self._satellite_id,
+                is_known=False,
+                reason="embed-failed",
+            )
             await self._block_response(
                 outcome=OUTCOME_BLOCKED_EMBED_FAILED,
                 duration=duration,
@@ -1135,7 +1223,12 @@ class MurdockHandler(AsyncEventHandler):
             )
             return
 
-        if result.is_match and result.matched_speaker:
+        margin, uncertain = self._margin_gate_uncertain(result)
+        weight = self.context.compute_speaker_weight(
+            result.distance, result.threshold
+        )
+
+        if result.is_match and result.matched_speaker and not uncertain:
             _LOGGER.info(
                 "[%s] MATCH: %s (d=%.4f, th=%.3f, verify=%.0fms%s)",
                 sid, result.matched_speaker, result.distance,
@@ -1164,6 +1257,7 @@ class MurdockHandler(AsyncEventHandler):
             emotion, emotion_conf = await self._classify_emotion(
                 verify_audio, duration,
             )
+            nearest, nearest_d = self._nearest_of(result)
             self.context.publish_recognition(
                 speaker=result.matched_speaker,
                 confidence=self.context.confidence_for(result.distance),
@@ -1171,7 +1265,9 @@ class MurdockHandler(AsyncEventHandler):
                 is_known=True,
                 distance=result.distance,
                 threshold=result.threshold,
-                nearest_speaker=result.matched_speaker,
+                nearest_speaker=nearest,
+                nearest_distance=nearest_d,
+                margin=margin,
                 role=spk.role if spk else None,
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
@@ -1186,6 +1282,8 @@ class MurdockHandler(AsyncEventHandler):
                 transcript=transcript,
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
+                weight=weight,
+                margin=margin,
             )
             self._spawn_shadow(event_id, verify_audio)
             # Aging / auto-enroll: add fresh embedding if distance is
@@ -1196,28 +1294,46 @@ class MurdockHandler(AsyncEventHandler):
             )
             return
 
-        # No match path.
-        _LOGGER.info(
-            "[%s] NO MATCH (best=%.4f, th=%.3f, verify=%.0fms, scores=%s)",
-            sid, result.distance, result.threshold, verify_ms,
-            ", ".join(f"{n}={d:.3f}" for n, d in result.all_distances.items()),
-        )
-
-        if self.context.get_unknown_logging() and embedding is not None:
-            await self._log_unknown(verify_audio, embedding, result, duration)
-
-        best_speaker = None
-        if result.all_distances:
-            best_speaker = next(iter(result.all_distances))
+        # No match — or a match downgraded by the margin gate.
+        if uncertain:
+            _LOGGER.info(
+                "[%s] UNCERTAIN: best=%s d=%.4f th=%.3f but margin=%.4f "
+                "below gate (verify=%.0fms)",
+                sid, result.matched_speaker, result.distance,
+                result.threshold, margin, verify_ms,
+            )
+            sentinel = "uncertain"
+            best_speaker = result.matched_speaker
+            best_distance = result.distance
+            fwd_outcome = OUTCOME_UNCERTAIN_FORWARDED
+            blk_outcome = OUTCOME_BLOCKED_UNCERTAIN
+        else:
+            _LOGGER.info(
+                "[%s] NO MATCH (best=%.4f, th=%.3f, verify=%.0fms, scores=%s)",
+                sid, result.distance, result.threshold, verify_ms,
+                ", ".join(f"{n}={d:.3f}" for n, d in result.all_distances.items()),
+            )
+            # An uncertain sample is a near-match of an enrolled voice,
+            # not an unknown one — keep it out of the unknown postbox.
+            if self.context.get_unknown_logging() and embedding is not None:
+                await self._log_unknown(verify_audio, embedding, result, duration)
+            sentinel = "unknown"
+            best_speaker, best_distance = self._nearest_of(result)
+            fwd_outcome = OUTCOME_UNKNOWN_FORWARDED
+            blk_outcome = OUTCOME_BLOCKED_NO_MATCH
 
         self.context.publish_recognition(
-            speaker="unknown",
+            speaker=sentinel,
             confidence=self.context.confidence_for(result.distance),
             satellite_id=self._satellite_id,
             is_known=False,
             distance=result.distance,
             threshold=result.threshold,
             nearest_speaker=best_speaker,
+            nearest_distance=best_distance,
+            margin=margin,
+            uncertain=uncertain,
+            reason=sentinel,
         )
 
         if not require_match:
@@ -1228,29 +1344,33 @@ class MurdockHandler(AsyncEventHandler):
                     transcript, is_known=False,
                     distance=result.distance, nearest=best_speaker,
                 ),
-                label="unknown-forwarded",
+                label=f"{sentinel}-forwarded",
             )
             self._responded = True
             await self._close_upstream(send_stop=False)
-            self._log_total_latency("unknown-forwarded")
+            self._log_total_latency(f"{sentinel}-forwarded")
             event_id = self._record_event(
-                outcome=OUTCOME_UNKNOWN_FORWARDED,
+                outcome=fwd_outcome,
                 duration_sec=duration,
                 matched_speaker=best_speaker,
                 distance=result.distance,
                 threshold=result.threshold,
                 verify_ms=verify_ms,
                 transcript=transcript,
+                weight=weight,
+                margin=margin,
             )
             self._spawn_shadow(event_id, verify_audio)
         else:
             await self._block_response(
-                outcome=OUTCOME_BLOCKED_NO_MATCH,
+                outcome=blk_outcome,
                 duration=duration,
                 distance=result.distance,
                 threshold=result.threshold,
                 verify_ms=verify_ms,
                 matched_speaker=best_speaker,
+                weight=weight,
+                margin=margin,
             )
             self._log_total_latency("blocked")
 
@@ -1359,6 +1479,8 @@ class MurdockHandler(AsyncEventHandler):
         distance: Optional[float] = None,
         threshold: Optional[float] = None,
         verify_ms: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
     ) -> None:
         """Return an empty transcript and drop the upstream stream."""
         await self._send_transcript_to_satellite("", label=f"block:{outcome}")
@@ -1372,6 +1494,8 @@ class MurdockHandler(AsyncEventHandler):
             threshold=threshold,
             verify_ms=verify_ms,
             transcript="",
+            weight=weight,
+            margin=margin,
         )
 
     async def _maybe_auto_enroll(
@@ -1484,6 +1608,8 @@ class MurdockHandler(AsyncEventHandler):
         transcript: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
     ) -> int:
         """Persist a recognition audit row. Never raises. Returns the row
         id (0 on failure) so the A/B shadow can attach its transcript
@@ -1501,6 +1627,8 @@ class MurdockHandler(AsyncEventHandler):
                 transcript=transcript,
                 emotion=emotion,
                 emotion_confidence=emotion_confidence,
+                weight=weight,
+                margin=margin,
             )
         except Exception:
             _LOGGER.debug(

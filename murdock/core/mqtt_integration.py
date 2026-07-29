@@ -39,6 +39,7 @@ import time
 from typing import Optional
 
 from murdock import __version__
+from murdock.core.event_payload import build_recognition_payload
 
 _LOGGER = logging.getLogger("murdock.mqtt")
 
@@ -598,6 +599,11 @@ class MQTTClient:
         distance: Optional[float] = None,
         threshold: Optional[float] = None,
         nearest_speaker: Optional[str] = None,
+        nearest_distance: Optional[float] = None,
+        weight: Optional[float] = None,
+        margin: Optional[float] = None,
+        uncertain: bool = False,
+        reason: Optional[str] = None,
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
@@ -640,25 +646,26 @@ class MQTTClient:
             return_exceptions=True,
         )
 
-        # Also publish a JSON event for advanced automations.
-        event_payload = {
-            "speaker": speaker,
-            "confidence": round(confidence, 4),
-            "is_known": is_known,
-            "satellite_id": satellite_id,
-        }
-        if distance is not None:
-            event_payload["distance"] = round(distance, 4)
-        if threshold is not None:
-            event_payload["threshold"] = round(threshold, 4)
-        if nearest_speaker:
-            event_payload["nearest_speaker"] = nearest_speaker
-        if role:
-            event_payload["role"] = role
-        if emotion:
-            event_payload["emotion"] = emotion
-            if emotion_confidence is not None:
-                event_payload["emotion_confidence"] = round(emotion_confidence, 4)
+        # Also publish a JSON event for advanced automations. Same shape
+        # as the HA event (speaker=null on non-recognition, see
+        # murdock/core/event_payload.py).
+        event_payload = build_recognition_payload(
+            speaker=speaker,
+            is_known=is_known,
+            confidence=confidence,
+            satellite_id=satellite_id,
+            distance=distance,
+            threshold=threshold,
+            nearest_speaker=nearest_speaker,
+            nearest_distance=nearest_distance,
+            weight=weight,
+            margin=margin,
+            uncertain=uncertain,
+            reason=reason,
+            role=role,
+            emotion=emotion,
+            emotion_confidence=emotion_confidence,
+        )
 
         await self._publish_state(
             f"{prefix}/event/recognition", json.dumps(event_payload)

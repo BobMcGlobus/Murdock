@@ -14,6 +14,7 @@ from murdock import __version__
 from murdock.core.context import AppContext
 
 from .routes_backup import router as backup_router
+from .routes_integration import router as integration_router
 from .routes_recognition import router as recognition_router
 from .routes_settings import router as settings_router
 from .routes_speakers import router as speakers_router
@@ -45,6 +46,7 @@ def create_app(context: AppContext) -> FastAPI:
     app.include_router(settings_router)
     app.include_router(recognition_router)
     app.include_router(backup_router)
+    app.include_router(integration_router)
 
     @app.get("/api/health")
     async def health() -> dict:
