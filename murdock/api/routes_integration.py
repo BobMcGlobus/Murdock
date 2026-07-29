@@ -162,6 +162,15 @@ class VocabularyMetaOut(BaseModel):
     entity_count: int = 0
     term_count: int = 0
     terms_preview: List[str] = Field(default_factory=list)
+    # Full mirrored term list, in the priority order the cap applies to
+    # (entity names → aliases → areas → floors).
+    terms: List[str] = Field(default_factory=list)
+    # How many of those actually reach the STT backend.
+    term_cap: int = 0
+    # The prompt that really goes out: manual terms + capped HA terms.
+    # Empty when the vocabulary tier is switched off.
+    effective_prompt: str = ""
+    effective_enabled: bool = False
 
 
 @router.post("/vocabulary", response_model=VocabularyStoredOut)
@@ -186,11 +195,24 @@ async def push_vocabulary(
 async def get_vocabulary(
     ctx: AppContext = Depends(get_context)
 ) -> VocabularyMetaOut:
-    """Latest snapshot metadata (integration verify + UI diagnostics)."""
+    """Latest snapshot + what the STT backend actually receives.
+
+    Serves both the integration's verify step and the Web UI panel, so
+    "which terms are in play" is answerable without reading the DB.
+    """
+    from murdock.core.context import _HA_VOCAB_TERM_CAP
+
     store = ctx.get_vocabulary_store()
+    enabled = ctx.get_enable_stt_vocabulary()
+    effective = ctx.get_effective_vocabulary()
     snap = store.latest()
     if snap is None:
-        return VocabularyMetaOut(available=False)
+        return VocabularyMetaOut(
+            available=False,
+            term_cap=_HA_VOCAB_TERM_CAP,
+            effective_prompt=effective,
+            effective_enabled=enabled,
+        )
     terms = store.terms()
     return VocabularyMetaOut(
         available=True,
@@ -201,4 +223,8 @@ async def get_vocabulary(
         entity_count=len(snap["payload"].get("entities") or []),
         term_count=len(terms),
         terms_preview=terms[:25],
+        terms=terms,
+        term_cap=_HA_VOCAB_TERM_CAP,
+        effective_prompt=effective,
+        effective_enabled=enabled,
     )

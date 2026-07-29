@@ -1398,6 +1398,7 @@ async function loadSettings() {
                 sttForm.enable_stt_dictionary.checked = !!s.enable_stt_dictionary;
                 sttForm.stt_dictionary.value = s.stt_dictionary || "";
             }
+            loadVocabularyMirror();
             if (sttForm.enable_dual_transcript) {
                 sttForm.enable_dual_transcript.checked = !!s.enable_dual_transcript;
             }
@@ -2888,3 +2889,69 @@ initCollapsibleCards();
 api("/api/health")
     .then((h) => setStatus(t("health.status", { version: h.version, n: h.speakers })))
     .catch((err) => setStatus(t("health.failed", { err: err.message }), "err"));
+
+// ── Mirrored vocabulary (pushed by the HA integration) ─────────────
+//
+// Shows what the integration actually contributed and, more importantly,
+// which of those terms survive the cap and reach the STT engine.
+async function loadVocabularyMirror() {
+    const box = $("#vocab-mirror");
+    if (!box) return;
+    let data;
+    try {
+        data = await api("/api/vocabulary");
+    } catch (err) {
+        box.hidden = true;
+        return;
+    }
+    const hasSnapshot = !!data.available;
+    const hasPrompt = !!(data.effective_prompt || "").trim();
+    if (!hasSnapshot && !hasPrompt) {
+        box.hidden = true;
+        return;
+    }
+    box.hidden = false;
+
+    const meta = $("#vocab-mirror-meta");
+    if (meta) {
+        if (hasSnapshot) {
+            const age = data.created_at
+                ? formatTimestamp(data.created_at) : "";
+            meta.textContent = t("vocab.mirror_meta", {
+                entities: data.entity_count,
+                terms: data.term_count,
+                cap: data.term_cap,
+                version: data.version || "?",
+                age: age,
+            });
+        } else {
+            meta.textContent = t("vocab.mirror_none");
+        }
+    }
+
+    const list = $("#vocab-terms");
+    if (list) {
+        const terms = data.terms || [];
+        const cap = data.term_cap || terms.length;
+        list.innerHTML = terms
+            .map((term, i) => {
+                const cls = i < cap ? "chip" : "chip capped";
+                const title = i < cap
+                    ? t("vocab.chip_sent") : t("vocab.chip_capped");
+                return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(term)}</span>`;
+            })
+            .join("");
+    }
+
+    const eff = $("#vocab-effective");
+    if (eff) {
+        eff.textContent = data.effective_enabled
+            ? (data.effective_prompt || t("vocab.effective_empty"))
+            : t("vocab.effective_disabled");
+    }
+}
+
+const vocabRefreshBtn = $("#vocab-refresh-btn");
+if (vocabRefreshBtn) {
+    vocabRefreshBtn.addEventListener("click", loadVocabularyMirror);
+}

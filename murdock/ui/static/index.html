@@ -372,6 +372,19 @@
                         <span data-i18n="stt.vocab_label">Vocabulary (comma-separated terms or a short sentence)</span>
                         <textarea name="stt_vocabulary" rows="2" spellcheck="false" placeholder="Fehenlichter, Bed-Lightstrip, Sat1"></textarea>
                     </label>
+                    <div id="vocab-mirror" class="vocab-mirror" hidden>
+                        <div class="row">
+                            <strong data-i18n="vocab.mirror_title">Mirrored from Home Assistant</strong>
+                            <button type="button" id="vocab-refresh-btn" class="secondary small" data-i18n="vocab.refresh">Refresh</button>
+                        </div>
+                        <p class="meta" id="vocab-mirror-meta"></p>
+                        <p class="meta" data-i18n="vocab.mirror_hint">Pushed by the Murdock integration: names and aliases of your exposed entities, areas and floors. Terms above the cap are stored but not sent — the cap keeps the bias a nudge rather than a source of false replacements.</p>
+                        <div id="vocab-terms" class="chips"></div>
+                        <details id="vocab-effective-wrap">
+                            <summary data-i18n="vocab.effective_title">Prompt actually sent to the STT engine</summary>
+                            <pre id="vocab-effective" class="mono-block"></pre>
+                        </details>
+                    </div>
                     <label class="switch">
                         <input type="checkbox" name="enable_stt_dictionary">
                         <span data-i18n="stt.dict_enable">Correction dictionary (known misrecognitions)</span>

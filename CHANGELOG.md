@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+**See the mirrored vocabulary.** The terms the HA integration contributes
+were invisible: the Web UI only showed the manual list, and the prompt
+that actually reaches the STT engine wasn't exposed anywhere. New panel
+under *Settings → STT backend → Transcript quality*:
+
+- every mirrored term as a chip, with the ones **beyond the 25-term cap**
+  greyed out — the cap was silently dropping terms before
+- snapshot version, entity/term counts and push time
+- the **effective prompt**, i.e. manual terms plus capped HA terms exactly
+  as sent (or a note when the vocabulary tier is switched off)
+
+`GET /api/vocabulary` gained `terms` (full list), `term_cap`,
+`effective_prompt` and `effective_enabled` to back it.
+
 ## 0.8.1
 
 Makes the 0.8.0 integration actually work on a token-free (MQTT) setup —

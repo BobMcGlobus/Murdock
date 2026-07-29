@@ -135,3 +135,49 @@ def test_vocabulary_endpoints_round_trip(tmp_path):
     assert meta.available is True
     assert meta.entity_count == 3
     assert "Bett-Lightstrip" in meta.terms_preview
+
+
+def test_vocabulary_meta_exposes_full_list_and_effective_prompt(tmp_path):
+    """The UI panel needs the whole term list plus what actually goes out."""
+    import asyncio
+
+    from murdock.api.routes_integration import VocabularyIn, get_vocabulary, push_vocabulary
+    from murdock.core.context import _HA_VOCAB_TERM_CAP
+
+    ctx = _ctx(tmp_path)
+    ctx.set_stt_vocabulary("Fehenlichter")
+
+    entities = [
+        {"entity_id": f"light.l{i}", "name": f"Lampe {i:02d}", "aliases": []}
+        for i in range(_HA_VOCAB_TERM_CAP + 5)
+    ]
+    asyncio.run(push_vocabulary(
+        VocabularyIn(version=3, entities=entities, areas=[], floors=[]), ctx
+    ))
+
+    meta = asyncio.run(get_vocabulary(ctx))
+    assert meta.term_count == _HA_VOCAB_TERM_CAP + 5
+    # Full list for the panel, preview stays capped for cheap clients.
+    assert len(meta.terms) == _HA_VOCAB_TERM_CAP + 5
+    assert len(meta.terms_preview) == 25
+    assert meta.term_cap == _HA_VOCAB_TERM_CAP
+    # The effective prompt is manual terms + capped HA terms.
+    sent = meta.effective_prompt.split(", ")
+    assert sent[0] == "Fehenlichter"
+    assert len(sent) == _HA_VOCAB_TERM_CAP + 1
+    assert meta.terms[_HA_VOCAB_TERM_CAP] not in meta.effective_prompt
+    assert meta.effective_enabled is True
+
+
+def test_vocabulary_meta_reports_disabled_tier(tmp_path):
+    import asyncio
+
+    from murdock.api.routes_integration import get_vocabulary
+
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    ctx.set_enable_stt_vocabulary(False)
+    meta = asyncio.run(get_vocabulary(ctx))
+    assert meta.available is True
+    assert meta.effective_enabled is False
+    assert meta.effective_prompt == ""

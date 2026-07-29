@@ -642,3 +642,66 @@ table.distances tr.ok td {
 input[type="checkbox"] {
     accent-color: var(--accent);
 }
+
+/* ── Mirrored vocabulary panel ──────────────────────────── */
+
+.vocab-mirror {
+    margin: 0.35rem 0 0.9rem;
+    padding: 0.7rem 0.8rem;
+    background: var(--card-alt);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.vocab-mirror .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin: 0.5rem 0;
+}
+
+.chip {
+    padding: 0.12rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    background: rgba(56, 189, 248, 0.08);
+    color: #7dd3fc;
+    border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+/* Beyond the cap: stored, but not sent to the STT engine. */
+.chip.capped {
+    background: transparent;
+    color: var(--muted);
+    border-color: var(--border);
+}
+
+.mono-block {
+    margin: 0.5rem 0 0;
+    padding: 0.55rem 0.65rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+}
+
+.vocab-mirror summary {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.vocab-mirror summary:hover {
+    color: var(--text);
+}
