@@ -1323,6 +1323,25 @@ class MurdockHandler(AsyncEventHandler):
             )
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
             transcript = await self._get_transcript(verify_audio)
+            nearest, nearest_d = self._nearest_of(result)
+            # Publish BEFORE answering — and wait for it. HA starts the
+            # intent stage (where the agent's prompt is built) within a
+            # millisecond of receiving the transcript, so a speaker
+            # published afterwards can only reach the *next* turn.
+            await self.context.publish_recognition_now(
+                speaker=result.matched_speaker,
+                confidence=self.context.confidence_for(result.distance),
+                satellite_id=self._satellite_id,
+                is_known=True,
+                distance=result.distance,
+                threshold=result.threshold,
+                nearest_speaker=nearest,
+                nearest_distance=nearest_d,
+                margin=margin,
+                weight=weight,
+                role=spk.role if spk else None,
+                ambiguities=self._transcript_hints or None,
+            )
             await self._send_transcript_to_satellite(
                 self._augment_transcript(
                     transcript, is_known=True, speaker=result.matched_speaker,
@@ -1336,29 +1355,28 @@ class MurdockHandler(AsyncEventHandler):
             self._log_total_latency("match")
             # Emotion classification runs AFTER the transcript has been
             # returned to the satellite, so its latency never shows up to
-            # the user. The HA push is fire-and-forget, so moving it to
-            # after classification only shifts *when* HA starts seeing
-            # the update by a few hundred ms, still faster than any
-            # automation could act on it.
+            # the user. The speaker itself already went out above; only
+            # when there is an emotion to add does a second event follow.
             emotion, emotion_conf = await self._classify_emotion(
                 verify_audio, duration,
             )
-            nearest, nearest_d = self._nearest_of(result)
-            self.context.publish_recognition(
-                speaker=result.matched_speaker,
-                confidence=self.context.confidence_for(result.distance),
-                satellite_id=self._satellite_id,
-                is_known=True,
-                distance=result.distance,
-                threshold=result.threshold,
-                nearest_speaker=nearest,
-                nearest_distance=nearest_d,
-                margin=margin,
-                role=spk.role if spk else None,
-                emotion=emotion,
-                emotion_confidence=emotion_conf,
-                ambiguities=self._transcript_hints or None,
-            )
+            if emotion:
+                self.context.publish_recognition(
+                    speaker=result.matched_speaker,
+                    confidence=self.context.confidence_for(result.distance),
+                    satellite_id=self._satellite_id,
+                    is_known=True,
+                    distance=result.distance,
+                    threshold=result.threshold,
+                    nearest_speaker=nearest,
+                    nearest_distance=nearest_d,
+                    margin=margin,
+                    weight=weight,
+                    role=spk.role if spk else None,
+                    emotion=emotion,
+                    emotion_confidence=emotion_conf,
+                    ambiguities=self._transcript_hints or None,
+                )
             event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,

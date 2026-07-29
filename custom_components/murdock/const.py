@@ -16,6 +16,7 @@ CONF_CONTEXT_MODE = "context_mode"
 CONF_FRESHNESS_WINDOW = "freshness_window"
 CONF_MIN_CONFIDENCE = "min_confidence"
 CONF_MIRROR_VOCABULARY = "mirror_vocabulary"
+CONF_MQTT_PREFIX = "mqtt_topic_prefix"
 
 CONTEXT_MODE_CLEAN = "clean"
 CONTEXT_MODE_INLINE = "inline"
@@ -32,9 +33,15 @@ DEFAULT_CONTEXT_MODE = CONTEXT_MODE_SIDECAR
 DEFAULT_FRESHNESS_WINDOW = 30  # seconds
 DEFAULT_MIN_CONFIDENCE = 0.0   # prompt line names the speaker above this
 DEFAULT_MIRROR_VOCABULARY = True
+DEFAULT_MQTT_PREFIX = "murdock"
 
-# Murdock fires this on the HA event bus (REST /api/events/...).
+# Two independent delivery paths, because Murdock has two:
+#   * HA event bus — fed by Murdock's REST push (needs a token)
+#   * MQTT topic   — fed by Murdock's MQTT client (the recommended,
+#                    token-free setup); an MQTT message is NOT an HA
+#                    event, so it has to be subscribed explicitly.
 EVENT_SPEAKER_RECOGNITION = "speaker_recognition_detected"
+MQTT_EVENT_SUFFIX = "event/recognition"
 
 # Dispatcher signal: fired with the satellite_id on every state change.
 SIGNAL_SPEAKER_UPDATE = f"{DOMAIN}_speaker_update"

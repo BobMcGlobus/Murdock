@@ -198,5 +198,102 @@ def build_snapshot_signature():
 
 check("vocabulary.build_snapshot importable", build_snapshot_signature)
 
+
+def mqtt_subscribe_api():
+    """The MQTT path is how token-free setups deliver recognitions."""
+    from homeassistant.components import mqtt
+    sig = inspect.signature(mqtt.async_subscribe).parameters
+    for p in ("hass", "topic", "msg_callback"):
+        if p not in sig:
+            raise AttributeError(f"async_subscribe lacks {p}")
+    if not inspect.iscoroutinefunction(mqtt.async_subscribe):
+        raise TypeError("async_subscribe is not awaitable")
+    from homeassistant.components.mqtt.models import ReceiveMessage
+    for f in ("topic", "payload"):
+        if f not in ReceiveMessage.__dataclass_fields__:
+            raise AttributeError(f"ReceiveMessage lacks {f}")
+    return None
+
+
+check("mqtt.async_subscribe + ReceiveMessage", mqtt_subscribe_api)
+
+
+def payload_applies_from_both_paths():
+    """One recognition, two transports, identical resulting state."""
+    from custom_components.murdock.coordinator import MurdockCoordinator
+
+    payload = {
+        "satellite_id": "assist_satellite.arbeitszimmer",
+        "speaker": "Jonas",
+        "is_known": True,
+        "confidence": 0.94,
+        "distance": 0.2142,
+        "threshold": 0.38,
+        "nearest_speaker": "Alex",
+        "nearest_distance": 0.61,
+        "weight": 1.0,
+        "timestamp": 1785000000.5,
+        "ambiguities": [
+            {"original": "Bad", "alternative": "Bett", "kind": "alternative"}
+        ],
+    }
+
+    class FakeCoordinator(MurdockCoordinator):
+        def __init__(self):  # bypass HA plumbing
+            self._states = {}
+            self._unsubs = []
+            self._last_seen = None
+            self.mqtt_subscribed = False
+            self.available = False
+            self.last_event_at = None
+            self.hass = None
+
+        def _dispatch(self, sat):
+            pass
+
+    import custom_components.murdock.coordinator as mod
+
+    sent = []
+    original = mod.async_dispatcher_send
+    mod.async_dispatcher_send = lambda hass, sig, sat: sent.append(sat)
+    try:
+        # Event-bus path
+        c = FakeCoordinator()
+        c._apply_payload(payload, source="event")
+        via_event = c._states[payload["satellite_id"]]
+        # MQTT path: same payload, JSON-encoded
+        import json as _json
+
+        encoded = _json.dumps(payload)
+
+        class Msg:
+            topic = "murdock/event/recognition"
+            payload = encoded
+
+        c2 = FakeCoordinator()
+        c2._handle_mqtt_message(Msg())
+        via_mqtt = c2._states[payload["satellite_id"]]
+        # Duplicate suppression on a single coordinator
+        c3 = FakeCoordinator()
+        c3._apply_payload(payload, source="event")
+        c3._handle_mqtt_message(Msg())
+        dispatches = len(sent)
+    finally:
+        mod.async_dispatcher_send = original
+
+    if via_event.speaker != "Jonas" or via_mqtt.speaker != "Jonas":
+        raise AssertionError("speaker not applied on both paths")
+    if via_mqtt.weight != 1.0 or via_mqtt.nearest_distance != 0.61:
+        raise AssertionError("fields lost on the MQTT path")
+    if len(via_mqtt.ambiguities) != 1:
+        raise AssertionError("ambiguities lost on the MQTT path")
+    # 1 (event) + 1 (mqtt) + 1 (third coordinator, duplicate suppressed)
+    if dispatches != 3:
+        raise AssertionError(f"expected 3 dispatches, got {dispatches}")
+    return "event + mqtt identical, duplicate suppressed"
+
+
+check("recognition applies from event bus and MQTT", payload_applies_from_both_paths)
+
 print(f"\n=== {ok} ok, {fail} failed ===")
 sys.exit(1 if fail else 0)

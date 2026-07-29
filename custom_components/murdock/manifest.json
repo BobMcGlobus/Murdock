@@ -1,6 +1,9 @@
 {
   "domain": "murdock",
   "name": "Murdock",
+  "after_dependencies": [
+    "mqtt"
+  ],
   "codeowners": [
     "@BobMcGlobus"
   ],
@@ -15,5 +18,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/BobMcGlobus/Murdock/issues",
   "requirements": [],
-  "version": "0.1.1"
+  "version": "0.2.0"
 }

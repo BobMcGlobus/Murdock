@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+**Integration 0.2.0 — the MQTT path now works, and the speaker arrives in
+time.** Two defects that together made the integration useless on the
+recommended setup:
+
+- **MQTT recognitions never reached the integration.** Murdock publishes
+  them to `<prefix>/event/recognition`, but an MQTT message is *not* a
+  Home Assistant event — the integration only listened on the event bus,
+  which is fed by the *legacy* REST/token push. Anyone on the
+  recommended, token-free MQTT setup saw `unbekannt` forever. The
+  integration now subscribes to the topic as well (prefix configurable,
+  blank disables it); running both paths is fine, duplicates are dropped
+  by satellite + timestamp.
+- **The speaker lost a race it could not win.** Home Assistant starts the
+  intent stage — where the agent's prompt is built — within a millisecond
+  of receiving the transcript, but Murdock published the recognition
+  *after* answering. Even a perfectly delivered event arrived too late
+  for the turn that caused it. The match path now publishes and **waits**
+  (1 s cap) before answering the satellite, costing a few milliseconds on
+  a local network. Emotion, classified after the response, only sends a
+  second event when there is an emotion to add.
+- New `sensor.murdock_delivery_path` diagnostic shows which transports are
+  live (`mqtt+event`, `event (waiting)`, …) — the first thing to check
+  when the speaker stays unknown.
+
 **Integration fix 0.1.1 — vocabulary mirroring crashed on HA 2026.7+.**
 `RegistryEntry.aliases` became `list[str | ComputedNameType]`, where the
 `COMPUTED_NAME` sentinel stands for the computed full entity name and is

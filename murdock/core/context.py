@@ -55,6 +55,11 @@ _WEIGHT_CEILING_DELTA = 0.15
 # ~20–30; more terms raise the false-replacement rate on noisy input).
 _HA_VOCAB_TERM_CAP = 25
 
+# Upper bound for the ordering-critical recognition publish that runs
+# before the transcript goes back. A local HA/broker answers in single
+# digit milliseconds; this only caps pathological cases.
+_PUBLISH_NOW_TIMEOUT = 1.0
+
 
 @dataclass
 class AppContext:
@@ -902,6 +907,43 @@ class AppContext:
             self.mqtt.publish_async(self.mqtt.publish_recognition(**kwargs))
         if self.ha.configured:
             self.ha.publish_async(self.ha.push_recognition(**kwargs))
+
+    async def publish_recognition_now(self, **kwargs) -> None:
+        """Publish and *wait* for the sinks — ordering-critical variant.
+
+        Home Assistant starts the intent stage within a millisecond of
+        receiving the transcript, and the conversation agent's prompt is
+        built there. A fire-and-forget push therefore loses the race and
+        the speaker only lands in time for the *next* turn. Awaiting the
+        publish before answering the satellite is what makes the speaker
+        available for the current turn.
+
+        Bounded by ``_PUBLISH_NOW_TIMEOUT`` and never raises: an
+        unreachable HA or a stalled broker must not hold up a transcript.
+        """
+        if kwargs.get("weight") is None:
+            kwargs["weight"] = self.compute_speaker_weight(
+                kwargs.get("distance"), kwargs.get("threshold")
+            )
+        coros = []
+        if self.mqtt.connected:
+            coros.append(self.mqtt.publish_recognition(**kwargs))
+        if self.ha.configured:
+            coros.append(self.ha.push_recognition(**kwargs))
+        if not coros:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*coros, return_exceptions=True),
+                timeout=_PUBLISH_NOW_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            _LOGGER.warning(
+                "Recognition publish exceeded %.1fs — continuing",
+                _PUBLISH_NOW_TIMEOUT,
+            )
+        except Exception:
+            _LOGGER.debug("Recognition publish failed", exc_info=True)
 
     async def is_tv_playing(self, satellite_id: Optional[str] = None) -> bool:
         """Return True if a TV is playing in the relevant room.

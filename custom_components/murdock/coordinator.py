@@ -1,14 +1,26 @@
 """In-memory speaker state per satellite (plan §7).
 
-Event bus in, in-memory out: Murdock fires
-``speaker_recognition_detected`` on every completed utterance; the
-coordinator keeps the latest :class:`SpeakerState` per satellite and
-never routes reads through entity state (the sensors are a dashboard
-by-product, see sensor.py).
+Recognition in, in-memory out: the coordinator keeps the latest
+:class:`SpeakerState` per satellite and never routes reads through entity
+state (the sensors are a dashboard by-product, see sensor.py).
+
+Murdock can deliver a recognition over **either** of two paths, so both
+are consumed here:
+
+* the **HA event bus** (``speaker_recognition_detected``), fired by
+  Murdock's REST push — needs a long-lived token;
+* the **MQTT topic** ``<prefix>/event/recognition``, published by
+  Murdock's own MQTT client. This is the recommended, token-free setup,
+  and an MQTT message is *not* an HA event — it has to be subscribed
+  explicitly or the integration sees nothing at all.
+
+Both carry the identical payload, and duplicates (someone running both)
+are dropped by (satellite, timestamp).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -25,13 +37,16 @@ from .api import MurdockApiClient, MurdockApiError
 from .const import (
     CONF_BASE_URL,
     CONF_FRESHNESS_WINDOW,
+    CONF_MQTT_PREFIX,
     CONF_SATELLITE_ENTITY,
     CONF_SATELLITE_ID,
     CONF_SATELLITES,
     CONF_TOKEN,
     DEFAULT_FRESHNESS_WINDOW,
+    DEFAULT_MQTT_PREFIX,
     EVENT_SPEAKER_RECOGNITION,
     HEALTH_POLL_INTERVAL_SECONDS,
+    MQTT_EVENT_SUFFIX,
     SIGNAL_SPEAKER_UPDATE,
 )
 
@@ -104,6 +119,10 @@ class MurdockCoordinator:
         self.last_event_at: datetime | None = None
         self._states: dict[str, SpeakerState] = {}
         self._unsubs: list = []
+        # (satellite_id, timestamp) of the last applied payload, so a
+        # recognition delivered over both paths is only applied once.
+        self._last_seen: tuple[str, Any] | None = None
+        self.mqtt_subscribed: bool = False
 
     # ------------------------------------------------------------------
     # Config accessors
@@ -125,6 +144,14 @@ class MurdockCoordinator:
         """Configured satellite mappings ({satellite_id, satellite_entity})."""
         return list(self._option.get(CONF_SATELLITES, []))
 
+    @property
+    def mqtt_topic(self) -> str:
+        """Recognition topic, or "" when MQTT consumption is disabled."""
+        prefix = str(
+            self._option.get(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX) or ""
+        ).strip().strip("/")
+        return f"{prefix}/{MQTT_EVENT_SUFFIX}" if prefix else ""
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -135,6 +162,7 @@ class MurdockCoordinator:
                 EVENT_SPEAKER_RECOGNITION, self._handle_event
             )
         )
+        await self._async_subscribe_mqtt()
         self._unsubs.append(
             async_track_time_interval(
                 self.hass,
@@ -144,10 +172,41 @@ class MurdockCoordinator:
         )
         await self.async_initial_sync()
 
+    async def _async_subscribe_mqtt(self) -> None:
+        """Subscribe to Murdock's MQTT recognition topic, if MQTT is set up.
+
+        Best-effort: no broker, no MQTT integration, or a bad topic just
+        means this path stays unused — the event bus still works.
+        """
+        topic = self.mqtt_topic
+        if not topic:
+            return
+        if "mqtt" not in self.hass.config.components:
+            _LOGGER.debug(
+                "MQTT integration not loaded — relying on the event bus"
+            )
+            return
+        try:
+            from homeassistant.components import mqtt
+
+            unsub = await mqtt.async_subscribe(
+                self.hass, topic, self._handle_mqtt_message
+            )
+        except Exception:
+            _LOGGER.warning(
+                "Could not subscribe to %s — relying on the event bus",
+                topic, exc_info=True,
+            )
+            return
+        self._unsubs.append(unsub)
+        self.mqtt_subscribed = True
+        _LOGGER.debug("Subscribed to %s", topic)
+
     async def async_shutdown(self) -> None:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+        self.mqtt_subscribed = False
 
     async def async_initial_sync(self) -> None:
         """Rebuild state from the proxy after an HA restart (plan §7)."""
@@ -209,10 +268,32 @@ class MurdockCoordinator:
 
     @callback
     def _handle_event(self, event: Event) -> None:
-        data = event.data or {}
+        """Recognition from the HA event bus (Murdock's REST push)."""
+        self._apply_payload(event.data or {}, source="event")
+
+    @callback
+    def _handle_mqtt_message(self, msg) -> None:
+        """Recognition from Murdock's MQTT topic (token-free path)."""
+        try:
+            data = json.loads(msg.payload)
+        except (TypeError, ValueError):
+            _LOGGER.debug("Ignoring non-JSON payload on %s", msg.topic)
+            return
+        if not isinstance(data, dict):
+            return
+        self._apply_payload(data, source="mqtt")
+
+    @callback
+    def _apply_payload(self, data: dict[str, Any], *, source: str) -> None:
         sat = data.get("satellite_id")
         if not sat:
             return
+        # Running both paths delivers the same recognition twice.
+        marker = (sat, data.get("timestamp"))
+        if marker[1] is not None and marker == self._last_seen:
+            _LOGGER.debug("Duplicate recognition via %s — ignored", source)
+            return
+        self._last_seen = marker
         state = SpeakerState(
             speaker=data.get("speaker") if data.get("is_known") else None,
             confidence=float(data.get("confidence") or 0.0),

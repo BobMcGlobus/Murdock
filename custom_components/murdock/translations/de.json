@@ -23,7 +23,8 @@
         "data": {
           "context_mode": "Kontext-Modus",
           "freshness_window": "Frischefenster des Sprechers",
-          "mirror_vocabulary": "Vokabular an Murdock spiegeln"
+          "mirror_vocabulary": "Vokabular an Murdock spiegeln",
+          "mqtt_topic_prefix": "Murdock-MQTT-Topic-Prefix (leer = nur REST-Event-Bus)"
         }
       }
     },
@@ -47,7 +48,8 @@
         "data": {
           "context_mode": "Kontext-Modus",
           "freshness_window": "Frischefenster des Sprechers",
-          "mirror_vocabulary": "Vokabular an Murdock spiegeln"
+          "mirror_vocabulary": "Vokabular an Murdock spiegeln",
+          "mqtt_topic_prefix": "Murdock-MQTT-Topic-Prefix (leer = nur REST-Event-Bus)"
         }
       },
       "satellites": {
@@ -73,12 +75,23 @@
   },
   "entity": {
     "sensor": {
-      "speaker": { "name": "Sprecher" },
-      "last_recognition": { "name": "Letzte Erkennung" },
-      "vocabulary_version": { "name": "Vokabular-Version" }
+      "speaker": {
+        "name": "Sprecher"
+      },
+      "last_recognition": {
+        "name": "Letzte Erkennung"
+      },
+      "vocabulary_version": {
+        "name": "Vokabular-Version"
+      },
+      "delivery_path": {
+        "name": "Lieferweg"
+      }
     },
     "binary_sensor": {
-      "connection": { "name": "Verbindung" }
+      "connection": {
+        "name": "Verbindung"
+      }
     }
   }
 }

@@ -23,7 +23,8 @@
         "data": {
           "context_mode": "Context mode",
           "freshness_window": "Speaker freshness window",
-          "mirror_vocabulary": "Mirror vocabulary to Murdock"
+          "mirror_vocabulary": "Mirror vocabulary to Murdock",
+          "mqtt_topic_prefix": "Murdock MQTT topic prefix (blank = REST event bus only)"
         }
       }
     },
@@ -47,7 +48,8 @@
         "data": {
           "context_mode": "Context mode",
           "freshness_window": "Speaker freshness window",
-          "mirror_vocabulary": "Mirror vocabulary to Murdock"
+          "mirror_vocabulary": "Mirror vocabulary to Murdock",
+          "mqtt_topic_prefix": "Murdock MQTT topic prefix (blank = REST event bus only)"
         }
       },
       "satellites": {
@@ -73,12 +75,23 @@
   },
   "entity": {
     "sensor": {
-      "speaker": { "name": "Speaker" },
-      "last_recognition": { "name": "Last recognition" },
-      "vocabulary_version": { "name": "Vocabulary version" }
+      "speaker": {
+        "name": "Speaker"
+      },
+      "last_recognition": {
+        "name": "Last recognition"
+      },
+      "vocabulary_version": {
+        "name": "Vocabulary version"
+      },
+      "delivery_path": {
+        "name": "Delivery path"
+      }
     },
     "binary_sensor": {
-      "connection": { "name": "Connection" }
+      "connection": {
+        "name": "Connection"
+      }
     }
   }
 }

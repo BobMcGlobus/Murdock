@@ -196,3 +196,99 @@ def test_recognition_log_persists_weight_and_margin(tmp_path):
     ev = log.list_events(limit=1)[0]
     assert ev.weight == pytest.approx(1.0)
     assert ev.margin == pytest.approx(0.2)
+
+
+# ----------------------------------------------------------------------
+# Ordering-critical publish (the speaker must beat the intent stage)
+# ----------------------------------------------------------------------
+
+
+def test_publish_recognition_now_awaits_both_sinks(tmp_path):
+    """HA starts the intent stage ~0.2ms after the transcript, so the
+    publish has to be finished before answering — not fire-and-forget."""
+    import asyncio
+
+    calls = []
+
+    class FakeMQTT:
+        connected = True
+
+        async def publish_recognition(self, **kw):
+            await asyncio.sleep(0)
+            calls.append(("mqtt", kw["speaker"]))
+
+    class FakeHA:
+        configured = True
+
+        async def push_recognition(self, **kw):
+            await asyncio.sleep(0)
+            calls.append(("ha", kw["speaker"]))
+
+    db = open_db(tmp_path / "m.db")
+    ctx = AppContext(
+        settings=SimpleNamespace(), db=db, embedder=None, vad=None,
+        speakers=None, unknown=None, ha=FakeHA(), mqtt=FakeMQTT(),
+        recognition=None,
+    )
+    asyncio.run(ctx.publish_recognition_now(
+        speaker="Jonas", confidence=0.9, satellite_id="sat1", is_known=True,
+        distance=0.31, threshold=0.38,
+    ))
+    # Both sinks completed before the call returned.
+    assert sorted(calls) == [("ha", "Jonas"), ("mqtt", "Jonas")]
+
+
+def test_publish_recognition_now_survives_a_stalled_sink(tmp_path):
+    """An unreachable HA must never hold up a transcript."""
+    import asyncio
+
+    from murdock.core import context as context_mod
+
+    class StalledHA:
+        configured = True
+
+        async def push_recognition(self, **kw):
+            await asyncio.sleep(60)
+
+    class NoMQTT:
+        connected = False
+
+    db = open_db(tmp_path / "m.db")
+    ctx = AppContext(
+        settings=SimpleNamespace(), db=db, embedder=None, vad=None,
+        speakers=None, unknown=None, ha=StalledHA(), mqtt=NoMQTT(),
+        recognition=None,
+    )
+    original = context_mod._PUBLISH_NOW_TIMEOUT
+    context_mod._PUBLISH_NOW_TIMEOUT = 0.05
+    try:
+        asyncio.run(ctx.publish_recognition_now(
+            speaker="Jonas", confidence=0.9, satellite_id="sat1",
+            is_known=True,
+        ))
+    finally:
+        context_mod._PUBLISH_NOW_TIMEOUT = original
+
+
+def test_publish_recognition_now_computes_weight(tmp_path):
+    import asyncio
+
+    seen = {}
+
+    class FakeHA:
+        configured = True
+
+        async def push_recognition(self, **kw):
+            seen.update(kw)
+
+    db = open_db(tmp_path / "m.db")
+    ctx = AppContext(
+        settings=SimpleNamespace(), db=db, embedder=None, vad=None,
+        speakers=None, unknown=None, ha=FakeHA(),
+        mqtt=SimpleNamespace(connected=False), recognition=None,
+    )
+    asyncio.run(ctx.publish_recognition_now(
+        speaker="Jonas", confidence=0.9, satellite_id="sat1", is_known=True,
+        distance=0.31, threshold=0.38,
+    ))
+    assert seen["weight"] == pytest.approx(1.0)

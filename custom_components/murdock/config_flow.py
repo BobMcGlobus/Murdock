@@ -34,6 +34,7 @@ from .const import (
     CONF_CONTEXT_MODE,
     CONF_FRESHNESS_WINDOW,
     CONF_MIRROR_VOCABULARY,
+    CONF_MQTT_PREFIX,
     CONF_SATELLITE_ENTITY,
     CONF_SATELLITE_ID,
     CONF_SATELLITES,
@@ -42,6 +43,7 @@ from .const import (
     DEFAULT_CONTEXT_MODE,
     DEFAULT_FRESHNESS_WINDOW,
     DEFAULT_MIRROR_VOCABULARY,
+    DEFAULT_MQTT_PREFIX,
     DOMAIN,
 )
 
@@ -80,6 +82,13 @@ def _settings_schema(current: dict[str, Any]) -> vol.Schema:
                     CONF_MIRROR_VOCABULARY, DEFAULT_MIRROR_VOCABULARY
                 ),
             ): BooleanSelector(),
+            # Murdock's MQTT topic prefix. Recognitions arrive over MQTT
+            # when you run the token-free setup; blank disables the MQTT
+            # path and relies on the REST event bus alone.
+            vol.Optional(
+                CONF_MQTT_PREFIX,
+                default=current.get(CONF_MQTT_PREFIX, DEFAULT_MQTT_PREFIX),
+            ): TextSelector(),
         }
     )
 

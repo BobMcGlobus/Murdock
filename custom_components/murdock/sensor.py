@@ -39,6 +39,7 @@ async def async_setup_entry(
             entities.append(SpeakerSensor(coordinator, sat_id))
     entities.append(LastRecognitionSensor(coordinator))
     entities.append(VocabularyVersionSensor(coordinator))
+    entities.append(DeliveryPathSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -112,6 +113,38 @@ class LastRecognitionSensor(MurdockEntity, SensorEntity):
     @property
     def native_value(self) -> datetime | None:
         return self.coordinator.last_event_at
+
+
+class DeliveryPathSensor(MurdockEntity, SensorEntity):
+    """Which path recognitions actually arrive on.
+
+    The single most useful thing to look at when the speaker stays
+    `unbekannt`: Murdock's REST push needs a token, its MQTT publish needs
+    a broker, and only a subscribed path delivers anything.
+    """
+
+    _attr_translation_key = "delivery_path"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: MurdockCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.api.base_url}:delivery_path"
+        self._attr_device_info = proxy_device_info(coordinator)
+
+    @property
+    def native_value(self) -> str:
+        got_any = self.coordinator.last_event_at is not None
+        if self.coordinator.mqtt_subscribed:
+            return "mqtt+event" if got_any else "mqtt (waiting)"
+        return "event" if got_any else "event (waiting)"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "mqtt_subscribed": self.coordinator.mqtt_subscribed,
+            "mqtt_topic": self.coordinator.mqtt_topic or None,
+            "recognitions_received": self.coordinator.last_event_at is not None,
+        }
 
 
 class VocabularyVersionSensor(MurdockEntity, SensorEntity):
