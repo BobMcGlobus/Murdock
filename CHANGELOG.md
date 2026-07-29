@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Integration fix 0.1.1 — vocabulary mirroring crashed on HA 2026.7+.**
+`RegistryEntry.aliases` became `list[str | ComputedNameType]`, where the
+`COMPUTED_NAME` sentinel stands for the computed full entity name and is
+only expanded by `async_get_entity_aliases()`. Sorting the raw list threw
+`TypeError: '<' not supported between instances of 'str' and
+'ComputedNameType'` and, because the initial push was awaited during
+setup, took the **whole integration** down with it — no speaker, no LLM
+API, no sensors.
+
+- Aliases are now resolved through the official helper, with a fallback
+  for older cores where `aliases` is still a plain `set[str]`.
+- Vocabulary mirroring is strictly best-effort: per-entity failures are
+  skipped, `async_push()` never raises, and a mirror that fails to start
+  no longer fails the config entry. The speaker path is the reason this
+  integration exists; vocabulary is an enhancement.
+- New `scripts/verify_integration_api.py` checks every Home Assistant API
+  the integration touches (30 assertions, all modules imported) against a
+  real HA install. The repo's pytest suite can't cover
+  `custom_components/` — HA needs Python 3.14, the add-on image is on
+  3.11 — so this closes that gap. Verified green on HA 2026.7.4.
+
 **Sidecar mode for ambiguity markers** — the `[oder: …]` markers from the
 correction dictionary and the dual transcript no longer have to live in
 the transcript. New setting under *Settings → Speaker context*:

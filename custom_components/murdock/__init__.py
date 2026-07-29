@@ -36,12 +36,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         llm.async_register_api(hass, MurdockLLMApi(hass, coordinator))
     )
 
-    # Vocabulary mirroring (plan §9), opt-out via options.
+    # Vocabulary mirroring (plan §9), opt-out via options. Deliberately
+    # best-effort: the speaker path is the reason this integration
+    # exists, so a vocabulary problem must never fail the entry setup.
     options = {**entry.data, **entry.options}
     if options.get(CONF_MIRROR_VOCABULARY, DEFAULT_MIRROR_VOCABULARY):
         mirror = VocabularyMirror(hass, coordinator)
-        await mirror.async_setup()
         coordinator.vocabulary_mirror = mirror
+        try:
+            await mirror.async_setup()
+        except Exception:
+            _LOGGER.exception(
+                "Vocabulary mirroring failed to start — continuing without it"
+            )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
