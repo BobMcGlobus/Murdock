@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.8.1
+
+Makes the 0.8.0 integration actually work on a token-free (MQTT) setup —
+0.8.0's integration could not see recognitions there at all, and even on
+the REST path the speaker arrived one turn late. **Update both the add-on
+and the integration** (0.2.0, attached to the release).
 
 **Integration 0.2.0 — the MQTT path now works, and the speaker arrives in
 time.** Two defects that together made the integration useless on the
