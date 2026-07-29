@@ -492,6 +492,16 @@
                         </label>
                         <p class="meta" data-i18n="transcript_tpl.tip">Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.</p>
                     </div>
+                    <label>
+                        <span data-i18n="hint_mode.label">Ambiguity markers (correction dictionary / dual transcript)</span>
+                        <select name="transcript_hint_mode" id="transcript-hint-mode">
+                            <option value="inline" data-i18n="hint_mode.inline">Inline in the transcript — `[oder: …]` stays in the text</option>
+                            <option value="sidecar" data-i18n="hint_mode.sidecar">Sidecar — transcript stays clean, hints go in the recognition event</option>
+                            <option value="clean" data-i18n="hint_mode.clean">Clean — drop the markers entirely</option>
+                            <option value="auto" data-i18n="hint_mode.auto">Auto — sidecar when an event sink is available, else inline</option>
+                        </select>
+                        <small class="meta" id="hint-mode-help" data-i18n="hint_mode.hint">Sidecar keeps HA's local intent matching working and needs the Murdock HA integration (or an automation on the recognition event) to read the hints.</small>
+                    </label>
                     <div class="row">
                         <button type="submit" data-i18n="generic.save">Save</button>
                     </div>

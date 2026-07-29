@@ -136,6 +136,7 @@ class HomeAssistantClient:
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        ambiguities: Optional[list] = None,
     ) -> None:
         if not self.configured:
             return
@@ -157,6 +158,7 @@ class HomeAssistantClient:
                 role=role,
                 emotion=emotion,
                 emotion_confidence=emotion_confidence,
+                ambiguities=ambiguities,
             )
             response = await client.post(
                 "/api/events/speaker_recognition_detected",
@@ -223,6 +225,7 @@ class HomeAssistantClient:
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        ambiguities: Optional[list] = None,
     ) -> None:
         """Push all recognition data to HA in one go.
 
@@ -264,6 +267,7 @@ class HomeAssistantClient:
             role=role,
             emotion=emotion,
             emotion_confidence=emotion_confidence,
+            ambiguities=ambiguities,
         )
 
     async def is_tv_playing(self) -> bool:

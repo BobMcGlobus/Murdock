@@ -449,6 +449,58 @@ class AppContext:
             )
         set_setting(self.db, "speaker_context_mode", mode)
 
+    # ------------------------------------------------------------------
+    # Transcript hint delivery (plan §13)
+    # ------------------------------------------------------------------
+
+    TRANSCRIPT_HINT_MODES = ("inline", "sidecar", "clean", "auto")
+
+    def get_transcript_hint_mode(self) -> str:
+        """Where ambiguity markers go: inline | sidecar | clean | auto.
+
+        * ``inline`` — ``[oder: …]`` stays in the transcript (default,
+          the pre-0.8 behaviour).
+        * ``sidecar`` — transcript stays clean, ambiguities travel in the
+          recognition event; the HA integration turns them into a
+          "Transkript-Hinweis" prompt line.
+        * ``clean`` — markers are dropped entirely.
+        * ``auto`` — sidecar when an event sink is available, else inline.
+        """
+        override = get_setting(self.db, "transcript_hint_mode")
+        if override in self.TRANSCRIPT_HINT_MODES:
+            return override
+        return "inline"
+
+    def set_transcript_hint_mode(self, mode: str) -> None:
+        if mode not in self.TRANSCRIPT_HINT_MODES:
+            raise ValueError(
+                f"Invalid transcript_hint_mode: {mode!r} "
+                f"(allowed: {', '.join(self.TRANSCRIPT_HINT_MODES)})"
+            )
+        set_setting(self.db, "transcript_hint_mode", mode)
+
+    def effective_transcript_hint_mode(self) -> str:
+        """Resolve ``auto`` against the sinks that are actually wired.
+
+        Sidecar only helps when something downstream reads the event, so
+        ``auto`` falls back to inline markers when neither MQTT nor the
+        HA REST push is configured.
+        """
+        mode = self.get_transcript_hint_mode()
+        if mode != "auto":
+            return mode
+        has_sink = False
+        try:
+            has_sink = bool(self.mqtt and self.mqtt.connected)
+        except Exception:
+            pass
+        if not has_sink:
+            try:
+                has_sink = bool(self.ha and self.ha.configured)
+            except Exception:
+                pass
+        return "sidecar" if has_sink else "inline"
+
     def get_transcript_template_known(self) -> str:
         override = get_setting(self.db, "transcript_template_known")
         if override is not None:
@@ -818,6 +870,7 @@ class AppContext:
         role: Optional[str] = None,
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
+        ambiguities: Optional[list] = None,
     ) -> None:
         """Fire-and-forget a recognition result to every configured sink.
 
@@ -843,6 +896,7 @@ class AppContext:
             role=role,
             emotion=emotion,
             emotion_confidence=emotion_confidence,
+            ambiguities=ambiguities,
         )
         if self.mqtt.connected:
             self.mqtt.publish_async(self.mqtt.publish_recognition(**kwargs))

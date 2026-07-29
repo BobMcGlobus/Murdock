@@ -44,6 +44,28 @@ class Ambiguity:
 
     original: str
     alternative: str
+    kind: str = "alternative"
+
+
+def _parse_ambiguities(raw: Any) -> list[Ambiguity]:
+    """Read the event's sidecar hints, ignoring anything malformed."""
+    if not isinstance(raw, list):
+        return []
+    out: list[Ambiguity] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        alternative = str(item.get("alternative") or "").strip()
+        if not alternative:
+            continue
+        out.append(
+            Ambiguity(
+                original=str(item.get("original") or "").strip(),
+                alternative=alternative,
+                kind=str(item.get("kind") or "alternative"),
+            )
+        )
+    return out
 
 
 @dataclass
@@ -203,6 +225,7 @@ class MurdockCoordinator:
             recognized_at=dt_util.utcnow(),
             uncertain=bool(data.get("uncertain")),
             reason=data.get("reason"),
+            ambiguities=_parse_ambiguities(data.get("ambiguities")),
         )
         self._states[sat] = state
         self.available = True

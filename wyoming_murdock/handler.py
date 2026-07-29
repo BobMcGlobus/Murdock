@@ -169,6 +169,10 @@ class MurdockHandler(AsyncEventHandler):
         # shadow run, so the audit logging doesn't transcribe twice.
         self._dual_shadow: Optional[tuple[str, str]] = None
 
+        # Sidecar hint mode: ambiguities pulled out of the transcript,
+        # travelling in the recognition event instead (plan §13).
+        self._transcript_hints: list = []
+
     @property
     def upstream_uri(self) -> str:
         """Always read the live value from context so the UI can update
@@ -331,6 +335,7 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_bar = None
         self._reject_nearest = None
         self._dual_shadow = None
+        self._transcript_hints = []
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -770,6 +775,64 @@ class MurdockHandler(AsyncEventHandler):
             return await self._transcribe_cloud(audio_16k)
         return await self._wait_for_upstream_transcript()
 
+    def _republish_hints(self, **kwargs) -> None:
+        """Re-fire the recognition event once sidecar hints are known.
+
+        Some paths publish before the transcript exists (early match, the
+        no-match forward). Rather than delaying the event — automations
+        want the speaker as early as possible — the hints are delivered
+        by a second event with otherwise identical data. No hints, no
+        second event, so the common case still fires exactly once.
+        """
+        if not self._transcript_hints:
+            return
+        self.context.publish_recognition(
+            satellite_id=self._satellite_id,
+            ambiguities=self._transcript_hints,
+            **kwargs,
+        )
+
+    def _deliver_hints(self, result, label: str) -> str:
+        """Pick the transcript rendering and stash hints for the event.
+
+        Ambiguity markers are useful to an LLM and poison to HA's local
+        intent matcher, so where they go is a setting (plan §13):
+        ``inline`` keeps them in the text, ``sidecar`` moves them into the
+        recognition event, ``clean`` drops them. Before any of that,
+        hints that resolve against a known entity name are decided rather
+        than passed on.
+        """
+        from murdock.core.transcript_tools import render_hints, resolve_hints
+
+        sid = self._session_id
+        mode = self.context.effective_transcript_hint_mode()
+        if mode != "inline" and result.hints:
+            try:
+                known = self.context.get_vocabulary_store().terms()
+            except Exception:
+                known = []
+            result = resolve_hints(result, known)
+
+        if mode == "inline":
+            if result.annotated != result.clean:
+                _LOGGER.info("[%s] %s: %r", sid, label, result.annotated[:120])
+            return result.annotated
+
+        if mode == "sidecar" and result.hints:
+            self._transcript_hints = render_hints(result.hints)
+            _LOGGER.info(
+                "[%s] %s → sidecar: %d hint(s), transcript stays clean: %r",
+                sid, label, len(result.hints), result.clean[:120],
+            )
+        elif result.hints:
+            _LOGGER.debug(
+                "[%s] %s → %s: %d hint(s) dropped",
+                sid, label, mode, len(result.hints),
+            )
+        elif result.clean != result.annotated:
+            _LOGGER.info("[%s] %s: %r", sid, label, result.clean[:120])
+        return result.clean
+
     async def _get_transcript(self, audio_16k: bytes) -> str:
         """Primary transcript, refined by the enabled quality tiers.
 
@@ -783,12 +846,15 @@ class MurdockHandler(AsyncEventHandler):
           the merge, so a term both engines got wrong (or one engine's
           known quirk) is corrected first and produces no false
           disagreement.
+
+        Where the resulting ambiguity markers end up is decided by
+        :meth:`_deliver_hints`.
         """
         sid = self._session_id
         dictionary = self.context.get_dictionary_entries()
 
         if self.context.dual_transcript_active() and audio_16k:
-            from murdock.core.transcript_tools import merge_transcripts
+            from murdock.core.transcript_tools import merge_transcripts_ex
 
             shadow_task = asyncio.create_task(
                 self._shadow_transcribe(audio_16k)
@@ -811,35 +877,44 @@ class MurdockHandler(AsyncEventHandler):
                 _LOGGER.info("[%s] Dual: shadow failed: %s — primary only", sid, exc)
                 self._dual_shadow = (f"⚠ {exc}", "dual (failed)")
 
+            dict_hints = []
             if dictionary:
                 from murdock.core.transcript_tools import (
                     apply_correction_dictionary,
+                    apply_correction_dictionary_ex,
                 )
-                primary = apply_correction_dictionary(primary, dictionary)
+                primary_res = apply_correction_dictionary_ex(primary, dictionary)
+                primary = primary_res.clean
+                dict_hints = primary_res.hints
                 if shadow_text:
-                    shadow_text = apply_correction_dictionary(
+                    shadow_text = apply_correction_dictionary_ex(
                         shadow_text, dictionary
-                    )
+                    ).clean
             if shadow_text:
-                merged = merge_transcripts(primary, shadow_text)
-                if merged != primary:
-                    _LOGGER.info(
-                        "[%s] Dual merge: %r", sid, merged[:120]
+                merged = merge_transcripts_ex(primary, shadow_text)
+                if dict_hints:
+                    # Dictionary hints ride along with the merge's own.
+                    merged.hints[:0] = dict_hints
+                    merged.annotated = apply_correction_dictionary(
+                        merged.annotated, dictionary
                     )
-                return merged
+                return self._deliver_hints(merged, "Dual merge")
+            if dict_hints:
+                return self._deliver_hints(
+                    apply_correction_dictionary_ex(primary, dictionary),
+                    "Dictionary applied",
+                )
             return primary
 
         transcript = await self._primary_transcript(audio_16k)
         if dictionary and transcript:
             from murdock.core.transcript_tools import (
-                apply_correction_dictionary,
+                apply_correction_dictionary_ex,
             )
-            corrected = apply_correction_dictionary(transcript, dictionary)
-            if corrected != transcript:
-                _LOGGER.info(
-                    "[%s] Dictionary applied: %r", sid, corrected[:120]
-                )
-            transcript = corrected
+            return self._deliver_hints(
+                apply_correction_dictionary_ex(transcript, dictionary),
+                "Dictionary applied",
+            )
         return transcript
 
     # ------------------------------------------------------------------
@@ -1128,6 +1203,17 @@ class MurdockHandler(AsyncEventHandler):
                 self.context.speakers.get_speaker(self._early_match_id)
                 if self._early_match_id is not None else None
             )
+            self._republish_hints(
+                speaker=self._early_match,
+                confidence=self.context.confidence_for(
+                    self._early_distance or 0.0
+                ),
+                is_known=True,
+                distance=self._early_distance,
+                threshold=self.context.get_verify_threshold(self._satellite_id),
+                nearest_speaker=self._early_match,
+                role=early_spk.role if early_spk else None,
+            )
             await self._send_transcript_to_satellite(
                 self._augment_transcript(
                     transcript, is_known=True, speaker=self._early_match,
@@ -1271,6 +1357,7 @@ class MurdockHandler(AsyncEventHandler):
                 role=spk.role if spk else None,
                 emotion=emotion,
                 emotion_confidence=emotion_conf,
+                ambiguities=self._transcript_hints or None,
             )
             event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
@@ -1334,11 +1421,26 @@ class MurdockHandler(AsyncEventHandler):
             margin=margin,
             uncertain=uncertain,
             reason=sentinel,
+            ambiguities=self._transcript_hints or None,
         )
 
         if not require_match:
             _LOGGER.info("[%s] require_match=false → forwarding anyway", sid)
             transcript = await self._get_transcript(verify_audio)
+            # The event above went out before the transcript existed, so
+            # sidecar hints (if any) need a second, identical event.
+            self._republish_hints(
+                speaker=sentinel,
+                confidence=self.context.confidence_for(result.distance),
+                is_known=False,
+                distance=result.distance,
+                threshold=result.threshold,
+                nearest_speaker=best_speaker,
+                nearest_distance=best_distance,
+                margin=margin,
+                uncertain=uncertain,
+                reason=sentinel,
+            )
             await self._send_transcript_to_satellite(
                 self._augment_transcript(
                     transcript, is_known=False,

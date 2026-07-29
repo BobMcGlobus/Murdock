@@ -48,6 +48,9 @@ class SettingsOut(BaseModel):
     enable_early_reject: bool = False
     early_reject_margin: float = 0.25
     speaker_context_mode: str = "none"  # "none" | "transcript"
+    # Where ambiguity markers go: inline | sidecar | clean | auto
+    transcript_hint_mode: str = "inline"
+    effective_transcript_hint_mode: str = "inline"
     transcript_template_known: str = ""
     transcript_template_unknown: str = ""
     upstream_uri: str
@@ -127,6 +130,7 @@ class SettingsPatch(BaseModel):
     enable_early_reject: Optional[bool] = None
     early_reject_margin: Optional[float] = Field(default=None, ge=0.05, le=1.0)
     speaker_context_mode: Optional[str] = None  # "none" | "transcript"
+    transcript_hint_mode: Optional[str] = None
     transcript_template_known: Optional[str] = None
     transcript_template_unknown: Optional[str] = None
     # None → field not touched
@@ -223,6 +227,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         enable_early_reject=ctx.get_enable_early_reject(),
         early_reject_margin=ctx.get_early_reject_margin(),
         speaker_context_mode=ctx.get_speaker_context_mode(),
+        transcript_hint_mode=ctx.get_transcript_hint_mode(),
+        effective_transcript_hint_mode=ctx.effective_transcript_hint_mode(),
         transcript_template_known=ctx.get_transcript_template_known(),
         transcript_template_unknown=ctx.get_transcript_template_unknown(),
         upstream_uri=ctx.get_upstream_uri(),
@@ -325,6 +331,11 @@ async def patch_settings(
     if body.speaker_context_mode is not None:
         try:
             ctx.set_speaker_context_mode(body.speaker_context_mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    if body.transcript_hint_mode is not None:
+        try:
+            ctx.set_transcript_hint_mode(body.transcript_hint_mode)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
     if body.transcript_template_known is not None:

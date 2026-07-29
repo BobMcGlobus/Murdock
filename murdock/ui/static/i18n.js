@@ -232,6 +232,13 @@ const I18N = (() => {
             "transcript_tpl.unknown": "Unknown speaker template",
             "transcript_tpl.saved": "Speaker-context setting saved",
             "transcript_tpl.tip": "Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.",
+            "hint_mode.label": "Ambiguity markers (correction dictionary / dual transcript)",
+            "hint_mode.inline": "Inline in the transcript — `[oder: …]` stays in the text",
+            "hint_mode.sidecar": "Sidecar — transcript stays clean, hints go in the recognition event",
+            "hint_mode.clean": "Clean — drop the markers entirely",
+            "hint_mode.auto": "Auto — sidecar when an event sink is available, else inline",
+            "hint_mode.hint": "Sidecar keeps HA's local intent matching working and needs the Murdock HA integration (or an automation on the recognition event) to read the hints.",
+            "hint_mode.auto_now": "Currently resolves to: {mode}.",
 
             // -- MQTT --
             "mqtt.title": "MQTT (recommended)",
@@ -713,6 +720,13 @@ const I18N = (() => {
             "transcript_tpl.unknown": "Vorlage für unbekannten Sprecher",
             "transcript_tpl.saved": "Sprecher-Kontext-Einstellung gespeichert",
             "transcript_tpl.tip": "Tipp: Erkläre im System-Prompt deines Agenten, dass Zeilen in Klammern Erkennungs-Metadaten sind, nicht vom Nutzer gesprochen.",
+            "hint_mode.label": "Mehrdeutigkeits-Marker (Korrektur-Wörterbuch / Dual-Transkript)",
+            "hint_mode.inline": "Inline im Transkript — `[oder: …]` bleibt im Text",
+            "hint_mode.sidecar": "Sidecar — Transkript bleibt clean, Hinweise gehen ins Erkennungs-Event",
+            "hint_mode.clean": "Clean — Marker ganz verwerfen",
+            "hint_mode.auto": "Auto — Sidecar wenn ein Event-Ziel verfügbar ist, sonst Inline",
+            "hint_mode.hint": "Sidecar hält HAs lokales Intent-Matching funktionsfähig und braucht die Murdock-HA-Integration (oder eine Automation auf dem Erkennungs-Event), die die Hinweise ausliest.",
+            "hint_mode.auto_now": "Aktuell aufgelöst zu: {mode}.",
 
             // -- MQTT --
             "mqtt.title": "MQTT (empfohlen)",

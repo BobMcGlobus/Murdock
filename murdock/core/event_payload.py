@@ -18,7 +18,7 @@ Semantics (integration plan §21):
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 def build_recognition_payload(
@@ -38,6 +38,7 @@ def build_recognition_payload(
     role: Optional[str] = None,
     emotion: Optional[str] = None,
     emotion_confidence: Optional[float] = None,
+    ambiguities: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Build the event payload dict.
 
@@ -75,4 +76,6 @@ def build_recognition_payload(
         payload["emotion"] = emotion
     if emotion_confidence is not None:
         payload["emotion_confidence"] = round(emotion_confidence, 4)
+    if ambiguities:
+        payload["ambiguities"] = ambiguities
     return payload

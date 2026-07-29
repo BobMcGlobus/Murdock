@@ -1274,6 +1274,11 @@ async function loadSettings() {
                 s.transcript_template_known || "";
             tplForm.transcript_template_unknown.value =
                 s.transcript_template_unknown || "";
+            if (tplForm.transcript_hint_mode) {
+                tplForm.transcript_hint_mode.value =
+                    s.transcript_hint_mode || "inline";
+                updateHintModeHelp(s);
+            }
             updateSpeakerContextMode();
         }
         if (s.upstream_uri_source === "override") {
@@ -2082,9 +2087,28 @@ function updateSpeakerContextMode() {
     if (help) help.textContent = t("transcript_tpl.help_" + mode);
 }
 
+// Ambiguity-marker delivery. "auto" resolves server-side against the
+// configured sinks, so show what it currently resolves to.
+function updateHintModeHelp(settings) {
+    const sel = $("#transcript-hint-mode");
+    const help = $("#hint-mode-help");
+    if (!sel || !help) return;
+    let text = t("hint_mode.hint");
+    const effective = settings && settings.effective_transcript_hint_mode;
+    if (sel.value === "auto" && effective) {
+        text += " " + t("hint_mode.auto_now", { mode: effective });
+    }
+    help.textContent = text;
+}
+
 const speakerModeSel = $("#speaker-context-mode");
 if (speakerModeSel) {
     speakerModeSel.addEventListener("change", updateSpeakerContextMode);
+}
+
+const hintModeSel = $("#transcript-hint-mode");
+if (hintModeSel) {
+    hintModeSel.addEventListener("change", () => updateHintModeHelp(null));
 }
 
 $("#transcript-tpl-form").addEventListener("submit", async (e) => {
@@ -2097,6 +2121,9 @@ $("#transcript-tpl-form").addEventListener("submit", async (e) => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 speaker_context_mode: form.speaker_context_mode.value,
+                transcript_hint_mode: form.transcript_hint_mode
+                    ? form.transcript_hint_mode.value
+                    : undefined,
                 transcript_template_known: form.transcript_template_known.value,
                 transcript_template_unknown: form.transcript_template_unknown.value,
             }),

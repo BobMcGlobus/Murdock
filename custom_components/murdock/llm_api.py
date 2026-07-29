@@ -74,13 +74,19 @@ def build_api_prompt(
     ]
     state = coordinator.state_for_device(llm_context.device_id)
     if state and state.ambiguities:
-        hints = "; ".join(
-            f'"{a.original}" könnte auch "{a.alternative}" heißen'
-            for a in state.ambiguities
-        )
+        hints = "; ".join(_render_hint(a) for a in state.ambiguities)
         parts.append(f"Transkript-Hinweis: {hints}")
         parts.append(_HINT_INSTRUCTION)
     return "\n".join(parts)
+
+
+def _render_hint(hint) -> str:
+    """Phrase one ambiguity for the prompt."""
+    if hint.kind == "additional" or not hint.original:
+        return f'eine zweite Engine hörte zusätzlich "{hint.alternative}"'
+    if hint.kind == "reading":
+        return f'die Äußerung könnte auch lauten: "{hint.alternative}"'
+    return f'"{hint.original}" könnte auch "{hint.alternative}" heißen'
 
 
 class MurdockLLMApi(llm.API):

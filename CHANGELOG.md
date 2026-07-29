@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+**Sidecar mode for ambiguity markers** — the `[oder: …]` markers from the
+correction dictionary and the dual transcript no longer have to live in
+the transcript. New setting under *Settings → Speaker context*:
+
+- `inline` (default, unchanged) — markers stay in the text.
+- `sidecar` — the transcript stays clean and the ambiguities travel in
+  the recognition event's new `ambiguities` field. The HA integration
+  turns them into a `Transkript-Hinweis` prompt line. This is the
+  combination that was previously impossible: hints for the LLM *and*
+  working local intent matching.
+- `clean` — drop the markers entirely.
+- `auto` — sidecar when an event sink (MQTT or HA REST) is wired,
+  otherwise inline, so hints are never silently lost.
+
+**Decide before marking.** Before an ambiguity is passed on, it's checked
+against the mirrored vocabulary: if exactly one of the two readings is a
+real entity name, that reading wins outright and no hint is emitted —
+"Bad-Lightstrip [oder: Bed-Lightstrip]" simply becomes "Bed-Lightstrip"
+when that's the entity you actually own. Only genuine ambiguity (both or
+neither known) reaches the agent.
+
+- The paths that publish the event before the transcript exists (early
+  match, unknown-forwarded) fire one additional event carrying the hints;
+  with no hints there's no second event, so the common case is unchanged.
+- 21 new tests (197 total).
+
 ## 0.8.0
 
 **New: a Home Assistant custom integration** (`custom_components/murdock`,
