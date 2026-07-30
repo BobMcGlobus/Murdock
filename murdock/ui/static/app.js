@@ -2570,6 +2570,12 @@ function formatTimestamp(unixSec) {
     );
 }
 
+// Sub-second values read better in ms, longer ones in seconds.
+function formatMs(ms) {
+    if (ms === null || ms === undefined) return "";
+    return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
+}
+
 function renderRecognitionStats(stats) {
     const container = $("#rec-stats");
     if (!container) return;
@@ -2630,8 +2636,20 @@ function renderRecognitionEvent(e) {
             ? `verify=${e.verify_ms.toFixed(0)}ms`
             : "";
     const scoreLine = [dist, thr, vms].filter(Boolean).join(" · ");
+    // Engine timing badge. In upstream mode the primary streams while the
+    // audio is still arriving, so its figure is the remaining wait — the
+    // shadow always runs on the finished buffer.
+    const msBadge = (ms, extraCls) =>
+        ms === null || ms === undefined
+            ? ""
+            : `<span class="badge timing${extraCls || ""}">${formatMs(ms)}</span>`;
+    const hasBoth =
+        e.transcript_ms !== null && e.transcript_ms !== undefined &&
+        e.shadow_ms !== null && e.shadow_ms !== undefined;
+    // Mark the slower of the two when both are known.
+    const primarySlower = hasBoth && e.transcript_ms > e.shadow_ms;
     const transcript = e.transcript
-        ? `<div class="transcript">&ldquo;${escapeHtml(e.transcript)}&rdquo;</div>`
+        ? `<div class="transcript">${msBadge(e.transcript_ms, primarySlower && hasBoth ? " slower" : "")}&ldquo;${escapeHtml(e.transcript)}&rdquo;</div>`
         : `<div class="transcript muted">${escapeHtml(t("rec.no_transcript"))}</div>`;
     // A/B shadow engine result (filled in asynchronously). Highlight when
     // the two engines disagree — that's the signal the A/B test is for.
@@ -2639,9 +2657,19 @@ function renderRecognitionEvent(e) {
     if (e.shadow_transcript != null && e.shadow_engine) {
         const same = (e.transcript || "").trim().toLowerCase()
             === (e.shadow_transcript || "").trim().toLowerCase();
+        let delta = "";
+        if (hasBoth) {
+            const diff = e.shadow_ms - e.transcript_ms;
+            const key = diff >= 0 ? "rec.slower_by" : "rec.faster_by";
+            delta = `<span class="meta"> ${escapeHtml(
+                t(key, { ms: formatMs(Math.abs(diff)) })
+            )}</span>`;
+        }
         shadow = `<div class="transcript shadow${same ? "" : " differs"}">
             <span class="badge">${escapeHtml(t("rec.shadow"))} ${escapeHtml(e.shadow_engine)}</span>
+            ${msBadge(e.shadow_ms, hasBoth && !primarySlower ? " slower" : "")}
             &ldquo;${escapeHtml(e.shadow_transcript)}&rdquo;
+            ${delta}
             ${same ? "" : `<span class="meta"> ${escapeHtml(t("rec.shadow_differs"))}</span>`}
         </div>`;
     }
@@ -2954,4 +2982,45 @@ async function loadVocabularyMirror() {
 const vocabRefreshBtn = $("#vocab-refresh-btn");
 if (vocabRefreshBtn) {
     vocabRefreshBtn.addEventListener("click", loadVocabularyMirror);
+}
+
+// ── Settings sub-navigation ────────────────────────────────────────
+//
+// The settings tab grew to a dozen cards; showing one group at a time
+// keeps it scannable. The chosen group is remembered so a save + reload
+// doesn't dump you back at the top.
+const SETTINGS_GROUP_KEY = "murdock.settingsGroup";
+
+function showSettingsGroup(key) {
+    const groups = document.querySelectorAll(".settings-group");
+    if (!groups.length) return;
+    const known = [...groups].map((g) => g.dataset.settingsGroup);
+    const target = known.includes(key) ? key : known[0];
+    groups.forEach((g) => {
+        g.classList.toggle("active", g.dataset.settingsGroup === target);
+    });
+    document.querySelectorAll(".settings-nav-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.settingsGroup === target);
+    });
+    try {
+        localStorage.setItem(SETTINGS_GROUP_KEY, target);
+    } catch (err) {
+        /* private mode — remembering is a nicety, not a requirement */
+    }
+}
+
+document.querySelectorAll(".settings-nav-btn").forEach((btn) => {
+    btn.addEventListener("click", () =>
+        showSettingsGroup(btn.dataset.settingsGroup)
+    );
+});
+
+if (document.querySelector(".settings-group")) {
+    let remembered = null;
+    try {
+        remembered = localStorage.getItem(SETTINGS_GROUP_KEY);
+    } catch (err) {
+        remembered = null;
+    }
+    showSettingsGroup(remembered || "recognition");
 }

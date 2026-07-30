@@ -64,6 +64,10 @@ class RecognitionEvent:
     # answerable later.
     weight: Optional[float] = None
     margin: Optional[float] = None
+    # Wall-clock time each STT engine needed for this utterance, so the
+    # A/B comparison covers speed and not just wording.
+    transcript_ms: Optional[float] = None
+    shadow_ms: Optional[float] = None
 
 
 class RecognitionLog:
@@ -99,6 +103,7 @@ class RecognitionLog:
         emotion_confidence: Optional[float] = None,
         weight: Optional[float] = None,
         margin: Optional[float] = None,
+        transcript_ms: Optional[float] = None,
     ) -> int:
         """Insert one event row and return its id."""
         now = time.time()
@@ -114,8 +119,8 @@ class RecognitionLog:
                     "created_at, session_id, satellite_id, duration_sec, "
                     "outcome, matched_speaker, distance, threshold, "
                     "verify_ms, transcript, emotion, emotion_confidence, "
-                    "weight, margin) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "weight, margin, transcript_ms) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -131,6 +136,7 @@ class RecognitionLog:
                         emotion_confidence,
                         weight,
                         margin,
+                        transcript_ms,
                     ),
                 )
                 row_id = int(cur.lastrowid)
@@ -183,7 +189,8 @@ class RecognitionLog:
                 "SELECT id, created_at, session_id, satellite_id, duration_sec, "
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
                 "transcript, emotion, emotion_confidence, "
-                "shadow_transcript, shadow_engine, weight, margin "
+                "shadow_transcript, shadow_engine, weight, margin, "
+                "transcript_ms, shadow_ms "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -207,11 +214,19 @@ class RecognitionLog:
                 shadow_engine=row["shadow_engine"] if "shadow_engine" in row.keys() else None,
                 weight=row["weight"] if "weight" in row.keys() else None,
                 margin=row["margin"] if "margin" in row.keys() else None,
+                transcript_ms=row["transcript_ms"] if "transcript_ms" in row.keys() else None,
+                shadow_ms=row["shadow_ms"] if "shadow_ms" in row.keys() else None,
             )
             for row in rows
         ]
 
-    def set_shadow(self, event_id: int, transcript: str, engine: str) -> bool:
+    def set_shadow(
+        self,
+        event_id: int,
+        transcript: str,
+        engine: str,
+        shadow_ms: Optional[float] = None,
+    ) -> bool:
         """Attach the A/B shadow transcript to an already-recorded event.
 
         The shadow engine runs after the main response went out, so this
@@ -223,9 +238,9 @@ class RecognitionLog:
         with self._lock:
             try:
                 cur = self.conn.execute(
-                    "UPDATE recognition_events "
-                    "SET shadow_transcript = ?, shadow_engine = ? WHERE id = ?",
-                    ((transcript or "")[:1024], engine, event_id),
+                    "UPDATE recognition_events SET shadow_transcript = ?, "
+                    "shadow_engine = ?, shadow_ms = ? WHERE id = ?",
+                    ((transcript or "")[:1024], engine, shadow_ms, event_id),
                 )
                 self.conn.commit()
                 return cur.rowcount > 0

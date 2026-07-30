@@ -1,6 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.8.2
+
+**The settings page is navigable again.** It had grown to twelve cards on
+one endless scroll. Now four groups — *Recognition*, *Transcription*,
+*Home Assistant*, *System* — switched by pills at the top, with the chosen
+group remembered across reloads. Inside the recognition card the everyday
+knobs (threshold, margin gate, require-match, passthrough, auto-enroll,
+unknown logging) stay visible; the rest moved into three folded
+*Advanced* blocks: noise & multiple voices, per-satellite profiles & early
+reject, upstream & languages. Nothing was removed and no field changed
+form, so every setting saves exactly as before — including from a
+collapsed block.
+
+**STT A/B comparison now shows speed.** Each engine's wall-clock time
+appears as a badge next to its transcript, the slower of the two is
+highlighted, and the shadow line spells out the delta ("1.71s faster").
+Comparing wording was only half the question — this answers whether the
+better transcript is worth its latency.
+
+- `recognition_events` gained `transcript_ms` and `shadow_ms`; both are
+  exposed by `GET /api/recognition` (along with `weight` and `margin`).
+- Note on reading the numbers: in **upstream** mode the primary streams
+  while the audio is still arriving, so its figure is the remaining wait
+  and understates the engine's own work. Cloud backends and the shadow
+  always transcribe the finished buffer, so those are full request times.
+
 
 **See the mirrored vocabulary.** The terms the HA integration contributes
 were invisible: the Web UI only showed the manual list, and the prompt

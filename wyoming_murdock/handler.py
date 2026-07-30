@@ -173,6 +173,11 @@ class MurdockHandler(AsyncEventHandler):
         # travelling in the recognition event instead (plan §13).
         self._transcript_hints: list = []
 
+        # How long each STT engine took on this utterance, so the A/B
+        # comparison in the log covers speed, not just wording.
+        self._transcript_ms: Optional[float] = None
+        self._shadow_ms: Optional[float] = None
+
     @property
     def upstream_uri(self) -> str:
         """Always read the live value from context so the UI can update
@@ -336,6 +341,8 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_nearest = None
         self._dual_shadow = None
         self._transcript_hints = []
+        self._transcript_ms = None
+        self._shadow_ms = None
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -770,10 +777,20 @@ class MurdockHandler(AsyncEventHandler):
         return ""
 
     async def _primary_transcript(self, audio_16k: bytes) -> str:
-        """Obtain the transcript from whichever primary backend is active."""
-        if self._is_voxtral:
-            return await self._transcribe_cloud(audio_16k)
-        return await self._wait_for_upstream_transcript()
+        """Obtain the transcript from whichever primary backend is active.
+
+        Records the elapsed time in ``_transcript_ms``. In upstream mode
+        this is the *wait* for a stream that has been decoding in
+        parallel since the first chunk, so it understates the engine's
+        own work — in cloud mode it is the full request.
+        """
+        started = time.monotonic()
+        try:
+            if self._is_voxtral:
+                return await self._transcribe_cloud(audio_16k)
+            return await self._wait_for_upstream_transcript()
+        finally:
+            self._transcript_ms = (time.monotonic() - started) * 1000
 
     def _republish_hints(self, **kwargs) -> None:
         """Re-fire the recognition event once sidecar hints are known.
@@ -1749,6 +1766,7 @@ class MurdockHandler(AsyncEventHandler):
                 emotion_confidence=emotion_confidence,
                 weight=weight,
                 margin=margin,
+                transcript_ms=self._transcript_ms,
             )
         except Exception:
             _LOGGER.debug(
@@ -1770,7 +1788,9 @@ class MurdockHandler(AsyncEventHandler):
         if self._dual_shadow is not None:
             text, engine = self._dual_shadow
             self._dual_shadow = None
-            self.context.recognition.set_shadow(event_id, text, engine)
+            self.context.recognition.set_shadow(
+                event_id, text, engine, self._shadow_ms
+            )
             return
         if not audio_16k:
             return
@@ -1789,20 +1809,24 @@ class MurdockHandler(AsyncEventHandler):
             transcribe_via_wyoming,
         )
 
-        kind = self.context.get_shadow_stt_backend()
-        if kind == "upstream":
-            uri = self.context.get_shadow_upstream_uri()
-            if not uri:
-                raise STTBackendError("shadow upstream URI not configured")
-            text = await transcribe_via_wyoming(
-                uri, audio_16k, language=self._language
-            )
-            return text, f"wyoming:{uri}"
-        backend = self.context.get_shadow_backend()
-        if backend is None:
-            raise STTBackendError(f"shadow backend {kind!r} not configured")
-        text = await backend.transcribe(audio_16k, language=self._language)
-        return text, backend.label
+        started = time.monotonic()
+        try:
+            kind = self.context.get_shadow_stt_backend()
+            if kind == "upstream":
+                uri = self.context.get_shadow_upstream_uri()
+                if not uri:
+                    raise STTBackendError("shadow upstream URI not configured")
+                text = await transcribe_via_wyoming(
+                    uri, audio_16k, language=self._language
+                )
+                return text, f"wyoming:{uri}"
+            backend = self.context.get_shadow_backend()
+            if backend is None:
+                raise STTBackendError(f"shadow backend {kind!r} not configured")
+            text = await backend.transcribe(audio_16k, language=self._language)
+            return text, backend.label
+        finally:
+            self._shadow_ms = (time.monotonic() - started) * 1000
 
     async def _run_shadow(self, event_id: int, audio_16k: bytes) -> None:
         from murdock.core.stt_backend import STTBackendError
@@ -1814,7 +1838,7 @@ class MurdockHandler(AsyncEventHandler):
         except STTBackendError as exc:
             _LOGGER.info("[%s] Shadow STT failed: %s", sid, exc)
             self.context.recognition.set_shadow(
-                event_id, f"⚠ {exc}", f"{kind} (failed)"
+                event_id, f"⚠ {exc}", f"{kind} (failed)", self._shadow_ms
             )
             return
         except Exception:
@@ -1823,7 +1847,9 @@ class MurdockHandler(AsyncEventHandler):
         _LOGGER.info(
             "[%s] Shadow transcript (%s): %r", sid, engine, text[:80]
         )
-        self.context.recognition.set_shadow(event_id, text, engine)
+        self.context.recognition.set_shadow(
+            event_id, text, engine, self._shadow_ms
+        )
 
     async def _capture_for_training(self, audio_16k: bytes, duration: float) -> None:
         """Log an utterance to the unknown postbox so it can be assigned to

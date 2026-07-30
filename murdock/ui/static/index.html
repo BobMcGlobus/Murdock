@@ -220,14 +220,16 @@
 
         <!-- Settings tab -->
         <section id="tab-settings" class="tab">
+            <nav class="settings-nav" id="settings-nav">
+                <button type="button" class="settings-nav-btn" data-settings-group="recognition" data-i18n="settings.group_recognition">recognition</button>
+                <button type="button" class="settings-nav-btn" data-settings-group="transcription" data-i18n="settings.group_transcription">transcription</button>
+                <button type="button" class="settings-nav-btn" data-settings-group="homeassistant" data-i18n="settings.group_homeassistant">homeassistant</button>
+                <button type="button" class="settings-nav-btn" data-settings-group="system" data-i18n="settings.group_system">system</button>
+            </nav>
+            <div class="settings-group" data-settings-group="recognition">
             <div class="card">
-                <h2 data-i18n="settings.title">Runtime settings</h2>
+                <h2 data-i18n="settings.recognition_title">Speaker recognition</h2>
                 <form id="settings-form">
-                    <label>
-                        <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
-                        <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
-                        <small id="upstream-hint" class="meta"></small>
-                    </label>
                     <label>
                         <span data-i18n="settings.threshold">Verify threshold (cosine distance, 0 = identical)</span>
                         <input type="number" step="0.01" min="0" max="2" name="verify_threshold">
@@ -240,20 +242,6 @@
                         <span data-i18n="settings.margin_gate">Margin gate (min distance to the second-best speaker)</span>
                         <input type="number" step="0.01" min="0" max="1" name="margin_gate">
                         <small class="meta" data-i18n="settings.margin_gate_hint">Guards against confusing similar voices: if the runner-up is closer than this, the result becomes "uncertain" instead of a match. 0 disables the gate. Try 0.05–0.10 with similar-sounding household members.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="settings.skip_leading">Skip leading seconds (trim satellite chime before embedding)</span>
-                        <input type="number" step="0.1" min="0" max="5" name="skip_leading_seconds">
-                        <small class="meta" data-i18n="settings.skip_hint">STT still receives the full audio. Typical value: 1.0 s for ESPHome/Wyoming satellites.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="settings.min_liveness">Min liveness score (reject TV/background noise)</span>
-                        <input type="number" step="0.01" min="0" max="1" name="min_liveness_score">
-                        <small class="meta" data-i18n="settings.min_liveness_hint">Voices below this score are classified as TV/noise and blocked. Set to 0 to disable. Default: 0.35.</small>
-                    </label>
-                    <label class="switch">
-                        <input type="checkbox" name="unknown_logging">
-                        <span data-i18n="settings.unknown_logging">Log unknown voices</span>
                     </label>
                     <label class="switch">
                         <input type="checkbox" name="require_speaker_match">
@@ -269,40 +257,68 @@
                         <small class="meta" data-i18n="settings.auto_enroll_hint">Automatically add fresh embeddings when a known speaker is recognized, so the model adapts over time.</small>
                     </label>
                     <label class="switch">
-                        <input type="checkbox" name="enable_extraction">
-                        <span data-i18n="settings.enable_extraction">Speaker extraction (isolate target from TV/second voice)</span>
-                        <small class="meta" data-i18n="settings.enable_extraction_hint">When an utterance has multiple speech regions, embed each and keep only the dominant enrolled speaker's. Single-region clips are skipped (no added latency).</small>
+                        <input type="checkbox" name="unknown_logging">
+                        <span data-i18n="settings.unknown_logging">Log unknown voices</span>
                     </label>
-                    <label>
-                        <span data-i18n="settings.extraction_threshold">Extraction threshold (stricter than verify)</span>
-                        <input type="number" step="0.01" min="0" max="2" name="extraction_threshold">
-                        <small class="meta" data-i18n="settings.extraction_threshold_hint">Max cosine distance for a region to count as the target speaker. Keep below the verify threshold. Default: 0.25.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="settings.extraction_min_region">Min region length (seconds)</span>
-                        <input type="number" step="0.1" min="0" max="5" name="extraction_min_region_sec">
-                        <small class="meta" data-i18n="settings.extraction_min_region_hint">Speech regions shorter than this aren't scored (too short to embed reliably). Default: 0.6 s.</small>
-                    </label>
-                    <label class="switch">
-                        <input type="checkbox" name="enable_satellite_profiles">
-                        <span data-i18n="settings.satellite_profiles">Per-satellite voice profiles</span>
-                        <small class="meta" data-i18n="settings.satellite_profiles_hint">Builds an extra voiceprint per (speaker, satellite) from same-mic samples and matches against the better one — removes microphone bias between satellites. Needs ≥3 samples tagged with that satellite.</small>
-                    </label>
-                    <label class="switch">
-                        <input type="checkbox" name="enable_early_reject">
-                        <span data-i18n="settings.early_reject">Early reject (experimental TV/radio killer)</span>
-                        <small class="meta" data-i18n="settings.early_reject_hint">After ~1.5 s of clean voice, sessions that are catastrophically far from every profile are dropped: STT forwarding stops immediately and the satellite gets an empty transcript at stream end. Works even with "Require speaker match" off — unknown humans pass, TV doesn't. Media playing in the room (MQTT) halves the margin. Rejected audio still lands in Unknown voices for one-click training.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="settings.early_reject_margin">Early-reject margin (distance above threshold)</span>
-                        <input type="number" step="0.01" min="0.05" max="1" name="early_reject_margin">
-                        <small class="meta" data-i18n="settings.early_reject_margin_hint">Reject only when distance ≥ threshold + margin. Bigger = safer (fewer false rejects). Default: 0.25.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
-                        <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">
-                        <small id="lang-hint" class="meta"></small>
-                    </label>
+                    <details class="advanced">
+                        <summary data-i18n="settings.adv_noise">adv_noise</summary>
+                        <label>
+                            <span data-i18n="settings.skip_leading">Skip leading seconds (trim satellite chime before embedding)</span>
+                            <input type="number" step="0.1" min="0" max="5" name="skip_leading_seconds">
+                            <small class="meta" data-i18n="settings.skip_hint">STT still receives the full audio. Typical value: 1.0 s for ESPHome/Wyoming satellites.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.min_liveness">Min liveness score (reject TV/background noise)</span>
+                            <input type="number" step="0.01" min="0" max="1" name="min_liveness_score">
+                            <small class="meta" data-i18n="settings.min_liveness_hint">Voices below this score are classified as TV/noise and blocked. Set to 0 to disable. Default: 0.35.</small>
+                        </label>
+                        <label class="switch">
+                            <input type="checkbox" name="enable_extraction">
+                            <span data-i18n="settings.enable_extraction">Speaker extraction (isolate target from TV/second voice)</span>
+                            <small class="meta" data-i18n="settings.enable_extraction_hint">When an utterance has multiple speech regions, embed each and keep only the dominant enrolled speaker's. Single-region clips are skipped (no added latency).</small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.extraction_threshold">Extraction threshold (stricter than verify)</span>
+                            <input type="number" step="0.01" min="0" max="2" name="extraction_threshold">
+                            <small class="meta" data-i18n="settings.extraction_threshold_hint">Max cosine distance for a region to count as the target speaker. Keep below the verify threshold. Default: 0.25.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.extraction_min_region">Min region length (seconds)</span>
+                            <input type="number" step="0.1" min="0" max="5" name="extraction_min_region_sec">
+                            <small class="meta" data-i18n="settings.extraction_min_region_hint">Speech regions shorter than this aren't scored (too short to embed reliably). Default: 0.6 s.</small>
+                        </label>
+                    </details>
+                    <details class="advanced">
+                        <summary data-i18n="settings.adv_profiles">adv_profiles</summary>
+                        <label class="switch">
+                            <input type="checkbox" name="enable_satellite_profiles">
+                            <span data-i18n="settings.satellite_profiles">Per-satellite voice profiles</span>
+                            <small class="meta" data-i18n="settings.satellite_profiles_hint">Builds an extra voiceprint per (speaker, satellite) from same-mic samples and matches against the better one — removes microphone bias between satellites. Needs ≥3 samples tagged with that satellite.</small>
+                        </label>
+                        <label class="switch">
+                            <input type="checkbox" name="enable_early_reject">
+                            <span data-i18n="settings.early_reject">Early reject (experimental TV/radio killer)</span>
+                            <small class="meta" data-i18n="settings.early_reject_hint">After ~1.5 s of clean voice, sessions that are catastrophically far from every profile are dropped: STT forwarding stops immediately and the satellite gets an empty transcript at stream end. Works even with "Require speaker match" off — unknown humans pass, TV doesn't. Media playing in the room (MQTT) halves the margin. Rejected audio still lands in Unknown voices for one-click training.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.early_reject_margin">Early-reject margin (distance above threshold)</span>
+                            <input type="number" step="0.01" min="0.05" max="1" name="early_reject_margin">
+                            <small class="meta" data-i18n="settings.early_reject_margin_hint">Reject only when distance ≥ threshold + margin. Bigger = safer (fewer false rejects). Default: 0.25.</small>
+                        </label>
+                    </details>
+                    <details class="advanced">
+                        <summary data-i18n="settings.adv_upstream">adv_upstream</summary>
+                        <label>
+                            <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
+                            <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
+                            <small id="upstream-hint" class="meta"></small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
+                            <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">
+                            <small id="lang-hint" class="meta"></small>
+                        </label>
+                    </details>
                     <div class="row">
                         <button type="submit" data-i18n="settings.save">Save</button>
                         <button type="button" id="refresh-langs-btn" data-i18n="settings.refresh_langs">Refresh from upstream</button>
@@ -312,7 +328,91 @@
                 <div id="settings-info"></div>
                 <div id="ping-result" class="meta"></div>
             </div>
-
+            <div class="card">
+                <h2 data-i18n="sat_threshold.title">Per-satellite thresholds</h2>
+                <p class="meta" data-i18n="sat_threshold.description">
+                    Override the verify threshold for individual satellites
+                    (e.g. a noisy kitchen speaker vs. a quiet study). Leave
+                    empty to fall back to the global setting above.
+                </p>
+                <div id="sat-threshold-list" class="list"></div>
+                <div class="row" style="margin-top:0.5rem">
+                    <button type="button" id="sat-threshold-refresh" class="secondary" data-i18n="sat_threshold.refresh">Refresh</button>
+                </div>
+                <div id="sat-threshold-feedback" class="feedback"></div>
+            </div>
+            <div class="card">
+                <h2 data-i18n="calibration.title">Confidence calibration</h2>
+                <p class="meta" data-i18n="calibration.description">
+                    Maps the raw cosine distance to a calibrated probability
+                    (Platt scaling) so the confidence reported to Home
+                    Assistant is meaningful. Fitted automatically from your
+                    enrolled samples; gating still uses the distance threshold.
+                </p>
+                <form id="calibration-form">
+                    <label class="switch">
+                        <input type="checkbox" name="enable_calibration">
+                        <span data-i18n="calibration.enabled">Enable calibrated confidence</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_adaptive_thresholds">
+                        <span data-i18n="calibration.adaptive_enabled">Adaptive per-speaker thresholds</span>
+                        <small class="meta" data-i18n="calibration.adaptive_hint">Each speaker gets a threshold derived from their own genuine/impostor score distributions, bounded to ±0.08 around the global value. Recomputed on every recalibration; speakers without enough data keep the global threshold.</small>
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="calibration.save">Save</button>
+                        <button type="button" id="recalibrate-btn" class="secondary" data-i18n="calibration.recalibrate">Recalibrate now</button>
+                    </div>
+                    <p class="meta" id="calibration-status"></p>
+                    <div id="adaptive-thresholds-list" class="meta"></div>
+                </form>
+                <div id="calibration-feedback" class="meta"></div>
+            </div>
+            <div class="card">
+                <h2 data-i18n="quality.title">Sample quality (advanced)</h2>
+                <p class="meta" data-i18n="quality.description">
+                    Adjust how sample quality is scored. Scores drive the smart
+                    auto-enroll replacement logic (worst sample is only replaced
+                    when a better one comes in) and the per-speaker training
+                    quality indicator. Weights are normalized automatically.
+                </p>
+                <form id="quality-form">
+                    <label>
+                        <span data-i18n="quality.w_speech_ratio">Speech ratio weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="speech_ratio">
+                        <small class="meta" data-i18n="quality.w_speech_ratio_hint">VAD-detected speech vs total duration.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_snr">SNR weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="snr">
+                        <small class="meta" data-i18n="quality.w_snr_hint">Speech-to-noise ratio estimate (dB).</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_liveness">Liveness weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="liveness">
+                        <small class="meta" data-i18n="quality.w_liveness_hint">Spectral TV/broadcast heuristics.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_consistency">Consistency weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="consistency">
+                        <small class="meta" data-i18n="quality.w_consistency_hint">Embedding stability across windows (detects multiple voices).</small>
+                    </label>
+                    <label>
+                        <span data-i18n="quality.w_centroid_distance">Centroid fit weight</span>
+                        <input type="number" step="0.05" min="0" max="1" name="centroid_distance">
+                        <small class="meta" data-i18n="quality.w_centroid_distance_hint">How close the sample is to the existing speaker profile.</small>
+                    </label>
+                    <div id="quality-weights-info" class="meta"></div>
+                    <div class="row">
+                        <button type="submit" data-i18n="quality.save">Save weights</button>
+                        <button type="button" id="quality-reset-btn" class="secondary" data-i18n="quality.reset">Reset to defaults</button>
+                        <button type="button" id="quality-rescore-btn" class="secondary" data-i18n="quality.rescore_all">Re-evaluate all samples</button>
+                    </div>
+                </form>
+                <div id="quality-feedback" class="meta"></div>
+            </div>
+            </div>
+            <div class="settings-group" data-settings-group="transcription">
             <div class="card">
                 <h2 data-i18n="stt.title">STT Backend</h2>
                 <p class="meta" data-i18n="stt.description">
@@ -448,7 +548,6 @@
                 </form>
                 <div id="stt-feedback" class="feedback"></div>
             </div>
-
             <div class="card">
                 <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
                 <p class="meta" data-i18n="emotion.description">
@@ -469,7 +568,8 @@
                 </form>
                 <div id="emotion-feedback" class="feedback"></div>
             </div>
-
+            </div>
+            <div class="settings-group" data-settings-group="homeassistant">
             <div class="card">
                 <h2 data-i18n="transcript_tpl.title">Speaker context to the conversation agent</h2>
                 <p class="meta" data-i18n="transcript_tpl.description">
@@ -521,72 +621,6 @@
                 </form>
                 <div id="transcript-tpl-feedback" class="feedback"></div>
             </div>
-
-            <div class="card">
-                <h2 data-i18n="sat_threshold.title">Per-satellite thresholds</h2>
-                <p class="meta" data-i18n="sat_threshold.description">
-                    Override the verify threshold for individual satellites
-                    (e.g. a noisy kitchen speaker vs. a quiet study). Leave
-                    empty to fall back to the global setting above.
-                </p>
-                <div id="sat-threshold-list" class="list"></div>
-                <div class="row" style="margin-top:0.5rem">
-                    <button type="button" id="sat-threshold-refresh" class="secondary" data-i18n="sat_threshold.refresh">Refresh</button>
-                </div>
-                <div id="sat-threshold-feedback" class="feedback"></div>
-            </div>
-
-            <div class="card">
-                <h2 data-i18n="media_restrict.title">Media restrictions (per satellite × source)</h2>
-                <p class="meta" data-i18n="media_restrict.description">
-                    Set how much each media source tightens the verify
-                    threshold for each satellite while it's playing — e.g. the
-                    living-room TV restricts the living-room satellite strongly,
-                    but a bedroom radio not at all. Needs the media + satellite
-                    MQTT automations (see the MQTT card). Sources with no rule
-                    fall back to the default boost when they play in the
-                    satellite's room.
-                </p>
-                <div id="media-restrict-list" class="list"></div>
-                <form id="media-restrict-form" class="row" style="margin-top:0.5rem; flex-wrap:wrap; gap:0.5rem">
-                    <select id="media-restrict-sat"></select>
-                    <select id="media-restrict-source"></select>
-                    <input type="number" id="media-restrict-delta" step="0.01" min="0" max="2"
-                           data-i18n-ph="media_restrict.ph_delta" placeholder="0.10" style="width:6rem">
-                    <button type="submit" data-i18n="media_restrict.add">Add / update</button>
-                    <button type="button" id="media-restrict-refresh" class="secondary" data-i18n="media_restrict.refresh">Refresh</button>
-                </form>
-                <div id="media-restrict-feedback" class="feedback"></div>
-            </div>
-
-            <div class="card">
-                <h2 data-i18n="calibration.title">Confidence calibration</h2>
-                <p class="meta" data-i18n="calibration.description">
-                    Maps the raw cosine distance to a calibrated probability
-                    (Platt scaling) so the confidence reported to Home
-                    Assistant is meaningful. Fitted automatically from your
-                    enrolled samples; gating still uses the distance threshold.
-                </p>
-                <form id="calibration-form">
-                    <label class="switch">
-                        <input type="checkbox" name="enable_calibration">
-                        <span data-i18n="calibration.enabled">Enable calibrated confidence</span>
-                    </label>
-                    <label class="switch">
-                        <input type="checkbox" name="enable_adaptive_thresholds">
-                        <span data-i18n="calibration.adaptive_enabled">Adaptive per-speaker thresholds</span>
-                        <small class="meta" data-i18n="calibration.adaptive_hint">Each speaker gets a threshold derived from their own genuine/impostor score distributions, bounded to ±0.08 around the global value. Recomputed on every recalibration; speakers without enough data keep the global threshold.</small>
-                    </label>
-                    <div class="row">
-                        <button type="submit" data-i18n="calibration.save">Save</button>
-                        <button type="button" id="recalibrate-btn" class="secondary" data-i18n="calibration.recalibrate">Recalibrate now</button>
-                    </div>
-                    <p class="meta" id="calibration-status"></p>
-                    <div id="adaptive-thresholds-list" class="meta"></div>
-                </form>
-                <div id="calibration-feedback" class="meta"></div>
-            </div>
-
             <div class="card">
                 <h2 data-i18n="mqtt.title">MQTT (recommended)</h2>
                 <p class="meta" data-i18n="mqtt.description">
@@ -654,7 +688,28 @@
                     <pre><code id="mqtt-satellite-code"></code></pre>
                 </div>
             </div>
-
+            <div class="card">
+                <h2 data-i18n="media_restrict.title">Media restrictions (per satellite × source)</h2>
+                <p class="meta" data-i18n="media_restrict.description">
+                    Set how much each media source tightens the verify
+                    threshold for each satellite while it's playing — e.g. the
+                    living-room TV restricts the living-room satellite strongly,
+                    but a bedroom radio not at all. Needs the media + satellite
+                    MQTT automations (see the MQTT card). Sources with no rule
+                    fall back to the default boost when they play in the
+                    satellite's room.
+                </p>
+                <div id="media-restrict-list" class="list"></div>
+                <form id="media-restrict-form" class="row" style="margin-top:0.5rem; flex-wrap:wrap; gap:0.5rem">
+                    <select id="media-restrict-sat"></select>
+                    <select id="media-restrict-source"></select>
+                    <input type="number" id="media-restrict-delta" step="0.01" min="0" max="2"
+                           data-i18n-ph="media_restrict.ph_delta" placeholder="0.10" style="width:6rem">
+                    <button type="submit" data-i18n="media_restrict.add">Add / update</button>
+                    <button type="button" id="media-restrict-refresh" class="secondary" data-i18n="media_restrict.refresh">Refresh</button>
+                </form>
+                <div id="media-restrict-feedback" class="feedback"></div>
+            </div>
             <div class="card">
                 <h2 data-i18n="ha.title">Home Assistant (REST — legacy)</h2>
                 <p class="meta" data-i18n="ha.description">
@@ -720,7 +775,8 @@
                     <span id="ha-copy-feedback"></span>
                 </div>
             </div>
-
+            </div>
+            <div class="settings-group" data-settings-group="system">
             <div class="card">
                 <h2 data-i18n="backup.title">Backup &amp; Restore</h2>
                 <p class="meta" data-i18n="backup.description">
@@ -749,51 +805,6 @@
                 </div>
                 <div id="backup-feedback" class="meta"></div>
             </div>
-
-            <div class="card">
-                <h2 data-i18n="quality.title">Sample quality (advanced)</h2>
-                <p class="meta" data-i18n="quality.description">
-                    Adjust how sample quality is scored. Scores drive the smart
-                    auto-enroll replacement logic (worst sample is only replaced
-                    when a better one comes in) and the per-speaker training
-                    quality indicator. Weights are normalized automatically.
-                </p>
-                <form id="quality-form">
-                    <label>
-                        <span data-i18n="quality.w_speech_ratio">Speech ratio weight</span>
-                        <input type="number" step="0.05" min="0" max="1" name="speech_ratio">
-                        <small class="meta" data-i18n="quality.w_speech_ratio_hint">VAD-detected speech vs total duration.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="quality.w_snr">SNR weight</span>
-                        <input type="number" step="0.05" min="0" max="1" name="snr">
-                        <small class="meta" data-i18n="quality.w_snr_hint">Speech-to-noise ratio estimate (dB).</small>
-                    </label>
-                    <label>
-                        <span data-i18n="quality.w_liveness">Liveness weight</span>
-                        <input type="number" step="0.05" min="0" max="1" name="liveness">
-                        <small class="meta" data-i18n="quality.w_liveness_hint">Spectral TV/broadcast heuristics.</small>
-                    </label>
-                    <label>
-                        <span data-i18n="quality.w_consistency">Consistency weight</span>
-                        <input type="number" step="0.05" min="0" max="1" name="consistency">
-                        <small class="meta" data-i18n="quality.w_consistency_hint">Embedding stability across windows (detects multiple voices).</small>
-                    </label>
-                    <label>
-                        <span data-i18n="quality.w_centroid_distance">Centroid fit weight</span>
-                        <input type="number" step="0.05" min="0" max="1" name="centroid_distance">
-                        <small class="meta" data-i18n="quality.w_centroid_distance_hint">How close the sample is to the existing speaker profile.</small>
-                    </label>
-                    <div id="quality-weights-info" class="meta"></div>
-                    <div class="row">
-                        <button type="submit" data-i18n="quality.save">Save weights</button>
-                        <button type="button" id="quality-reset-btn" class="secondary" data-i18n="quality.reset">Reset to defaults</button>
-                        <button type="button" id="quality-rescore-btn" class="secondary" data-i18n="quality.rescore_all">Re-evaluate all samples</button>
-                    </div>
-                </form>
-                <div id="quality-feedback" class="meta"></div>
-            </div>
-
             <div class="card">
                 <h2 data-i18n="service.title">Service</h2>
                 <p class="meta" data-i18n="service.description">
@@ -804,6 +815,7 @@
                 </p>
                 <button type="button" id="restart-btn" class="danger" data-i18n="service.restart_btn">Restart Murdock</button>
                 <div id="restart-feedback" class="meta"></div>
+            </div>
             </div>
         </section>
     </main>

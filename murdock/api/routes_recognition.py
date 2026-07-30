@@ -34,6 +34,11 @@ class RecognitionEventOut(BaseModel):
     # A/B shadow engine result, filled in asynchronously.
     shadow_transcript: Optional[str] = None
     shadow_engine: Optional[str] = None
+    # Wall-clock time per STT engine, so the A/B view compares speed too.
+    transcript_ms: Optional[float] = None
+    shadow_ms: Optional[float] = None
+    weight: Optional[float] = None
+    margin: Optional[float] = None
 
 
 class RecognitionListOut(BaseModel):
@@ -84,6 +89,10 @@ async def list_events(
                 unknown_sample_id=session_map.get(e.session_id),
                 shadow_transcript=e.shadow_transcript,
                 shadow_engine=e.shadow_engine,
+                transcript_ms=e.transcript_ms,
+                shadow_ms=e.shadow_ms,
+                weight=e.weight,
+                margin=e.margin,
             )
             for e in events
         ]

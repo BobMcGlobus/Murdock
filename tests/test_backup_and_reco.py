@@ -75,3 +75,70 @@ def test_reco_clamped():
     # Pathologically low distances should still yield a sane floor.
     r = recommend_threshold([0.001] * 20, [0.02] * 10, current=0.30)
     assert r["recommended"] >= 0.05
+
+
+# --- STT engine timings -------------------------------------------------------
+
+
+def test_recognition_log_persists_stt_timings(tmp_path):
+    """The A/B comparison needs speed, not just wording."""
+    from murdock.core.db import open_db as _open
+    from murdock.core.recognition_log import RecognitionLog
+
+    log = RecognitionLog(_open(tmp_path / "t.db"))
+    row_id = log.record(
+        session_id="s1", satellite_id="sat1", duration_sec=2.0,
+        outcome="match", matched_speaker="Jonas", transcript="hallo",
+        transcript_ms=412.5,
+    )
+    assert row_id > 0
+    ev = log.list_events(limit=1)[0]
+    assert ev.transcript_ms == pytest.approx(412.5)
+    # The shadow arrives later, via set_shadow.
+    assert ev.shadow_ms is None
+
+    assert log.set_shadow(row_id, "hallo!", "openai:whisper", 1183.0) is True
+    ev = log.list_events(limit=1)[0]
+    assert ev.shadow_transcript == "hallo!"
+    assert ev.shadow_ms == pytest.approx(1183.0)
+
+
+def test_set_shadow_without_timing_keeps_none(tmp_path):
+    from murdock.core.db import open_db as _open
+    from murdock.core.recognition_log import RecognitionLog
+
+    log = RecognitionLog(_open(tmp_path / "t2.db"))
+    row_id = log.record(
+        session_id="s", satellite_id=None, duration_sec=1.0, outcome="match"
+    )
+    log.set_shadow(row_id, "text", "engine")
+    assert log.list_events(limit=1)[0].shadow_ms is None
+
+
+def test_recognition_api_exposes_timings(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from murdock.api.routes_recognition import list_events
+    from murdock.core.db import open_db as _open
+    from murdock.core.recognition_log import RecognitionLog
+
+    db = _open(tmp_path / "t3.db")
+    log = RecognitionLog(db)
+    row_id = log.record(
+        session_id="s1", satellite_id="sat1", duration_sec=1.0,
+        outcome="match", matched_speaker="Jonas", transcript="hi",
+        transcript_ms=300.0, weight=1.0, margin=0.2,
+    )
+    log.set_shadow(row_id, "hi", "shadow-engine", 900.0)
+
+    ctx = SimpleNamespace(
+        recognition=log,
+        unknown=SimpleNamespace(map_sessions_to_samples=lambda ids: {}),
+    )
+    out = asyncio.run(list_events(limit=10, outcome=None, speaker=None, ctx=ctx))
+    ev = out.events[0]
+    assert ev.transcript_ms == pytest.approx(300.0)
+    assert ev.shadow_ms == pytest.approx(900.0)
+    assert ev.weight == pytest.approx(1.0)
+    assert ev.margin == pytest.approx(0.2)
