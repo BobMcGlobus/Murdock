@@ -1401,7 +1401,15 @@ async function loadSettings() {
                 sttForm.enable_stt_dictionary.checked = !!s.enable_stt_dictionary;
                 sttForm.stt_dictionary.value = s.stt_dictionary || "";
             }
+            if (sttForm.enable_canonicalizer) {
+                sttForm.enable_canonicalizer.checked = !!s.enable_canonicalizer;
+                sttForm.canonicalizer_min_score.value =
+                    (s.canonicalizer_min_score ?? 0.82).toFixed(2);
+                sttForm.canonicalizer_min_margin.value =
+                    (s.canonicalizer_min_margin ?? 0.1).toFixed(2);
+            }
             loadVocabularyMirror();
+            loadCanonicalizerHits();
             if (sttForm.enable_dual_transcript) {
                 sttForm.enable_dual_transcript.checked = !!s.enable_dual_transcript;
             }
@@ -1755,6 +1763,17 @@ if (sttForm) {
             if (sttForm.shadow_mistral_api_key) {
                 const shMKey = sttForm.shadow_mistral_api_key.value;
                 if (shMKey) body.shadow_mistral_api_key = shMKey;
+            }
+        }
+        if (sttForm.enable_canonicalizer) {
+            body.enable_canonicalizer = sttForm.enable_canonicalizer.checked;
+            if (sttForm.canonicalizer_min_score.value !== "") {
+                body.canonicalizer_min_score =
+                    parseFloat(sttForm.canonicalizer_min_score.value);
+            }
+            if (sttForm.canonicalizer_min_margin.value !== "") {
+                body.canonicalizer_min_margin =
+                    parseFloat(sttForm.canonicalizer_min_margin.value);
             }
         }
         if (sttForm.enable_stt_vocabulary) {
@@ -2921,71 +2940,255 @@ api("/api/health")
     .then((h) => setStatus(t("health.status", { version: h.version, n: h.speakers })))
     .catch((err) => setStatus(t("health.failed", { err: err.message }), "err"));
 
-// ── Mirrored vocabulary (pushed by the HA integration) ─────────────
+// -- Bias-prompt vocabulary editor ---------------------------------
 //
-// Shows what the integration actually contributed and, more importantly,
-// which of those terms survive the cap and reach the STT engine.
+// Two kinds of chip: your own terms (always sent) and mirrored ones from
+// Home Assistant, which are toggleable. Only the first N mirrored terms
+// reach the engine, so choosing *which* N matters more than seeing them.
+let VOCAB_STATE = null;
+
 async function loadVocabularyMirror() {
     const box = $("#vocab-mirror");
     if (!box) return;
-    let data;
     try {
-        data = await api("/api/vocabulary");
+        VOCAB_STATE = await api("/api/vocabulary");
     } catch (err) {
         box.hidden = true;
         return;
     }
-    const hasSnapshot = !!data.available;
-    const hasPrompt = !!(data.effective_prompt || "").trim();
-    if (!hasSnapshot && !hasPrompt) {
+    renderVocabularyPanel();
+}
+
+function renderVocabularyPanel() {
+    const data = VOCAB_STATE;
+    const box = $("#vocab-mirror");
+    if (!box || !data) return;
+    const own = data.manual_terms || [];
+    const mirrored = data.terms || [];
+    if (!mirrored.length && !own.length) {
         box.hidden = true;
         return;
     }
     box.hidden = false;
 
+    const selected = new Set((data.selected || []).map((x) => x.toLowerCase()));
+    const isManual = data.selection !== null && data.selection !== undefined;
+
     const meta = $("#vocab-mirror-meta");
     if (meta) {
-        if (hasSnapshot) {
-            const age = data.created_at
-                ? formatTimestamp(data.created_at) : "";
-            meta.textContent = t("vocab.mirror_meta", {
-                entities: data.entity_count,
-                terms: data.term_count,
-                cap: data.term_cap,
-                version: data.version || "?",
-                age: age,
-            });
-        } else {
-            meta.textContent = t("vocab.mirror_none");
-        }
+        meta.textContent = data.available
+            ? t("vocab.mirror_meta", {
+                  entities: data.entity_count,
+                  terms: data.term_count,
+                  cap: data.term_cap,
+                  version: data.version || "?",
+                  age: data.created_at ? formatTimestamp(data.created_at) : "",
+              })
+            : t("vocab.mirror_none");
     }
 
     const list = $("#vocab-terms");
     if (list) {
-        const terms = data.terms || [];
-        const cap = data.term_cap || terms.length;
-        list.innerHTML = terms
-            .map((term, i) => {
-                const cls = i < cap ? "chip" : "chip capped";
-                const title = i < cap
-                    ? t("vocab.chip_sent") : t("vocab.chip_capped");
-                return `<span class="${cls}" title="${escapeHtml(title)}">${escapeHtml(term)}</span>`;
-            })
-            .join("");
+        const ownChips = own.map(
+            (term) =>
+                '<span class="chip own" title="' +
+                escapeHtml(t("vocab.chip_own")) +
+                '">' +
+                escapeHtml(term) +
+                '<button type="button" class="chip-x" data-vocab-remove="' +
+                escapeHtml(term) +
+                '">&times;</button></span>'
+        );
+        const mirroredChips = mirrored.map((term) => {
+            const on = selected.has(term.toLowerCase());
+            return (
+                '<button type="button" class="' +
+                (on ? "chip" : "chip capped") +
+                '" data-vocab-toggle="' +
+                escapeHtml(term) +
+                '" title="' +
+                escapeHtml(on ? t("vocab.chip_sent") : t("vocab.chip_off")) +
+                '">' +
+                escapeHtml(term) +
+                "</button>"
+            );
+        });
+        list.innerHTML = ownChips.concat(mirroredChips).join("");
+    }
+
+    const count = $("#vocab-count");
+    if (count) {
+        count.textContent = t("vocab.count", {
+            own: own.length,
+            selected: selected.size,
+            cap: data.term_cap,
+            mode: isManual ? t("vocab.mode_manual") : t("vocab.mode_auto"),
+        });
+    }
+
+    // Say so when the active backend throws the prompt away.
+    const warn = $("#vocab-backend-warning");
+    if (warn) {
+        const ignored = data.effective_enabled && !data.backend_supports_prompt;
+        warn.hidden = !ignored;
+        if (ignored) warn.textContent = t("vocab.backend_ignores");
     }
 
     const eff = $("#vocab-effective");
     if (eff) {
         eff.textContent = data.effective_enabled
-            ? (data.effective_prompt || t("vocab.effective_empty"))
+            ? data.effective_prompt || t("vocab.effective_empty")
             : t("vocab.effective_disabled");
     }
 }
 
-const vocabRefreshBtn = $("#vocab-refresh-btn");
-if (vocabRefreshBtn) {
-    vocabRefreshBtn.addEventListener("click", loadVocabularyMirror);
+async function putVocabSelection(payload) {
+    try {
+        VOCAB_STATE = await api("/api/vocabulary/selection", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        renderVocabularyPanel();
+        setStatus(t("vocab.saved"), "ok");
+    } catch (err) {
+        setStatus(String(err), "error");
+    }
 }
+
+// Toggling freezes the currently sent set as an explicit selection —
+// otherwise the first click would be undone by the automatic "first N"
+// rule as soon as the next snapshot arrives.
+function toggleMirroredTerm(term) {
+    if (!VOCAB_STATE) return;
+    const current = new Set(VOCAB_STATE.selected || []);
+    if (current.has(term)) current.delete(term);
+    else current.add(term);
+    putVocabSelection({ terms: Array.from(current) });
+}
+
+async function saveOwnTerms(terms) {
+    const value = terms.join(", ");
+    const form = $("#stt-form");
+    if (form && form.stt_vocabulary) form.stt_vocabulary.value = value;
+    try {
+        await api("/api/settings", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stt_vocabulary: value }),
+        });
+        await loadVocabularyMirror();
+        setStatus(t("vocab.saved"), "ok");
+    } catch (err) {
+        setStatus(String(err), "error");
+    }
+}
+
+const vocabTermsBox = $("#vocab-terms");
+if (vocabTermsBox) {
+    vocabTermsBox.addEventListener("click", (e) => {
+        const remove = e.target.closest("[data-vocab-remove]");
+        if (remove) {
+            const term = remove.dataset.vocabRemove;
+            const own = (VOCAB_STATE ? VOCAB_STATE.manual_terms || [] : [])
+                .filter((x) => x !== term);
+            saveOwnTerms(own);
+            return;
+        }
+        const toggle = e.target.closest("[data-vocab-toggle]");
+        if (toggle) toggleMirroredTerm(toggle.dataset.vocabToggle);
+    });
+}
+
+function addOwnTermFromInput() {
+    const input = $("#vocab-add-input");
+    if (!input) return;
+    const term = input.value.trim().replace(/,+$/, "");
+    if (!term) return;
+    const own = VOCAB_STATE ? VOCAB_STATE.manual_terms || [] : [];
+    input.value = "";
+    if (own.some((x) => x.toLowerCase() === term.toLowerCase())) return;
+    saveOwnTerms(own.concat([term]));
+}
+
+const vocabAddBtn = $("#vocab-add-btn");
+if (vocabAddBtn) vocabAddBtn.addEventListener("click", addOwnTermFromInput);
+
+const vocabAddInput = $("#vocab-add-input");
+if (vocabAddInput) {
+    vocabAddInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            addOwnTermFromInput();
+        }
+    });
+}
+
+const vocabAutoBtn = $("#vocab-auto-btn");
+if (vocabAutoBtn) {
+    vocabAutoBtn.addEventListener("click", () => putVocabSelection({ auto: true }));
+}
+
+// -- Recurring canonicalizations, promotable to exact rules ---------
+async function loadCanonicalizerHits() {
+    const box = $("#canon-learned");
+    const list = $("#canon-learned-list");
+    if (!box || !list) return;
+    let data;
+    try {
+        data = await api("/api/canonicalizer/hits?limit=15");
+    } catch (err) {
+        box.hidden = true;
+        return;
+    }
+    const hits = data.hits || [];
+    box.hidden = hits.length === 0;
+    list.innerHTML = hits
+        .map(
+            (h) =>
+                '<div class="list-item"><div class="row"><span><code>' +
+                escapeHtml(h.original) +
+                "</code> &rarr; <code>" +
+                escapeHtml(h.replacement) +
+                '</code> <span class="badge">' +
+                h.count +
+                '&times;</span></span><button type="button" class="secondary small"' +
+                ' data-promote-original="' + escapeHtml(h.original) + '"' +
+                ' data-promote-replacement="' + escapeHtml(h.replacement) + '">' +
+                escapeHtml(t("canon.promote")) +
+                "</button></div></div>"
+        )
+        .join("");
+}
+
+const canonList = $("#canon-learned-list");
+if (canonList) {
+    canonList.addEventListener("click", async (e) => {
+        const btn = e.target.closest("[data-promote-original]");
+        if (!btn) return;
+        try {
+            await api("/api/canonicalizer/promote", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    original: btn.dataset.promoteOriginal,
+                    replacement: btn.dataset.promoteReplacement,
+                }),
+            });
+            setStatus(t("canon.promoted"), "ok");
+            await loadCanonicalizerHits();
+            await loadSettings();
+        } catch (err) {
+            setStatus(String(err), "error");
+        }
+    });
+}
+
+const canonRefreshBtn = $("#canon-refresh-btn");
+if (canonRefreshBtn) canonRefreshBtn.addEventListener("click", loadCanonicalizerHits);
+
+const vocabRefreshBtn = $("#vocab-refresh-btn");
+if (vocabRefreshBtn) vocabRefreshBtn.addEventListener("click", loadVocabularyMirror);
 
 // ── Settings sub-navigation ────────────────────────────────────────
 //

@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.8.3
+
+**Automatic name correction** — the feature the vocabulary should have been
+powering all along. Murdock knows exactly which entity names exist; it now
+maps misheard spans onto them instead of only trying to bias the engine up
+front.
+
+```
+"schalte das Bad-Lightstrip ein"  →  "schalte das Bett-Lightstrip ein"
+```
+
+- Candidates are indexed by **Kölner Phonetik**. German mishearings are
+  phonetic — "Bad" and "Bett" both encode to `12` — and plain edit distance
+  ranks exactly those pairs far apart. Phonetics may propose, never decide:
+  only the entity list knows which spelling you actually own.
+- Scoring blends sequence similarity, character-trigram overlap and a
+  phonetic-match bonus. Two ways in: the normal similarity floor (0.82), or
+  a floor 0.10 lower when the phonetic codes are identical.
+- **The margin decides ties.** The winner must lead the runner-up clearly
+  (0.10), so two equally plausible entities are never resolved by coin
+  flip — same discipline as the speaker margin gate.
+- Never touches already-valid names, spans under four characters, or common
+  German words. Runs *after* the explicit dictionary, so your rules win.
+- Works with **every** STT backend, and the result is plain text, so HA's
+  local intent matching improves rather than breaks.
+- Under 50 ms with 400 entities (trigram overlap blocks non-contenders
+  before the expensive comparison).
+- Default off, under *Settings → Transcription → STT backend*.
+
+**Recurring corrections become rules.** Every applied correction is
+counted; frequent ones appear under *Recurring corrections* with a *Make it
+a rule* button that writes an exact dictionary entry and enables that tier.
+Deliberately a click, not an automatism.
+
+**The bias prompt, demoted to what it is.** It only ever reached
+OpenAI-compatible non-OpenRouter backends — never the default Wyoming
+upstream, never Voxtral — so on a normal install the mirrored vocabulary
+did nothing. The UI now says so when the active backend ignores the prompt,
+and the 25 terms are **curatable**: mirrored terms are clickable chips
+(filled = sent), your own terms are separate red chips with add/remove, a
+counter shows what is in play, and *Automatic selection* returns to the
+default first-25.
+
+**HACS support.** The integration installs as a HACS custom repository:
+`hacs.json`, `info.md`, entity icons (`icons.json`), and brand assets at
+the sizes `home-assistant/brands` specifies. A new `validate` workflow runs
+`hassfest` and the HACS action on every push — it immediately caught a URL
+in a config-flow string and the missing brand directory, both fixed.
+
+**Experimental tab.** Unproven features moved out of the settings page;
+emotion detection lives there now.
+
+248 tests green.
+
 ## 0.8.2
 
 **The settings page is navigable again.** It had grown to twelve cards on

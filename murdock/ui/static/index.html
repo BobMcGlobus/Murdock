@@ -504,13 +504,21 @@
                     <label>
                         <span data-i18n="stt.vocab_label">Vocabulary (comma-separated terms or a short sentence)</span>
                         <textarea name="stt_vocabulary" rows="2" spellcheck="false" placeholder="Fehenlichter, Bed-Lightstrip, Sat1"></textarea>
+                        <small class="meta" data-i18n="stt.vocab_own_hint">Your own terms. Always sent, never dropped by the cap — edit them here or as chips below.</small>
                     </label>
+                    <p class="meta warn" id="vocab-backend-warning" hidden></p>
                     <div id="vocab-mirror" class="vocab-mirror" hidden>
                         <div class="row">
                             <strong data-i18n="vocab.mirror_title">Mirrored from Home Assistant</strong>
                             <button type="button" id="vocab-refresh-btn" class="secondary small" data-i18n="vocab.refresh">Refresh</button>
                         </div>
                         <p class="meta" id="vocab-mirror-meta"></p>
+                        <div class="row vocab-controls">
+                            <input type="text" id="vocab-add-input" data-i18n-ph="vocab.add_ph" placeholder="add your own term">
+                            <button type="button" id="vocab-add-btn" class="secondary small" data-i18n="vocab.add">Add</button>
+                            <button type="button" id="vocab-auto-btn" class="secondary small" data-i18n="vocab.auto">Automatic selection</button>
+                        </div>
+                        <p class="meta" id="vocab-count"></p>
                         <p class="meta" data-i18n="vocab.mirror_hint">Pushed by the Murdock integration: names and aliases of your exposed entities, areas and floors. Terms above the cap are stored but not sent — the cap keeps the bias a nudge rather than a source of false replacements.</p>
                         <div id="vocab-terms" class="chips"></div>
                         <details id="vocab-effective-wrap">
@@ -527,6 +535,33 @@
                         <span data-i18n="stt.dict_label">Dictionary</span>
                         <textarea name="stt_dictionary" rows="4" spellcheck="false" placeholder="fehlende Lichter -> Fehenlichter&#10;Bad-Lightstrip -> Bed-Lightstrip"></textarea>
                     </label>
+                    <h3 data-i18n="canon.title">Automatic name correction</h3>
+                    <label class="switch">
+                        <input type="checkbox" name="enable_canonicalizer">
+                        <span data-i18n="canon.enable">Map misheard names onto real entities</span>
+                        <small class="meta" data-i18n="canon.hint">Compares every part of the transcript against the names Home Assistant actually has — using German phonetics, so "Bad-Lightstrip" becomes "Bett-Lightstrip". Works with every STT backend, unlike the bias prompt, and keeps local intent matching working because the result is plain text. Only replaces when one candidate wins clearly.</small>
+                    </label>
+                    <details class="advanced">
+                        <summary data-i18n="canon.adv">Advanced: how strict</summary>
+                        <label>
+                            <span data-i18n="canon.min_score">Minimum similarity</span>
+                            <input type="number" step="0.01" min="0.5" max="1" name="canonicalizer_min_score">
+                            <small class="meta" data-i18n="canon.min_score_hint">Below this, nothing is replaced. Default 0.82. Phonetically identical names are allowed 0.10 less, since sounding the same is strong evidence of a mishearing.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="canon.min_margin">Minimum lead over the runner-up</span>
+                            <input type="number" step="0.01" min="0" max="1" name="canonicalizer_min_margin">
+                            <small class="meta" data-i18n="canon.min_margin_hint">If two entity names are almost equally close, replacing one would be a coin flip — so nothing is replaced. Default 0.10.</small>
+                        </label>
+                    </details>
+                    <div id="canon-learned" class="vocab-mirror" hidden>
+                        <div class="row">
+                            <strong data-i18n="canon.learned_title">Recurring corrections</strong>
+                            <button type="button" id="canon-refresh-btn" class="secondary small" data-i18n="vocab.refresh">Refresh</button>
+                        </div>
+                        <p class="meta" data-i18n="canon.learned_hint">A correction that keeps recurring is no longer a guess. Promote it to become an exact dictionary rule — faster, deterministic, and never re-decided by the fuzzy matcher.</p>
+                        <div id="canon-learned-list" class="list"></div>
+                    </div>
                     <h3 data-i18n="stt.shadow_title">A/B shadow engine</h3>
                     <p class="meta" data-i18n="stt.shadow_hint">Transcribe every utterance with a second engine in the background. The shadow result is never returned to Home Assistant — it appears next to the primary transcript in the recognition log, so you can compare two engines on your real commands before switching.</p>
                     <label>

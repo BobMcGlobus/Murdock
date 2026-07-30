@@ -804,3 +804,57 @@ details.advanced > summary:hover {
 details.advanced[open] {
     padding-bottom: 0.5rem;
 }
+
+/* ── Vocabulary chip editor ─────────────────────────────── */
+
+.chip.own {
+    background: rgba(220, 38, 38, 0.1);
+    color: #fca5a5;
+    border-color: rgba(220, 38, 38, 0.3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.chip-x {
+    background: none;
+    border: 0;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    padding: 0 0 0 0.1rem;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.chip-x:hover {
+    opacity: 1;
+}
+
+/* Mirrored chips are buttons, so they need to look clickable. */
+button.chip {
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+}
+
+button.chip:hover {
+    border-color: var(--accent-soft);
+}
+
+.vocab-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    margin: 0.5rem 0;
+}
+
+.vocab-controls input[type="text"] {
+    flex: 1 1 12rem;
+    min-width: 8rem;
+}
+
+.meta.warn {
+    color: #fbbf24;
+}
