@@ -16,6 +16,9 @@ const I18N = (() => {
             "nav.verify": "Verify",
             "nav.recognition": "Recognition log",
             "nav.unknown": "Unknown",
+            "nav.experimental": "Experimental",
+            "exp.title": "Experimental features",
+            "exp.description": "Unfinished or unproven features. They are safe to leave off, and safe to switch on — but expect rough edges, and don't build automations you rely on around them yet.",
             "nav.settings": "Settings",
 
             // -- Speakers tab --
@@ -524,6 +527,9 @@ const I18N = (() => {
             "nav.verify": "Verifizieren",
             "nav.recognition": "Erkennungsprotokoll",
             "nav.unknown": "Unbekannt",
+            "nav.experimental": "Experimentell",
+            "exp.title": "Experimentelle Funktionen",
+            "exp.description": "Unfertige oder unerprobte Funktionen. Sie können bedenkenlos aus bleiben und bedenkenlos eingeschaltet werden — aber erwarte Ecken und Kanten, und baue noch keine Automationen darauf, auf die du dich verlässt.",
             "nav.settings": "Einstellungen",
 
             // -- Speakers tab --

@@ -79,6 +79,9 @@ $$(".tab-btn").forEach((btn) => {
         if (btn.dataset.tab === "unknown") loadUnknown();
         if (btn.dataset.tab === "settings") loadSettings();
         if (btn.dataset.tab === "recognition") loadRecognition();
+        // The experimental tab hosts settings cards, so it needs the
+        // same population pass as the settings tab.
+        if (btn.dataset.tab === "experimental") loadSettings();
     });
 });
 

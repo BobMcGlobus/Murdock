@@ -22,6 +22,7 @@
             <button data-tab="recognition" class="tab-btn" data-i18n="nav.recognition">Recognition log</button>
             <button data-tab="unknown" class="tab-btn" data-i18n="nav.unknown">Unknown</button>
             <button data-tab="settings" class="tab-btn" data-i18n="nav.settings">Settings</button>
+            <button data-tab="experimental" class="tab-btn" data-i18n="nav.experimental">Experimental</button>
         </nav>
         <select id="lang-selector" class="lang-selector">
             <option value="auto">Auto</option>
@@ -219,6 +220,38 @@
         </section>
 
         <!-- Settings tab -->
+        <!-- Experimental tab -->
+        <section id="tab-experimental" class="tab">
+            <div class="card">
+                <h2 data-i18n="exp.title">Experimental features</h2>
+                <p class="meta" data-i18n="exp.description">
+                    Unfinished or unproven features. They are safe to leave
+                    off, and safe to switch on — but expect rough edges, and
+                    do not build automations you rely on around them yet.
+                </p>
+            </div>
+            <div class="card">
+                <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
+                <p class="meta" data-i18n="emotion.description">
+                    Classifies the emotional tone of verified speech (happy,
+                    sad, angry, …) and pushes it to Home Assistant. This is
+                    plumbing only — no compatible ONNX model ships with
+                    Murdock yet. The toggle can be pre-flipped safely.
+                </p>
+                <form id="emotion-form">
+                    <label class="inline">
+                        <input type="checkbox" name="enable_emotion">
+                        <span data-i18n="emotion.enable">Enable emotion detection</span>
+                    </label>
+                    <div id="emotion-status" class="meta"></div>
+                    <div class="row" style="margin-top:0.5rem">
+                        <button type="submit" data-i18n="generic.save">Save</button>
+                    </div>
+                </form>
+                <div id="emotion-feedback" class="feedback"></div>
+            </div>
+        </section>
+
         <section id="tab-settings" class="tab">
             <nav class="settings-nav" id="settings-nav">
                 <button type="button" class="settings-nav-btn" data-settings-group="recognition" data-i18n="settings.group_recognition">recognition</button>
@@ -547,26 +580,6 @@
                     </div>
                 </form>
                 <div id="stt-feedback" class="feedback"></div>
-            </div>
-            <div class="card">
-                <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
-                <p class="meta" data-i18n="emotion.description">
-                    Classifies the emotional tone of verified speech (happy,
-                    sad, angry, …) and pushes it to Home Assistant. This is
-                    plumbing only — no compatible ONNX model ships with
-                    Murdock yet. The toggle can be pre-flipped safely.
-                </p>
-                <form id="emotion-form">
-                    <label class="inline">
-                        <input type="checkbox" name="enable_emotion">
-                        <span data-i18n="emotion.enable">Enable emotion detection</span>
-                    </label>
-                    <div id="emotion-status" class="meta"></div>
-                    <div class="row" style="margin-top:0.5rem">
-                        <button type="submit" data-i18n="generic.save">Save</button>
-                    </div>
-                </form>
-                <div id="emotion-feedback" class="feedback"></div>
             </div>
             </div>
             <div class="settings-group" data-settings-group="homeassistant">
