@@ -27,6 +27,8 @@ def _ctx(tmp_path, *, mqtt_connected=False, ha_configured=False):
     return AppContext(
         settings=SimpleNamespace(
             enable_stt_vocabulary=True, stt_vocabulary="",
+            stt_backend="upstream", enable_stt_dictionary=False,
+            stt_dictionary="",
         ),
         db=db, embedder=None, vad=None, speakers=None, unknown=None,
         ha=SimpleNamespace(configured=ha_configured),

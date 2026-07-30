@@ -1,0 +1,40 @@
+name: Validate integration
+
+# Keeps custom_components/murdock installable via HACS: hassfest checks
+# the manifest against Home Assistant's own rules, the HACS action checks
+# the repository layout and metadata. Both are cheap and catch breakage
+# long before a user's HACS download fails.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "custom_components/**"
+      - "hacs.json"
+      - "info.md"
+      - ".github/workflows/validate.yml"
+  pull_request:
+  schedule:
+    # Requirements drift as Home Assistant releases; a weekly run surfaces
+    # that without waiting for the next code change.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hacs/action@main
+        with:
+          category: integration

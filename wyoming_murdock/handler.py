@@ -178,6 +178,9 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_ms: Optional[float] = None
         self._shadow_ms: Optional[float] = None
 
+        # Canonicalizations applied to this transcript, for the log.
+        self._canonicalizations: list = []
+
     @property
     def upstream_uri(self) -> str:
         """Always read the live value from context so the UI can update
@@ -343,6 +346,7 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_hints = []
         self._transcript_ms = None
         self._shadow_ms = None
+        self._canonicalizations = []
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -851,6 +855,27 @@ class MurdockHandler(AsyncEventHandler):
         return result.clean
 
     async def _get_transcript(self, audio_16k: bytes) -> str:
+        """Transcript for this utterance, fully post-processed.
+
+        Order matters: the explicit dictionary and the dual-engine merge
+        run first (see :meth:`_transcribe_and_correct`), then
+        canonicalization maps whatever is left onto real entity names.
+        User-written rules therefore always win over a fuzzy match.
+        """
+        transcript = await self._transcribe_and_correct(audio_16k)
+        corrected, replacements = self.context.canonicalize_transcript(
+            transcript
+        )
+        if replacements:
+            self._canonicalizations = [r.as_dict() for r in replacements]
+            _LOGGER.info(
+                "[%s] Canonicalised %d span(s): %s",
+                self._session_id, len(replacements),
+                ", ".join(f"{r.original}→{r.replacement}" for r in replacements),
+            )
+        return corrected
+
+    async def _transcribe_and_correct(self, audio_16k: bytes) -> str:
         """Primary transcript, refined by the enabled quality tiers.
 
         * **Dual transcript**: run the shadow engine blocking in

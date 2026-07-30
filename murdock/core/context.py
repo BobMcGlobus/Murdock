@@ -1125,23 +1125,67 @@ class AppContext:
             self._vocab_store = store
         return store
 
+    def get_vocab_selection(self) -> Optional[List[str]]:
+        """Explicitly chosen mirrored terms, or None for automatic.
+
+        None means "take the first N by priority". A stored list — even an
+        empty one — means the user curated it, and only those terms go to
+        the engine.
+        """
+        raw = get_setting(self.db, "stt_vocab_selection")
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(data, list):
+            return None
+        return [str(t) for t in data]
+
+    def set_vocab_selection(self, terms: Optional[List[str]]) -> None:
+        """Store a curated selection, or None to return to automatic."""
+        if terms is None:
+            self.db.execute(
+                "DELETE FROM settings WHERE key = 'stt_vocab_selection'"
+            )
+            self.db.commit()
+            return
+        set_setting(
+            self.db,
+            "stt_vocab_selection",
+            json.dumps([str(t) for t in terms], ensure_ascii=False),
+        )
+
+    def get_selected_ha_terms(self) -> List[str]:
+        """Mirrored terms that actually go into the bias prompt."""
+        try:
+            available = self.get_vocabulary_store().terms()
+        except Exception:
+            _LOGGER.debug("Vocabulary snapshot unavailable", exc_info=True)
+            return []
+        selection = self.get_vocab_selection()
+        if selection is None:
+            return available[:_HA_VOCAB_TERM_CAP]
+        # Keep snapshot order, drop entries that no longer exist, and
+        # still respect the cap so a huge selection can't bloat the prompt.
+        chosen = {t.casefold() for t in selection}
+        return [t for t in available if t.casefold() in chosen][
+            :_HA_VOCAB_TERM_CAP
+        ]
+
     def get_effective_vocabulary(self) -> str:
         """Vocabulary prompt for the STT backends ("" when disabled).
 
-        Manual terms first, then registry terms pushed by the HA
-        integration — capped so the bias prompt stays a nudge (plan §10:
-        an oversized list raises false replacements on noisy input).
+        Manual terms first, then the selected registry terms. Capped
+        because a bias prompt has a length budget (plan §10: an oversized
+        list raises false replacements on noisy input) — the canonicalizer
+        has no such limit and uses the full list.
         """
         if not self.get_enable_stt_vocabulary():
             return ""
         manual = self.get_stt_vocabulary().strip()
-        try:
-            ha_terms = self.get_vocabulary_store().terms(
-                limit=_HA_VOCAB_TERM_CAP
-            )
-        except Exception:
-            _LOGGER.debug("Vocabulary snapshot unavailable", exc_info=True)
-            ha_terms = []
+        ha_terms = self.get_selected_ha_terms()
         if not ha_terms:
             return manual
         manual_lower = manual.lower()
@@ -1150,6 +1194,136 @@ class AppContext:
             return manual
         joined = ", ".join(extra)
         return f"{manual}, {joined}" if manual else joined
+
+    def active_backend_supports_prompt(self) -> bool:
+        """Whether the *active* primary backend will use the bias prompt.
+
+        The local Wyoming upstream has no prompt field, Voxtral doesn't
+        document one, and the OpenRouter request shape skips it — so on
+        those the vocabulary is stored but never sent. Surfacing that
+        beats showing a prompt that goes nowhere.
+        """
+        kind = self.get_stt_backend()
+        if kind == "openai":
+            base = (self.get_openai_base_url() or "").lower()
+            return "openrouter.ai" not in base
+        return False
+
+    # ------------------------------------------------------------------
+    # Canonicalization: map the transcript onto real entity names
+    # ------------------------------------------------------------------
+
+    def get_enable_canonicalizer(self) -> bool:
+        override = get_setting(self.db, "enable_canonicalizer")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return False
+
+    def set_enable_canonicalizer(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_canonicalizer", "true" if enabled else "false"
+        )
+
+    def get_canonicalizer_min_score(self) -> float:
+        from murdock.core.canonicalize import DEFAULT_MIN_SCORE
+
+        override = get_setting(self.db, "canonicalizer_min_score")
+        if override:
+            try:
+                return float(override)
+            except ValueError:
+                pass
+        return DEFAULT_MIN_SCORE
+
+    def set_canonicalizer_min_score(self, value: float) -> None:
+        set_setting(self.db, "canonicalizer_min_score", f"{float(value):.4f}")
+
+    def get_canonicalizer_min_margin(self) -> float:
+        from murdock.core.canonicalize import DEFAULT_MIN_MARGIN
+
+        override = get_setting(self.db, "canonicalizer_min_margin")
+        if override:
+            try:
+                return float(override)
+            except ValueError:
+                pass
+        return DEFAULT_MIN_MARGIN
+
+    def set_canonicalizer_min_margin(self, value: float) -> None:
+        set_setting(self.db, "canonicalizer_min_margin", f"{float(value):.4f}")
+
+    def get_manual_vocabulary_terms(self) -> List[str]:
+        """The manually maintained terms, split into individual entries."""
+        raw = self.get_stt_vocabulary()
+        return [t.strip() for t in raw.split(",") if t.strip()]
+
+    def get_canonicalizer_terms(self) -> List[str]:
+        """Every valid name a transcript may be mapped onto.
+
+        Uncapped on purpose: the 25-term limit exists because a bias
+        prompt has a length budget, while a local index does not. Manual
+        terms are included — they are names the user cares about by
+        definition.
+        """
+        terms = list(self.get_manual_vocabulary_terms())
+        try:
+            terms.extend(self.get_vocabulary_store().terms())
+        except Exception:
+            _LOGGER.debug("Vocabulary snapshot unavailable", exc_info=True)
+        return terms
+
+    def canonicalize_transcript(self, transcript: str):
+        """Correct near-misses of known names. Returns (text, replacements).
+
+        Never raises: a transcript must reach the satellite even if this
+        step has a bad day.
+        """
+        if not transcript or not self.get_enable_canonicalizer():
+            return transcript, []
+        try:
+            from murdock.core.canonicalize import canonicalize
+
+            terms = self.get_canonicalizer_terms()
+            if not terms:
+                return transcript, []
+            corrected, replacements = canonicalize(
+                transcript,
+                terms,
+                min_score=self.get_canonicalizer_min_score(),
+                min_margin=self.get_canonicalizer_min_margin(),
+            )
+            if replacements:
+                self.record_canonicalizer_hits(replacements)
+            return corrected, replacements
+        except Exception:
+            _LOGGER.exception("Canonicalization failed — transcript unchanged")
+            return transcript, []
+
+    def record_canonicalizer_hits(self, replacements) -> None:
+        """Count corrections so recurring ones can become explicit rules."""
+        try:
+            from murdock.core.canonicalizer_hits import CanonicalizerHits
+
+            store = getattr(self, "_canon_hits", None)
+            if store is None:
+                store = CanonicalizerHits(self.db)
+                self._canon_hits = store
+            store.record(replacements)
+        except Exception:
+            _LOGGER.debug("Could not record canonicalizer hits", exc_info=True)
+
+    def get_canonicalizer_hits(self, limit: int = 20):
+        try:
+            from murdock.core.canonicalizer_hits import CanonicalizerHits
+
+            store = getattr(self, "_canon_hits", None)
+            if store is None:
+                store = CanonicalizerHits(self.db)
+                self._canon_hits = store
+            return store.top(limit=limit)
+        except Exception:
+            _LOGGER.debug("Could not read canonicalizer hits", exc_info=True)
+            return []
 
     def get_enable_stt_dictionary(self) -> bool:
         override = get_setting(self.db, "enable_stt_dictionary")

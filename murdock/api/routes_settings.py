@@ -26,6 +26,13 @@ class SettingsOut(BaseModel):
     # Margin gate (plan §21): min distance between best and second-best
     # speaker before a match counts; 0 = off.
     margin_gate: float = 0.0
+    # Canonicalization: map misheard spans onto real entity names.
+    enable_canonicalizer: bool = False
+    canonicalizer_min_score: float = 0.82
+    canonicalizer_min_margin: float = 0.10
+    # Whether the *active* primary backend will actually use the bias
+    # prompt — the UI says so instead of showing a prompt that goes nowhere.
+    backend_supports_prompt: bool = False
     unknown_logging: bool
     unknown_ttl_hours: int
     require_speaker_match: bool
@@ -115,6 +122,13 @@ class SettingsOut(BaseModel):
 class SettingsPatch(BaseModel):
     verify_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     margin_gate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    enable_canonicalizer: Optional[bool] = None
+    canonicalizer_min_score: Optional[float] = Field(
+        default=None, ge=0.5, le=1.0
+    )
+    canonicalizer_min_margin: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0
+    )
     unknown_logging: Optional[bool] = None
     require_speaker_match: Optional[bool] = None
     passthrough_when_no_speakers: Optional[bool] = None
@@ -205,6 +219,10 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
     return SettingsOut(
         verify_threshold=ctx.get_verify_threshold(),
         margin_gate=ctx.get_margin_gate(),
+        enable_canonicalizer=ctx.get_enable_canonicalizer(),
+        canonicalizer_min_score=ctx.get_canonicalizer_min_score(),
+        canonicalizer_min_margin=ctx.get_canonicalizer_min_margin(),
+        backend_supports_prompt=ctx.active_backend_supports_prompt(),
         unknown_logging=ctx.get_unknown_logging(),
         unknown_ttl_hours=ctx.settings.unknown_ttl_hours,
         require_speaker_match=ctx.get_require_match(),
@@ -300,6 +318,12 @@ async def patch_settings(
         ctx.set_verify_threshold(body.verify_threshold)
     if body.margin_gate is not None:
         ctx.set_margin_gate(body.margin_gate)
+    if body.enable_canonicalizer is not None:
+        ctx.set_enable_canonicalizer(body.enable_canonicalizer)
+    if body.canonicalizer_min_score is not None:
+        ctx.set_canonicalizer_min_score(body.canonicalizer_min_score)
+    if body.canonicalizer_min_margin is not None:
+        ctx.set_canonicalizer_min_margin(body.canonicalizer_min_margin)
     if body.unknown_logging is not None:
         ctx.set_unknown_logging(body.unknown_logging)
     if body.require_speaker_match is not None:

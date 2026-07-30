@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 from types import SimpleNamespace
 
 from murdock.core.context import AppContext
@@ -88,6 +90,8 @@ def _ctx(tmp_path):
     return AppContext(
         settings=SimpleNamespace(
             enable_stt_vocabulary=True, stt_vocabulary="",
+            stt_backend="upstream", enable_stt_dictionary=False,
+            stt_dictionary="",
         ),
         db=db, embedder=None, vad=None, speakers=None, unknown=None,
         ha=None, mqtt=None, recognition=None,
@@ -181,3 +185,141 @@ def test_vocabulary_meta_reports_disabled_tier(tmp_path):
     assert meta.available is True
     assert meta.effective_enabled is False
     assert meta.effective_prompt == ""
+
+
+# ----------------------------------------------------------------------
+# Curated bias-prompt selection
+# ----------------------------------------------------------------------
+
+
+def test_selection_defaults_to_automatic(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    assert ctx.get_vocab_selection() is None
+    # Automatic = the first N by priority.
+    assert ctx.get_selected_ha_terms() == ctx.get_vocabulary_store().terms()
+
+
+def test_explicit_selection_wins(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    ctx.set_vocab_selection(["Bettlicht", "Obergeschoss"])
+    assert ctx.get_vocab_selection() == ["Bettlicht", "Obergeschoss"]
+    # Snapshot order is preserved, not the order they were picked in.
+    assert ctx.get_selected_ha_terms() == ["Bettlicht", "Obergeschoss"]
+    vocab = ctx.get_effective_vocabulary()
+    assert "Bettlicht" in vocab
+    assert "Bett-Lightstrip" not in vocab
+
+
+def test_empty_selection_sends_no_mirrored_terms(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    ctx.set_stt_vocabulary("Fehenlichter")
+    ctx.set_vocab_selection([])
+    assert ctx.get_selected_ha_terms() == []
+    assert ctx.get_effective_vocabulary() == "Fehenlichter"
+
+
+def test_selection_can_return_to_automatic(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    ctx.set_vocab_selection(["Bettlicht"])
+    ctx.set_vocab_selection(None)
+    assert ctx.get_vocab_selection() is None
+    assert len(ctx.get_selected_ha_terms()) > 1
+
+
+def test_selection_ignores_terms_that_vanished(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    ctx.set_vocab_selection(["Bettlicht", "Entity die es nicht mehr gibt"])
+    assert ctx.get_selected_ha_terms() == ["Bettlicht"]
+
+
+def test_backend_prompt_support_is_reported_honestly(tmp_path):
+    ctx = _ctx(tmp_path)
+    # The local upstream has no prompt field at all.
+    ctx.set_stt_backend("upstream")
+    assert ctx.active_backend_supports_prompt() is False
+    # Voxtral doesn't document one.
+    ctx.set_stt_backend("voxtral")
+    assert ctx.active_backend_supports_prompt() is False
+    # OpenAI-compatible does...
+    ctx.set_stt_backend("openai")
+    ctx.set_openai_base_url("https://api.openai.com")
+    assert ctx.active_backend_supports_prompt() is True
+    # ...except OpenRouter, whose request shape skips it.
+    ctx.set_openai_base_url("https://openrouter.ai")
+    assert ctx.active_backend_supports_prompt() is False
+
+
+# ----------------------------------------------------------------------
+# Canonicalizer wiring
+# ----------------------------------------------------------------------
+
+
+def test_canonicalizer_is_off_by_default(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    text, reps = ctx.canonicalize_transcript("mach die Dekenlampe an")
+    assert text == "mach die Dekenlampe an"
+    assert reps == []
+
+
+def test_canonicalizer_uses_the_full_uncapped_vocabulary(tmp_path):
+    ctx = _ctx(tmp_path)
+    ctx.set_enable_canonicalizer(True)
+    ctx.set_stt_vocabulary("Fehenlichter")
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    # Manual terms are candidates too.
+    terms = ctx.get_canonicalizer_terms()
+    assert "Fehenlichter" in terms
+    assert "Deckenlampe" in terms
+    text, reps = ctx.canonicalize_transcript("mach die Dekenlampe an")
+    assert text == "mach die Deckenlampe an"
+    assert reps[0].replacement == "Deckenlampe"
+
+
+def test_canonicalizer_hits_are_counted_and_promotable(tmp_path):
+    import asyncio
+
+    from murdock.api.routes_integration import (
+        PromoteHitIn,
+        get_canonicalizer_hits,
+        promote_canonicalizer_hit,
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.set_enable_canonicalizer(True)
+    ctx.get_vocabulary_store().save_snapshot(_SNAPSHOT)
+    for _ in range(3):
+        ctx.canonicalize_transcript("mach die Dekenlampe an")
+
+    out = asyncio.run(get_canonicalizer_hits(limit=10, ctx=ctx))
+    assert len(out.hits) == 1
+    hit = out.hits[0]
+    assert (hit.original, hit.replacement) == ("Dekenlampe", "Deckenlampe")
+    assert hit.count == 3
+
+    # Promoting writes an explicit rule, enables the tier and clears the tally.
+    after = asyncio.run(promote_canonicalizer_hit(
+        PromoteHitIn(original="Dekenlampe", replacement="Deckenlampe"), ctx
+    ))
+    assert after.hits == []
+    assert "Dekenlampe -> Deckenlampe" in ctx.get_stt_dictionary()
+    assert ctx.get_enable_stt_dictionary() is True
+
+
+def test_promote_rejects_empty_input(tmp_path):
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from murdock.api.routes_integration import PromoteHitIn, promote_canonicalizer_hit
+
+    ctx = _ctx(tmp_path)
+    with pytest.raises(HTTPException):
+        asyncio.run(promote_canonicalizer_hit(
+            PromoteHitIn(original="  ", replacement="x"), ctx
+        ))

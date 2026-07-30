@@ -1,0 +1,16 @@
+{
+  "entity": {
+    "sensor": {
+      "speaker": { "default": "mdi:account-voice" },
+      "last_recognition": { "default": "mdi:clock-check-outline" },
+      "vocabulary_version": { "default": "mdi:book-alphabet" },
+      "delivery_path": { "default": "mdi:transit-connection-variant" }
+    },
+    "binary_sensor": {
+      "connection": {
+        "default": "mdi:lan-disconnect",
+        "state": { "on": "mdi:lan-connect" }
+      }
+    }
+  }
+}

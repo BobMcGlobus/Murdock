@@ -95,21 +95,31 @@ def draw_mark(img: Image.Image, ox: float, oy: float, k: float,
         d.rounded_rectangle([x0, y0, x1, y1], radius=k * BAR_W / 2, fill=color)
 
 
-def make_icon(size: int = 256, ss: int = 4) -> Image.Image:
+def make_icon(size: int = 256, ss: int = 4, plate: bool = True) -> Image.Image:
+    """The square mark. ``plate=False`` drops the noir tile.
+
+    home-assistant/brands prefers transparency and trimmed edges, so the
+    brand assets are generated without the plate; the add-on icon keeps
+    it because Supervisor renders icons on its own light background.
+    """
     S = size * ss
     k = S / 256.0
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, S - 1, S - 1], radius=k * 56, fill=BG)
+    if plate:
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle([0, 0, S - 1, S - 1], radius=k * 56, fill=BG)
     draw_mark(img, 0, 0, k)
     return img.resize((size, size), Image.LANCZOS)
 
 
-def make_logo(w: int = 600, h: int = 240, ss: int = 3) -> Image.Image:
+def make_logo(
+    w: int = 600, h: int = 240, ss: int = 3, plate: bool = True
+) -> Image.Image:
     W, H = w * ss, h * ss
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=ss * 32, fill=BG)
+    if plate:
+        d.rounded_rectangle([0, 0, W - 1, H - 1], radius=ss * 32, fill=BG)
     # Mark on the left (no own plate), vertically centered on the head.
     k = H / 256.0 * 0.92
     draw_mark(img, ss * 24, (H - k * 256) / 2 + k * 6, k)
@@ -132,12 +142,36 @@ def make_logo(w: int = 600, h: int = 240, ss: int = 3) -> Image.Image:
     return img.resize((w, h), Image.LANCZOS)
 
 
+def make_brand_assets(root: Path) -> list[str]:
+    """Write home-assistant/brands assets for the custom integration.
+
+    Sizes are dictated by that repo: icons exactly 256/512 square, logos
+    at most 256/512 on the long edge. Transparent, no plate, so the mark
+    works on both light and dark backgrounds.
+    """
+    out = root / "brands" / "custom_integrations" / "murdock"
+    out.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, img in (
+        ("icon.png", make_icon(256, plate=False)),
+        ("icon@2x.png", make_icon(512, plate=False)),
+        # 600x240 is the add-on aspect (2.5:1) scaled into the cap.
+        ("logo.png", make_logo(256, 102, ss=6, plate=False)),
+        ("logo@2x.png", make_logo(512, 205, ss=3, plate=False)),
+    ):
+        img.save(out / name, optimize=True)
+        written.append(str((out / name).relative_to(root)).replace("\\", "/"))
+    return written
+
+
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
     make_icon(256).save(root / "icon.png")
     make_icon(64, ss=8).save(root / "murdock" / "ui" / "static" / "favicon.png")
     make_logo().save(root / "logo.png")
+    brands = make_brand_assets(root)
     print("wrote icon.png, logo.png, murdock/ui/static/favicon.png")
+    print("wrote " + ", ".join(brands))
 
 
 if __name__ == "__main__":
