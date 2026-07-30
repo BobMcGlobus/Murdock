@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Murdock",
-        "description": "Address of the Murdock proxy (add-on default: http://homeassistant.local:8099).",
+        "description": "Address of the Murdock proxy. The add-on serves it on port 8099 — publish that port under the add-on's Network options first.",
         "data": {
           "base_url": "Base URL",
           "token": "Token (optional)"

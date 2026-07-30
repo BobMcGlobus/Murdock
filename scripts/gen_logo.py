@@ -143,13 +143,20 @@ def make_logo(
 
 
 def make_brand_assets(root: Path) -> list[str]:
-    """Write home-assistant/brands assets for the custom integration.
+    """Write the integration's brand assets.
+
+    HACS looks for these inside the integration at ``brand/``, which is
+    what makes its brands check pass without a pull request against
+    home-assistant/brands. The same four files are exactly what that repo
+    wants under ``custom_integrations/murdock/`` should Murdock ever be
+    submitted there (which is what Home Assistant itself reads for the
+    icon on the integrations page).
 
     Sizes are dictated by that repo: icons exactly 256/512 square, logos
     at most 256/512 on the long edge. Transparent, no plate, so the mark
     works on both light and dark backgrounds.
     """
-    out = root / "brands" / "custom_integrations" / "murdock"
+    out = root / "custom_components" / "murdock" / "brand"
     out.mkdir(parents=True, exist_ok=True)
     written = []
     for name, img in (
