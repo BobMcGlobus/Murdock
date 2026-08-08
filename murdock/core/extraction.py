@@ -35,7 +35,7 @@ clean concatenation at the normal, more lenient threshold.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 _LOGGER = logging.getLogger("murdock.extraction")
@@ -62,6 +62,11 @@ class ExtractionResult:
     n_kept: int = 0
     target_speaker: Optional[str] = None
     dropped_seconds: float = 0.0
+    # Every enrolled speaker heard in the clip with their speaking time,
+    # longest first. The gate still follows the dominant one; this is for
+    # "who else was in the room" — the information was already computed to
+    # pick the dominant speaker and used to be thrown away.
+    speakers: list = field(default_factory=list)
 
 
 def extract_target_speaker(
@@ -154,6 +159,14 @@ def extract_target_speaker(
     target_sid = max(duration_by_speaker, key=lambda k: duration_by_speaker[k])
     target_name = name_by_speaker.get(target_sid)
 
+    roster = [
+        {"speaker": name_by_speaker.get(sid), "seconds": round(secs, 2)}
+        for sid, secs in sorted(
+            duration_by_speaker.items(), key=lambda kv: kv[1], reverse=True
+        )
+        if name_by_speaker.get(sid)
+    ]
+
     kept = [r for r in regions if r[3] == target_sid]
 
     # Every region already belongs to the target → extraction is a no-op.
@@ -164,6 +177,7 @@ def extract_target_speaker(
             n_regions=len(segments),
             n_kept=len(kept),
             target_speaker=target_name,
+            speakers=roster,
         )
 
     kept_audio = b"".join(audio_16k[sb:eb] for sb, eb, *_ in kept)
@@ -182,4 +196,5 @@ def extract_target_speaker(
         n_kept=len(kept),
         target_speaker=target_name,
         dropped_seconds=dropped_seconds,
+        speakers=roster,
     )

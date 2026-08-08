@@ -28,6 +28,9 @@ class SettingsOut(BaseModel):
     margin_gate: float = 0.0
     # Canonicalization: map misheard spans onto real entity names.
     enable_canonicalizer: bool = False
+    # Whisper detection (experimental).
+    enable_whisper_detection: bool = False
+    whisper_threshold: float = 0.62
     canonicalizer_min_score: float = 0.82
     canonicalizer_min_margin: float = 0.10
     # Whether the *active* primary backend will actually use the bias
@@ -123,6 +126,8 @@ class SettingsPatch(BaseModel):
     verify_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     margin_gate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     enable_canonicalizer: Optional[bool] = None
+    enable_whisper_detection: Optional[bool] = None
+    whisper_threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     canonicalizer_min_score: Optional[float] = Field(
         default=None, ge=0.5, le=1.0
     )
@@ -220,6 +225,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         verify_threshold=ctx.get_verify_threshold(),
         margin_gate=ctx.get_margin_gate(),
         enable_canonicalizer=ctx.get_enable_canonicalizer(),
+        enable_whisper_detection=ctx.get_enable_whisper_detection(),
+        whisper_threshold=ctx.get_whisper_threshold(),
         canonicalizer_min_score=ctx.get_canonicalizer_min_score(),
         canonicalizer_min_margin=ctx.get_canonicalizer_min_margin(),
         backend_supports_prompt=ctx.active_backend_supports_prompt(),
@@ -320,6 +327,10 @@ async def patch_settings(
         ctx.set_margin_gate(body.margin_gate)
     if body.enable_canonicalizer is not None:
         ctx.set_enable_canonicalizer(body.enable_canonicalizer)
+    if body.enable_whisper_detection is not None:
+        ctx.set_enable_whisper_detection(body.enable_whisper_detection)
+    if body.whisper_threshold is not None:
+        ctx.set_whisper_threshold(body.whisper_threshold)
     if body.canonicalizer_min_score is not None:
         ctx.set_canonicalizer_min_score(body.canonicalizer_min_score)
     if body.canonicalizer_min_margin is not None:

@@ -1416,6 +1416,13 @@ async function loadSettings() {
             updateSttFieldVisibility();
         }
         // Emotion detection (experimental)
+        const whisperForm = $("#whisper-form");
+        if (whisperForm && whisperForm.enable_whisper_detection) {
+            whisperForm.enable_whisper_detection.checked =
+                !!s.enable_whisper_detection;
+            whisperForm.whisper_threshold.value =
+                (s.whisper_threshold ?? 0.62).toFixed(2);
+        }
         const emotionForm = $("#emotion-form");
         if (emotionForm) {
             emotionForm.enable_emotion.checked = !!s.enable_emotion;
@@ -2698,6 +2705,9 @@ function renderRecognitionEvent(e) {
     const sat = e.satellite_id
         ? ` · <code>${escapeHtml(e.satellite_id)}</code>`
         : "";
+    const whisperChip = e.whisper
+        ? `<span class="badge whisper">${escapeHtml(t("rec.whisper"))}</span>`
+        : "";
     const emotionChip = e.emotion
         ? `<span class="badge emotion">${escapeHtml(e.emotion)}${
               e.emotion_confidence != null
@@ -2716,6 +2726,7 @@ function renderRecognitionEvent(e) {
             <div class="row">
                 <span class="${badgeCls}">${escapeHtml(meta.label)}</span>
                 <strong>${who}</strong>
+                ${whisperChip}
                 ${emotionChip}
                 <span class="meta">${ts} · ${e.duration_sec.toFixed(2)}s${sat}</span>
             </div>
@@ -3229,4 +3240,33 @@ if (document.querySelector(".settings-group")) {
         remembered = null;
     }
     showSettingsGroup(remembered || "recognition");
+}
+
+// ── Whisper detection (experimental) ───────────────────────────────
+const whisperFormEl = $("#whisper-form");
+if (whisperFormEl) {
+    whisperFormEl.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const fb = $("#whisper-feedback");
+        const body = {
+            enable_whisper_detection: form.enable_whisper_detection.checked,
+        };
+        if (form.whisper_threshold.value !== "") {
+            body.whisper_threshold = parseFloat(form.whisper_threshold.value);
+        }
+        try {
+            await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            fb.className = "feedback ok";
+            fb.textContent = t("whisper.saved");
+            setStatus(t("whisper.saved"), "ok");
+        } catch (err) {
+            fb.className = "feedback error";
+            fb.textContent = String(err);
+        }
+    });
 }

@@ -181,6 +181,12 @@ class MurdockHandler(AsyncEventHandler):
         # Canonicalizations applied to this transcript, for the log.
         self._canonicalizations: list = []
 
+        # Whisper detection result for this utterance (experimental).
+        self._whisper: bool = False
+
+        # Every enrolled speaker heard in this utterance (from extraction).
+        self._speakers: list = []
+
     @property
     def upstream_uri(self) -> str:
         """Always read the live value from context so the UI can update
@@ -347,6 +353,8 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_ms = None
         self._shadow_ms = None
         self._canonicalizations = []
+        self._whisper = False
+        self._speakers = []
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -605,6 +613,19 @@ class MurdockHandler(AsyncEventHandler):
                 )
                 return
 
+            # A whisper is far from every profile by construction — the
+            # embedding has no voicing to match against. Rejecting it here
+            # would silently kill exactly the utterances the whisper
+            # feature exists to notice, so check before dropping.
+            whisper_probe = self.context.detect_whisper(audio_16k)
+            if whisper_probe is not None and whisper_probe.is_whisper:
+                self._whisper = True
+                _LOGGER.info(
+                    "[%s] Early reject suppressed: utterance is whispered "
+                    "(score=%.2f)", sid, whisper_probe.score,
+                )
+                return
+
             bar = result.threshold + (
                 margin * _EARLY_REJECT_MEDIA_FACTOR if media_tighten > 0 else margin
             )
@@ -649,6 +670,8 @@ class MurdockHandler(AsyncEventHandler):
                 nearest_distance=result.distance,
                 margin=self._margin_of(result),
                 reason="early-reject",
+                whisper=self._whisper,
+                speakers=self._speakers or None,
             )
         except asyncio.CancelledError:
             return
@@ -690,6 +713,20 @@ class MurdockHandler(AsyncEventHandler):
         except Exception:
             _LOGGER.debug("[%s] Extraction failed; using full audio", sid, exc_info=True)
             return verify_audio
+
+        # Extraction already scored every speech region against the
+        # enrolled speakers to pick the dominant one, so "who else spoke"
+        # comes for free. The gate still follows the dominant speaker.
+        self._speakers = list(getattr(result, "speakers", []) or [])
+        if len(self._speakers) > 1:
+            _LOGGER.info(
+                "[%s] Multiple known voices: %s",
+                sid,
+                ", ".join(
+                    f"{e['speaker']} ({e['seconds']:.1f}s)"
+                    for e in self._speakers
+                ),
+            )
 
         if result.applied:
             _LOGGER.info(
@@ -1135,6 +1172,19 @@ class MurdockHandler(AsyncEventHandler):
         settings = self.context.settings
         speaker_count = len(self.context.speakers.list_speakers())
 
+        # Whisper detection runs BEFORE the gates on purpose: whispered
+        # speech is quiet and spectrally flat, which is exactly what the
+        # liveness heuristic rejects as playback. Without checking first,
+        # Murdock would discard the very utterances it should notice.
+        whisper_features = self.context.detect_whisper(audio_16k)
+        if whisper_features is not None and whisper_features.is_whisper:
+            self._whisper = True
+            _LOGGER.info(
+                "[%s] WHISPER detected (score=%.2f, voiced=%.2f) — skipping "
+                "the liveness gate for this utterance",
+                sid, whisper_features.score, whisper_features.voiced_ratio,
+            )
+
         # Gate 1: audio too short — passthrough.
         if duration < settings.min_verify_seconds:
             _LOGGER.info(
@@ -1189,9 +1239,10 @@ class MurdockHandler(AsyncEventHandler):
             )
             return
 
-        # Gate 2b: liveness / TV-noise rejection.
+        # Gate 2b: liveness / TV-noise rejection. Skipped for whispers —
+        # see above; the two look alike to a spectral heuristic.
         min_liveness = self.context.get_min_liveness_score()
-        if min_liveness > 0:
+        if min_liveness > 0 and not self._whisper:
             try:
                 liveness = await asyncio.to_thread(analyze_liveness, audio_16k)
                 _LOGGER.debug(
@@ -1383,6 +1434,8 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 role=spk.role if spk else None,
                 ambiguities=self._transcript_hints or None,
+                whisper=self._whisper,
+                speakers=self._speakers or None,
             )
             await self._send_transcript_to_satellite(
                 self._augment_transcript(
@@ -1482,6 +1535,8 @@ class MurdockHandler(AsyncEventHandler):
             uncertain=uncertain,
             reason=sentinel,
             ambiguities=self._transcript_hints or None,
+            whisper=self._whisper,
+            speakers=self._speakers or None,
         )
 
         if not require_match:
@@ -1792,6 +1847,8 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 margin=margin,
                 transcript_ms=self._transcript_ms,
+                whisper=self._whisper,
+                speakers=self._speakers or None,
             )
         except Exception:
             _LOGGER.debug(

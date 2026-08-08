@@ -68,6 +68,8 @@ class RecognitionEvent:
     # A/B comparison covers speed and not just wording.
     transcript_ms: Optional[float] = None
     shadow_ms: Optional[float] = None
+    # Whether the utterance was whispered (experimental detector).
+    whisper: bool = False
 
 
 class RecognitionLog:
@@ -104,6 +106,7 @@ class RecognitionLog:
         weight: Optional[float] = None,
         margin: Optional[float] = None,
         transcript_ms: Optional[float] = None,
+        whisper: bool = False,
     ) -> int:
         """Insert one event row and return its id."""
         now = time.time()
@@ -119,8 +122,8 @@ class RecognitionLog:
                     "created_at, session_id, satellite_id, duration_sec, "
                     "outcome, matched_speaker, distance, threshold, "
                     "verify_ms, transcript, emotion, emotion_confidence, "
-                    "weight, margin, transcript_ms) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "weight, margin, transcript_ms, whisper) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -137,6 +140,7 @@ class RecognitionLog:
                         weight,
                         margin,
                         transcript_ms,
+                        1 if whisper else 0,
                     ),
                 )
                 row_id = int(cur.lastrowid)
@@ -190,7 +194,7 @@ class RecognitionLog:
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
                 "transcript, emotion, emotion_confidence, "
                 "shadow_transcript, shadow_engine, weight, margin, "
-                "transcript_ms, shadow_ms "
+                "transcript_ms, shadow_ms, whisper "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -216,6 +220,7 @@ class RecognitionLog:
                 margin=row["margin"] if "margin" in row.keys() else None,
                 transcript_ms=row["transcript_ms"] if "transcript_ms" in row.keys() else None,
                 shadow_ms=row["shadow_ms"] if "shadow_ms" in row.keys() else None,
+                whisper=bool(row["whisper"]) if "whisper" in row.keys() and row["whisper"] else False,
             )
             for row in rows
         ]

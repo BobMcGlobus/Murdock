@@ -1,7 +1,16 @@
 """Emotion classification via onnxruntime.
 
-Loads an emotion-recognition ONNX model (emotion2vec+ base by default) and
-turns mono 16 kHz audio into one of nine emotion labels plus a confidence.
+Loads emotion2vec+ base and turns mono 16 kHz audio into one of nine
+emotion labels plus a confidence.
+
+The published ONNX export is the **feature extractor only**: it emits
+frame-level features of shape ``[1, frames, 768]``. The classification
+head is a single linear layer shipped alongside as a small binary
+(``emotion_head.bin``: two int32 — classes, dim — then the weight matrix
+and bias as float32). Utterance-level inference is therefore mean-pooling
+over frames followed by that linear layer, which is exactly what the
+upstream implementation does. Both files are needed; with only the ONNX
+there is no classifier at all.
 
 Design goals:
 
@@ -15,6 +24,10 @@ Design goals:
 - **Post-hoc label override.** The 9-class label order of the standard
   emotion2vec+ export is hard-coded, but callers can pass a custom list
   for experimental models.
+- **No silent guessing.** If the model's output doesn't match the labels
+  and no head can turn it into class scores, classification fails rather
+  than inventing label names — a confidently wrong emotion is worse than
+  an absent one.
 
 The standard emotion2vec+ class order (matching the FunASR/ModelScope
 checkpoints) is::
@@ -97,10 +110,17 @@ class EmotionClassifier:
         self,
         model_path: Path,
         labels: Optional[List[str]] = None,
+        head_path: Optional[Path] = None,
         sample_rate: int = _SAMPLE_RATE,
         min_duration_sec: float = _MIN_DURATION_SEC,
     ) -> None:
         self.model_path = Path(model_path)
+        # The classification head lives next to the ONNX; without it the
+        # export is a feature extractor and cannot name an emotion.
+        self.head_path = (
+            Path(head_path) if head_path
+            else self.model_path.with_name("emotion_head.bin")
+        )
         self.sample_rate = sample_rate
         self.min_duration_sec = float(min_duration_sec)
         self.labels: List[str] = list(labels) if labels else list(DEFAULT_LABELS)
@@ -108,6 +128,7 @@ class EmotionClassifier:
         self._input_names: List[str] = []
         self._output_name: Optional[str] = None
         self._wants_lengths: bool = False
+        self._head: Optional[Tuple[np.ndarray, np.ndarray]] = None
         self._lock = Lock()
 
     # ------------------------------------------------------------------
@@ -115,8 +136,41 @@ class EmotionClassifier:
     # ------------------------------------------------------------------
 
     def is_available(self) -> bool:
-        """Whether the model file is on disk. Does not actually load it."""
-        return self.model_path.exists()
+        """Whether a *usable* model is on disk. Does not load it.
+
+        Both parts are required: the ONNX alone only yields frame
+        features, which cannot be turned into an emotion.
+        """
+        return self.model_path.exists() and self.head_path.exists()
+
+    def _load_head(self) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+        """Read the linear head: int32 classes, int32 dim, W, bias."""
+        if self._head is not None:
+            return self._head
+        if not self.head_path.exists():
+            return None
+        raw = self.head_path.read_bytes()
+        if len(raw) < 8:
+            _LOGGER.warning("Emotion head %s is truncated", self.head_path)
+            return None
+        n_classes, dim = np.frombuffer(raw[:8], dtype="<i4")
+        expected = 8 + int(n_classes) * int(dim) * 4 + int(n_classes) * 4
+        if len(raw) != expected:
+            _LOGGER.warning(
+                "Emotion head %s has %d bytes, expected %d for %dx%d — ignoring",
+                self.head_path, len(raw), expected, n_classes, dim,
+            )
+            return None
+        end_w = 8 + int(n_classes) * int(dim) * 4
+        weight = np.frombuffer(raw[8:end_w], dtype="<f4").reshape(
+            int(n_classes), int(dim)
+        )
+        bias = np.frombuffer(raw[end_w:], dtype="<f4")
+        self._head = (weight, bias)
+        _LOGGER.info(
+            "Loaded emotion head: %d classes x %d dims", n_classes, dim
+        )
+        return self._head
 
     def _ensure_session(self) -> None:
         if self._session is not None:
@@ -187,25 +241,34 @@ class EmotionClassifier:
                 )
             outputs = self._session.run([self._output_name], feeds)
 
-        logits = np.asarray(outputs[0]).reshape(-1).astype(np.float32)
-        probs = _softmax(logits)
+        raw = np.asarray(outputs[0])
 
-        if probs.size != len(self.labels):
-            # Don't crash — pad or truncate the label list so we still
-            # return something useful. Log loudly so users notice the
-            # mismatch in their logs.
-            _LOGGER.warning(
-                "Emotion model emitted %d scores but %d labels are configured; "
-                "output will be truncated/padded.",
-                probs.size, len(self.labels),
-            )
-            labels = list(self.labels)
-            if probs.size > len(labels):
-                labels.extend(f"class_{i}" for i in range(len(labels), probs.size))
-            else:
-                probs = np.pad(probs, (0, len(labels) - probs.size))
+        # Frame-level features [1, frames, dim] → mean-pool → linear head.
+        # This is how emotion2vec+ does utterance-level classification.
+        if raw.ndim == 3 or (raw.ndim == 2 and raw.shape[-1] not in (len(self.labels),)):
+            head = self._load_head()
+            if head is None:
+                raise RuntimeError(
+                    f"Emotion model returned features of shape {raw.shape}, "
+                    f"not {len(self.labels)} class scores, and no usable head "
+                    f"was found at {self.head_path}. Both files are required."
+                )
+            weight, bias = head
+            pooled = raw.reshape(-1, weight.shape[1]).mean(axis=0)
+            logits = (weight @ pooled + bias).astype(np.float32)
         else:
-            labels = self.labels
+            logits = raw.reshape(-1).astype(np.float32)
+
+        probs = _softmax(logits)
+        if probs.size != len(self.labels):
+            # Never invent label names: a confidently wrong emotion is
+            # worse than none at all.
+            raise RuntimeError(
+                f"Emotion model produced {probs.size} scores but "
+                f"{len(self.labels)} labels are configured — refusing to "
+                f"guess. Check that the model and label list match."
+            )
+        labels = self.labels
 
         scores = {label: float(score) for label, score in zip(labels, probs)}
         best_idx = int(np.argmax(probs))

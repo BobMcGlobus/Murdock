@@ -231,6 +231,40 @@
                 </p>
             </div>
             <div class="card">
+                <h2 data-i18n="whisper.title">Whisper detection (experimental)</h2>
+                <p class="meta" data-i18n="whisper.description">
+                    Flags utterances that were whispered, so your conversation
+                    agent can answer quietly. Whispering has no vocal-fold
+                    vibration, which is a far clearer signal than most voice
+                    properties — but it also wrecks speaker recognition, so a
+                    whispered command will usually come back as “unknown”.
+                    That is deliberate: treating a whisper as proof of identity
+                    would turn this into a way past the gate.
+                </p>
+                <form id="whisper-form">
+                    <label class="switch">
+                        <input type="checkbox" name="enable_whisper_detection">
+                        <span data-i18n="whisper.enable">Detect whispered speech</span>
+                    </label>
+                    <label>
+                        <span data-i18n="whisper.threshold">Detection threshold</span>
+                        <input type="number" step="0.01" min="0" max="1" name="whisper_threshold">
+                        <small class="meta" data-i18n="whisper.threshold_hint">Higher = stricter. Default 0.62. The recognition log marks whispered utterances, so you can tune this against real recordings.</small>
+                    </label>
+                    <p class="meta" data-i18n="whisper.gate_hint">
+                        While this is on, the TV/noise liveness gate and early
+                        reject are skipped for utterances detected as whispered
+                        — otherwise they would throw them away, because a
+                        whisper looks quiet and flat to those heuristics.
+                    </p>
+                    <div class="row">
+                        <button type="submit" data-i18n="generic.save">Save</button>
+                    </div>
+                </form>
+                <div id="whisper-feedback" class="feedback"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
                 <p class="meta" data-i18n="emotion.description">
                     Classifies the emotional tone of verified speech (happy,

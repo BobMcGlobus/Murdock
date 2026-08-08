@@ -858,3 +858,13 @@ button.chip:hover {
 .meta.warn {
     color: #fbbf24;
 }
+
+/* ── Whisper badge ──────────────────────────────────────── */
+
+.badge.whisper {
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    font-size: 0.73rem;
+    font-style: italic;
+}

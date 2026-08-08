@@ -608,6 +608,8 @@ class MQTTClient:
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
+        whisper: bool = False,
+        speakers: Optional[list] = None,
     ) -> None:
         """Push a recognition result to all state topics."""
         if not self._connected or self._client is None:
@@ -667,6 +669,8 @@ class MQTTClient:
             emotion=emotion,
             emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
+            whisper=whisper,
+            speakers=speakers,
         )
 
         await self._publish_state(

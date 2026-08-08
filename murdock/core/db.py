@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS recognition_events (
     weight REAL,
     margin REAL,
     transcript_ms REAL,
-    shadow_ms REAL
+    shadow_ms REAL,
+    whisper INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_unknown_created ON unknown_samples(created_at);
@@ -144,6 +145,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE recognition_events ADD COLUMN transcript_ms REAL")
         conn.execute("ALTER TABLE recognition_events ADD COLUMN shadow_ms REAL")
         _LOGGER.info("Migration: recognition_events STT timings added")
+    if "whisper" not in event_cols:
+        conn.execute("ALTER TABLE recognition_events ADD COLUMN whisper INTEGER")
+        _LOGGER.info("Migration: recognition_events.whisper added")
 
     conn.commit()
 

@@ -876,6 +876,8 @@ class AppContext:
         emotion: Optional[str] = None,
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
+        whisper: bool = False,
+        speakers: Optional[list] = None,
     ) -> None:
         """Fire-and-forget a recognition result to every configured sink.
 
@@ -902,6 +904,8 @@ class AppContext:
             emotion=emotion,
             emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
+            whisper=whisper,
+            speakers=speakers,
         )
         if self.mqtt.connected:
             self.mqtt.publish_async(self.mqtt.publish_recognition(**kwargs))
@@ -1212,6 +1216,50 @@ class AppContext:
     # ------------------------------------------------------------------
     # Canonicalization: map the transcript onto real entity names
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Whisper detection (experimental)
+    # ------------------------------------------------------------------
+
+    def get_enable_whisper_detection(self) -> bool:
+        override = get_setting(self.db, "enable_whisper_detection")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return False
+
+    def set_enable_whisper_detection(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "enable_whisper_detection", "true" if enabled else "false"
+        )
+
+    def get_whisper_threshold(self) -> float:
+        from murdock.core.whisper_detect import DEFAULT_THRESHOLD
+
+        override = get_setting(self.db, "whisper_threshold")
+        if override:
+            try:
+                return float(override)
+            except ValueError:
+                pass
+        return DEFAULT_THRESHOLD
+
+    def set_whisper_threshold(self, value: float) -> None:
+        set_setting(self.db, "whisper_threshold", f"{float(value):.4f}")
+
+    def detect_whisper(self, audio_16k: bytes):
+        """Whisper features for an utterance, or None when disabled.
+
+        Never raises: a detector hiccup must not cost the utterance.
+        """
+        if not audio_16k or not self.get_enable_whisper_detection():
+            return None
+        try:
+            from murdock.core.whisper_detect import analyze_pcm
+
+            return analyze_pcm(audio_16k, self.get_whisper_threshold())
+        except Exception:
+            _LOGGER.debug("Whisper detection failed", exc_info=True)
+            return None
 
     def get_enable_canonicalizer(self) -> bool:
         override = get_setting(self.db, "enable_canonicalizer")

@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+**Whisper detection (experimental).** Whispering has no vocal-fold
+vibration, so there is no fundamental frequency and no harmonic
+structure — a far cleaner signal than most voice properties. The detector
+scores harmonicity, zero-crossing rate and spectral tilt; loudness only
+refines, never decides, so a distant quiet speaker is not mistaken for a
+whisper.
+
+- It runs **before** the gates on purpose: whispered speech is quiet and
+  spectrally flat, exactly what the TV/playback liveness heuristic and
+  early reject throw away. Both are skipped for a detected whisper —
+  otherwise Murdock would discard precisely the utterances the feature
+  exists to notice.
+- The flag travels in the recognition event (`whisper: true`) and is
+  marked in the recognition log, so the threshold can be tuned against
+  real recordings.
+- **Never used to relax verification.** Whispering does wreck speaker
+  embeddings, so a whispered command usually comes back as "unknown" —
+  that is deliberate. Treating a whisper as proof of identity would turn
+  the feature into a way past the gate.
+
+**Emotion detection now actually works.** It was announced but shipped
+without a model, and — worse — the classifier papered over the mismatch
+by inventing label names like `class_44737`. Both are fixed:
+
+- emotion2vec+ base publishes its ONNX as a **feature extractor**
+  (frame-level 768-dim output); the 9-class head ships separately as a
+  small binary. The classifier now mean-pools the frames and applies that
+  head, which is what upstream does.
+- A shape mismatch with no usable head raises instead of guessing. A
+  confidently wrong emotion is worse than an absent one.
+- `DOWNLOAD_EMOTION_MODEL=1 scripts/download_models.sh` fetches both
+  files (~356 MB, opt-in, never part of the required set). The head is
+  validated by exact size, and the ONNX is deleted if the head is missing
+  — the extractor alone cannot classify anything.
+
+**Multiple speakers per utterance.** Extraction already scored every
+speech region against the enrolled speakers to pick the dominant one, and
+threw the rest away. The full roster (name + speaking seconds, longest
+first) now travels in the event as `speakers` whenever more than one
+known voice was heard. The gate still follows the dominant speaker.
+
 ## 0.8.3
 
 **Automatic name correction** — the feature the vocabulary should have been

@@ -39,6 +39,7 @@ class RecognitionEventOut(BaseModel):
     shadow_ms: Optional[float] = None
     weight: Optional[float] = None
     margin: Optional[float] = None
+    whisper: bool = False
 
 
 class RecognitionListOut(BaseModel):
@@ -93,6 +94,7 @@ async def list_events(
                 shadow_ms=e.shadow_ms,
                 weight=e.weight,
                 margin=e.margin,
+                whisper=e.whisper,
             )
             for e in events
         ]

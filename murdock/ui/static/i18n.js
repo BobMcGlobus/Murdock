@@ -451,6 +451,14 @@ const I18N = (() => {
             "stt.hint_upstream": "Wyoming proxy active — audio is forwarded to the upstream STT service.",
 
             // -- Emotion detection --
+            "whisper.saved": "Whisper settings saved",
+            "whisper.title": "Whisper detection (experimental)",
+            "whisper.description": "Flags utterances that were whispered, so your conversation agent can answer quietly. Whispering has no vocal-fold vibration, which is a far clearer signal than most voice properties — but it also wrecks speaker recognition, so a whispered command will usually come back as “unknown”. That is deliberate: treating a whisper as proof of identity would turn this into a way past the gate.",
+            "whisper.enable": "Detect whispered speech",
+            "whisper.threshold": "Detection threshold",
+            "whisper.threshold_hint": "Higher = stricter. Default 0.62. The recognition log marks whispered utterances, so you can tune this against real recordings.",
+            "whisper.gate_hint": "While this is on, the TV/noise liveness gate and early reject are skipped for utterances detected as whispered — otherwise they would throw them away, because a whisper looks quiet and flat to those heuristics.",
+            "rec.whisper": "whispered",
             "emotion.title": "Emotion detection (experimental)",
             "emotion.description": "Classifies the emotional tone of verified speech (happy, sad, angry, …) and pushes it to Home Assistant. This is plumbing only — no compatible ONNX model ships with Murdock yet. The toggle can be pre-flipped safely.",
             "emotion.enable": "Enable emotion detection",
@@ -985,6 +993,14 @@ const I18N = (() => {
             "stt.hint_upstream": "Wyoming-Proxy aktiv — Audio wird an den Upstream-STT-Dienst weitergeleitet.",
 
             // -- Emotionserkennung --
+            "whisper.saved": "Flüster-Einstellungen gespeichert",
+            "whisper.title": "Flüstererkennung (experimentell)",
+            "whisper.description": "Markiert geflüsterte Äußerungen, damit dein Konversationsagent leise antworten kann. Beim Flüstern schwingen die Stimmlippen nicht — ein viel klareres Signal als die meisten Stimmeigenschaften. Es zerlegt allerdings auch die Sprechererkennung, ein geflüsterter Befehl kommt also meist als „unbekannt“ zurück. Das ist Absicht: Flüstern als Identitätsnachweis zu werten, würde daraus einen Weg am Gate vorbei machen.",
+            "whisper.enable": "Geflüsterte Sprache erkennen",
+            "whisper.threshold": "Erkennungsschwelle",
+            "whisper.threshold_hint": "Höher = strenger. Standard 0,62. Das Erkennungsprotokoll markiert geflüsterte Äußerungen, damit du gegen echte Aufnahmen justieren kannst.",
+            "whisper.gate_hint": "Solange das an ist, werden das TV-/Rausch-Gate und die Früh-Ablehnung für erkannte Flüster-Äußerungen übersprungen — sonst würden sie sie verwerfen, weil Flüstern für diese Heuristiken leise und flach aussieht.",
+            "rec.whisper": "geflüstert",
             "emotion.title": "Emotionserkennung (experimentell)",
             "emotion.description": "Klassifiziert die Stimmungslage erkannter Sprache (glücklich, traurig, wütend, …) und schiebt sie an Home Assistant. Nur Infrastruktur — bisher liefert Murdock kein passendes ONNX-Modell mit. Der Schalter kann gefahrlos im Voraus aktiviert werden.",
             "emotion.enable": "Emotionserkennung aktivieren",
