@@ -107,6 +107,19 @@
             </div>
 
             <div class="card">
+                <div class="row">
+                    <h2 data-i18n="coach.title">Profile health</h2>
+                    <button type="button" id="coach-refresh-btn" class="secondary small" data-i18n="vocab.refresh">Refresh</button>
+                </div>
+                <p class="meta" data-i18n="coach.description">
+                    What would concretely make recognition better, derived from
+                    your enrollments and the recognition log. No findings means
+                    every profile looks healthy.
+                </p>
+                <div id="coach-list" class="list"></div>
+            </div>
+
+            <div class="card">
                 <h2 data-i18n="map.title">Voice map (embedding space)</h2>
                 <p class="meta" data-i18n="map.description">
                     2-D projection (PCA) of every sample embedding: one color

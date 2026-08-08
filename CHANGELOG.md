@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.8.4
+
+**Profile health.** The Speakers tab now says what would concretely make
+recognition better, instead of leaving you to interpret quality scores:
+too few samples, poor recording quality, a satellite the speaker uses
+often but has no samples from (so no per-satellite profile can be built),
+matches passing only just, or a profile drifting worse over time. Every
+finding carries the numbers behind it. An empty panel is the normal
+state — advice that always has something to say gets ignored.
+
 
 **Whisper detection (experimental).** Whispering has no vocal-fold
 vibration, so there is no fundamental frequency and no harmonic

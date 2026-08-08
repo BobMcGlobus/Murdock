@@ -443,3 +443,66 @@ async def debug_vad(
             "segments": result.segments,
         },
     }
+
+
+# ----------------------------------------------------------------------
+# Enrollment coach: what would make recognition better, concretely
+# ----------------------------------------------------------------------
+
+
+class CoachFindingOut(BaseModel):
+    speaker: str
+    code: str
+    severity: str
+    message: str
+    detail: dict = {}
+
+
+class CoachOut(BaseModel):
+    findings: List[CoachFindingOut] = []
+    speakers_checked: int = 0
+
+
+@router.get("/coach", response_model=CoachOut)
+async def enrollment_coach(ctx: AppContext = Depends(get_context)) -> CoachOut:
+    """Actionable advice per speaker, derived from data already on disk.
+
+    Silence means every profile looks healthy — the panel is meant to be
+    empty most of the time.
+    """
+    from murdock.core.enrollment_coach import analyse
+
+    speakers = ctx.speakers.list_speakers()
+    samples_by_speaker = {}
+    for sp in speakers:
+        try:
+            samples_by_speaker[sp.id] = ctx.speakers.list_samples(sp.id)
+        except Exception:
+            samples_by_speaker[sp.id] = []
+
+    # Matches per speaker, newest first — the log is already ordered.
+    events_by_speaker: dict = {}
+    try:
+        for ev in ctx.recognition.list_events(limit=1000, outcome="match"):
+            if not ev.matched_speaker:
+                continue
+            events_by_speaker.setdefault(ev.matched_speaker, []).append(
+                {
+                    "distance": ev.distance,
+                    "satellite_id": ev.satellite_id,
+                    "created_at": ev.created_at,
+                }
+            )
+    except Exception:
+        _LOGGER.debug("Could not read the recognition log", exc_info=True)
+
+    findings = analyse(
+        speakers=[{"id": sp.id, "name": sp.name} for sp in speakers],
+        samples_by_speaker=samples_by_speaker,
+        events_by_speaker=events_by_speaker,
+        threshold=ctx.get_verify_threshold(),
+    )
+    return CoachOut(
+        findings=[CoachFindingOut(**f.as_dict()) for f in findings],
+        speakers_checked=len(speakers),
+    )

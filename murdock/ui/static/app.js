@@ -74,7 +74,7 @@ $$(".tab-btn").forEach((btn) => {
         $$(".tab").forEach((t) => t.classList.remove("active"));
         btn.classList.add("active");
         $("#tab-" + btn.dataset.tab).classList.add("active");
-        if (btn.dataset.tab === "speakers") loadSpeakers();
+        if (btn.dataset.tab === "speakers") { loadSpeakers(); loadCoach(); }
         if (btn.dataset.tab === "verify") loadRoles();
         if (btn.dataset.tab === "unknown") loadUnknown();
         if (btn.dataset.tab === "settings") loadSettings();
@@ -3270,3 +3270,39 @@ if (whisperFormEl) {
         }
     });
 }
+
+// ── Enrollment coach ───────────────────────────────────────────────
+async function loadCoach() {
+    const list = $("#coach-list");
+    if (!list) return;
+    let data;
+    try {
+        data = await api("/api/speakers/coach");
+    } catch (err) {
+        list.innerHTML = "";
+        return;
+    }
+    const findings = data.findings || [];
+    if (!findings.length) {
+        list.innerHTML = `<p class="meta">${escapeHtml(
+            data.speakers_checked
+                ? t("coach.all_good", { n: data.speakers_checked })
+                : t("coach.no_speakers")
+        )}</p>`;
+        return;
+    }
+    list.innerHTML = findings
+        .map((f) => {
+            const cls = f.severity === "warn" ? "badge warn" : "badge";
+            const label = f.severity === "warn"
+                ? t("coach.warn") : t("coach.info");
+            return `<div class="list-item"><div class="row">
+                <span class="${cls}">${escapeHtml(label)}</span>
+                <strong>${escapeHtml(f.speaker)}</strong>
+            </div><div class="meta">${escapeHtml(f.message)}</div></div>`;
+        })
+        .join("");
+}
+
+const coachRefreshBtn = $("#coach-refresh-btn");
+if (coachRefreshBtn) coachRefreshBtn.addEventListener("click", loadCoach);
