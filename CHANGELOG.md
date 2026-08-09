@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.6
 
 **Whispering now leaves Murdock.** The detector has been reporting a
 score since 0.8.5, but nothing outside the web UI could see it, and
