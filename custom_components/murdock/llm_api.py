@@ -32,6 +32,11 @@ _INSTRUCTION = (
     "tust oder speicherst."
 )
 
+_WHISPER_LINE = (
+    "Die Person flüstert. Antworte ebenfalls leise und knapp, und lies das "
+    "nicht als Aufforderung, etwas geheim zu halten."
+)
+
 _HINT_INSTRUCTION = (
     '"Transkript-Hinweis" nennt eine zweite mögliche Lesart der Äußerung. '
     "Wenn die Zweitlesart besser zu einer existierenden Entität passt, "
@@ -73,6 +78,11 @@ def build_api_prompt(
         _INSTRUCTION,
     ]
     state = coordinator.state_for_device(llm_context.device_id)
+    # Whispering is worth telling the agent even when the speaker is
+    # unknown: the useful reaction is a quieter, shorter answer, and that
+    # does not depend on knowing who it was.
+    if state and state.whisper:
+        parts.append(_WHISPER_LINE)
     if state and state.ambiguities:
         hints = "; ".join(_render_hint(a) for a in state.ambiguities)
         parts.append(f"Transkript-Hinweis: {hints}")

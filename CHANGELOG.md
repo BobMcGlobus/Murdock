@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+**Whispering now leaves Murdock.** The detector has been reporting a
+score since 0.8.5, but nothing outside the web UI could see it, and
+assigning a whispered clip to a speaker filed it as normal speech —
+quietly degrading that speaker's ordinary voiceprint.
+
+- **Assignment respects the speaking style.** A clip assigned from
+  *Unknown* or the recognition log is filed under the style it was
+  *spoken* in, decided from the clip's own whisper score. A whispered
+  clip lands in the whisper profile and leaves the normal voiceprint
+  alone. The dialog can still override it explicitly.
+- **The samples list badges whispered samples** with `geflüstert`, so a
+  whisper profile can be curated without playing every clip. The samples
+  API had been dropping the style column outright; it is now part of the
+  response.
+- **MQTT gains `binary_sensor.murdock_whispering` and
+  `sensor.murdock_whisper_score`**, both auto-discovered under the
+  existing Murdock device.
+- **The HA integration (0.3.0) gains a per-satellite whisper sensor**,
+  whisper attributes on the speaker sensor, and a prompt line telling
+  the conversation agent to answer quietly — and explicitly not to read
+  whispering as an instruction to keep something secret.
+
+Whispering is reported even when the speaker is `unbekannt`: answering
+more quietly does not depend on knowing who asked.
+
 ## 0.8.5
 
 **Fixes a regression in 0.8.4 that emptied the recognition log.** A

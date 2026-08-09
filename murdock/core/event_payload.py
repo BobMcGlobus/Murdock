@@ -40,6 +40,7 @@ def build_recognition_payload(
     emotion_confidence: Optional[float] = None,
     ambiguities: Optional[List[Dict[str, str]]] = None,
     whisper: bool = False,
+    whisper_score: Optional[float] = None,
     speakers: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build the event payload dict.
@@ -82,6 +83,10 @@ def build_recognition_payload(
         payload["ambiguities"] = ambiguities
     if whisper:
         payload["whisper"] = True
+    # Always send the score when it exists, even below the bar — a
+    # consumer may want its own threshold.
+    if whisper_score is not None:
+        payload["whisper_score"] = round(whisper_score, 4)
     # More than one enrolled voice in the clip — the gate followed the
     # dominant one, but "who else was there" is useful on its own.
     if speakers and len(speakers) > 1:

@@ -40,6 +40,33 @@ class UnknownOut(BaseModel):
 class AssignBody(BaseModel):
     speaker_name: str
     create_if_missing: bool = True
+    # "auto" files the sample under the style it was spoken in, decided by
+    # its own whisper score. "normal"/"whisper" force it.
+    style: str = "auto"
+
+
+def _resolve_style(ctx, sample_id: int, requested: str) -> str:
+    """Decide which voiceprint a postbox sample belongs to.
+
+    The recognition run already measured how whispered the audio was, so
+    "auto" reuses that verdict instead of asking the user to remember.
+    """
+    from murdock.core.speaker_store import STYLE_NORMAL, STYLE_WHISPER
+
+    requested = (requested or "auto").lower()
+    if requested in (STYLE_NORMAL, STYLE_WHISPER):
+        return requested
+    meta = ctx.unknown.get_sample(sample_id) or {}
+    score = meta.get("whisper_score")
+    if score is None:
+        return STYLE_NORMAL
+    try:
+        threshold = ctx.get_whisper_threshold()
+    except Exception:
+        from murdock.core.whisper_detect import DEFAULT_THRESHOLD
+
+        threshold = DEFAULT_THRESHOLD
+    return STYLE_WHISPER if float(score) >= threshold else STYLE_NORMAL
 
 
 @router.get("", response_model=List[UnknownOut])
@@ -113,6 +140,7 @@ async def assign_unknown(
             source="unknown",
             filename=f"unknown-{sample_id}.wav",
             skip_vad=True,  # user explicitly approved this sample
+            style=_resolve_style(ctx, sample_id, body.style),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -154,6 +182,8 @@ class BulkAssignBody(BaseModel):
     speaker_name: str
     create_if_missing: bool = True
     sample_ids: List[int]
+    # Resolved per sample, so a mixed batch files each clip correctly.
+    style: str = "auto"
 
 
 class BulkAssignResult(BaseModel):
@@ -261,6 +291,7 @@ async def bulk_assign_unknown(
                 source="unknown",
                 filename=f"unknown-{sid}.wav",
                 skip_vad=True,  # user explicitly clustered these together
+                style=_resolve_style(ctx, sid, getattr(body, "style", "auto")),
             )
             ctx.unknown.tag(sid, f"assigned:{name}")
             assigned += 1

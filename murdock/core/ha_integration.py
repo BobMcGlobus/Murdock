@@ -138,6 +138,7 @@ class HomeAssistantClient:
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
+        whisper_score: Optional[float] = None,
         speakers: Optional[list] = None,
     ) -> None:
         if not self.configured:
@@ -162,7 +163,8 @@ class HomeAssistantClient:
                 emotion_confidence=emotion_confidence,
                 ambiguities=ambiguities,
                 whisper=whisper,
-            speakers=speakers,
+                whisper_score=whisper_score,
+                speakers=speakers,
             )
             response = await client.post(
                 "/api/events/speaker_recognition_detected",
@@ -231,6 +233,7 @@ class HomeAssistantClient:
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
+        whisper_score: Optional[float] = None,
         speakers: Optional[list] = None,
     ) -> None:
         """Push all recognition data to HA in one go.
@@ -275,6 +278,7 @@ class HomeAssistantClient:
             emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
             whisper=whisper,
+            whisper_score=whisper_score,
             speakers=speakers,
         )
 

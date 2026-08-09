@@ -877,6 +877,7 @@ class AppContext:
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
+        whisper_score: Optional[float] = None,
         speakers: Optional[list] = None,
     ) -> None:
         """Fire-and-forget a recognition result to every configured sink.
@@ -905,6 +906,7 @@ class AppContext:
             emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
             whisper=whisper,
+            whisper_score=whisper_score,
             speakers=speakers,
         )
         if self.mqtt.connected:

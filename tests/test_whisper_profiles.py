@@ -178,3 +178,109 @@ def test_deleting_whisper_samples_drops_the_profile(tmp_path):
     whispered[1] = 1.0
     assert store.verify_embedding(whispered, 0.38, whisper=True).is_match is False
     assert store.whisper_profile_counts().get(speaker.id, 0) == 0
+
+
+# ----------------------------------------------------------------------
+# Assigning a postbox sample must keep the style it was spoken in
+# ----------------------------------------------------------------------
+
+
+def test_assigned_whisper_sample_lands_in_the_whisper_profile(tmp_path):
+    """A whispered clip assigned from the log must not pollute the
+    normal voiceprint — that is the whole point of styles."""
+    from types import SimpleNamespace
+
+    from murdock.api.routes_unknown import _resolve_style
+
+    ctx = SimpleNamespace(
+        unknown=SimpleNamespace(
+            get_sample=lambda sid: {"whisper_score": 0.92}
+        ),
+        get_whisper_threshold=lambda: 0.62,
+    )
+    assert _resolve_style(ctx, 1, "auto") == STYLE_WHISPER
+
+
+def test_normal_sample_stays_normal(tmp_path):
+    from types import SimpleNamespace
+
+    from murdock.api.routes_unknown import _resolve_style
+
+    ctx = SimpleNamespace(
+        unknown=SimpleNamespace(get_sample=lambda sid: {"whisper_score": 0.31}),
+        get_whisper_threshold=lambda: 0.62,
+    )
+    assert _resolve_style(ctx, 1, "auto") == STYLE_NORMAL
+
+
+def test_missing_score_defaults_to_normal(tmp_path):
+    """Samples recorded before whisper detection existed have no score."""
+    from types import SimpleNamespace
+
+    from murdock.api.routes_unknown import _resolve_style
+
+    ctx = SimpleNamespace(
+        unknown=SimpleNamespace(get_sample=lambda sid: {"whisper_score": None}),
+        get_whisper_threshold=lambda: 0.62,
+    )
+    assert _resolve_style(ctx, 1, "auto") == STYLE_NORMAL
+
+
+def test_explicit_style_overrides_the_score(tmp_path):
+    """The detector can be wrong; the user's choice wins."""
+    from types import SimpleNamespace
+
+    from murdock.api.routes_unknown import _resolve_style
+
+    ctx = SimpleNamespace(
+        unknown=SimpleNamespace(get_sample=lambda sid: {"whisper_score": 0.92}),
+        get_whisper_threshold=lambda: 0.62,
+    )
+    assert _resolve_style(ctx, 1, "normal") == STYLE_NORMAL
+    ctx2 = SimpleNamespace(
+        unknown=SimpleNamespace(get_sample=lambda sid: {"whisper_score": 0.1}),
+        get_whisper_threshold=lambda: 0.62,
+    )
+    assert _resolve_style(ctx2, 1, "whisper") == STYLE_WHISPER
+
+
+def test_whisper_flag_and_score_reach_the_event_payload():
+    from murdock.core.event_payload import build_recognition_payload
+
+    p = build_recognition_payload(
+        speaker="Jonas", is_known=True, confidence=0.9,
+        satellite_id="wohnzimmer", whisper=True, whisper_score=0.87,
+    )
+    assert p["whisper"] is True
+    assert p["whisper_score"] == pytest.approx(0.87)
+
+    # Below the bar: no flag, but the score still travels so a consumer
+    # can apply its own threshold.
+    p2 = build_recognition_payload(
+        speaker="Jonas", is_known=True, confidence=0.9,
+        satellite_id="wohnzimmer", whisper=False, whisper_score=0.41,
+    )
+    assert "whisper" not in p2
+    assert p2["whisper_score"] == pytest.approx(0.41)
+
+
+def test_samples_api_exposes_style():
+    """The UI badge reads `style`; the response model must not drop it.
+
+    Regression: SampleOut listed every other column, so the samples list
+    could never tell a whispered clip from a normal one.
+    """
+    from murdock.api.routes_speakers import SampleOut
+
+    assert "style" in SampleOut.model_fields
+    out = SampleOut(
+        id=1, duration_sec=2.0, created_at=0.0, style="whisper",
+    )
+    assert out.style == "whisper"
+    # A row from the store must survive the round trip unchanged.
+    row = {
+        "id": 2, "duration_sec": 1.5, "source": "postbox", "filename": None,
+        "created_at": 1.0, "quality_score": 0.8, "satellite_id": "wohnzimmer",
+        "style": "whisper",
+    }
+    assert SampleOut(**row).style == "whisper"

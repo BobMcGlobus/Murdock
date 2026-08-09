@@ -205,13 +205,46 @@ def test_legacy_tv_still_boolean():
 def test_discovery_config_count_and_topics():
     c = _client()
     configs = c._discovery_configs()
-    # 7 sensors + 1 binary_sensor.
-    assert len(configs) == 8
+    # 8 sensors + 2 binary_sensors.
+    assert len(configs) == 10
     object_ids = {object_id for _, object_id, _ in configs}
     assert "current_speaker" in object_ids
     assert "speaker_recognized" in object_ids
+    # Whispering is its own entity so an automation can duck the TTS
+    # volume without parsing the JSON event.
+    assert "whisper" in object_ids
+    assert "whisper_score" in object_ids
     # Every config must carry availability + device grouping.
     for _, _, cfg in configs:
         assert cfg["availability_topic"] == "murdock/status"
         assert cfg["device"]["identifiers"] == ["murdock"]
         assert cfg["state_topic"].startswith("murdock/")
+
+
+def test_whisper_state_is_published():
+    """The flag and the score must reach their own topics."""
+    import asyncio
+
+    c = _client()
+    published = {}
+
+    async def _capture(topic, payload, retain=True):
+        published[topic] = payload
+
+    c._publish_state = _capture
+    c._connected = True
+    c._client = object()
+    asyncio.run(c.publish_recognition(
+        speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer",
+        is_known=True, whisper=True, whisper_score=0.87,
+    ))
+    assert published["murdock/binary_sensor/whisper/state"] == "ON"
+    assert published["murdock/sensor/whisper_score/state"] == "0.870"
+
+    published.clear()
+    asyncio.run(c.publish_recognition(
+        speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer",
+        is_known=True, whisper=False, whisper_score=0.41,
+    ))
+    assert published["murdock/binary_sensor/whisper/state"] == "OFF"
+    assert published["murdock/sensor/whisper_score/state"] == "0.410"

@@ -93,6 +93,8 @@ class SpeakerSensor(MurdockEntity, SensorEntity):
             "weight": state.weight,
             "role": state.role,
             "uncertain": state.uncertain,
+            "whisper": state.whisper,
+            "whisper_score": state.whisper_score,
             "reason": state.reason,
             "recognized_at": state.recognized_at.isoformat(),
         }

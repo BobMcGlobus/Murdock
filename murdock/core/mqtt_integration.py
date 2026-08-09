@@ -546,6 +546,24 @@ class MQTTClient:
                 **avail,
             }),
             # --- Binary sensor ---
+            ("sensor", "whisper_score", {
+                "name": "Whisper score",
+                "unique_id": f"{self.node_id}_whisper_score",
+                "state_topic": f"{prefix}/sensor/whisper_score/state",
+                "icon": "mdi:waveform",
+                "device": device,
+                **avail,
+            }),
+            ("binary_sensor", "whisper", {
+                "name": "Whispering",
+                "unique_id": f"{self.node_id}_whisper",
+                "state_topic": f"{prefix}/binary_sensor/whisper/state",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "icon": "mdi:account-voice-off",
+                "device": device,
+                **avail,
+            }),
             ("binary_sensor", "speaker_recognized", {
                 "name": "Speaker Recognized",
                 "unique_id": f"{self.node_id}_speaker_recognized",
@@ -609,6 +627,7 @@ class MQTTClient:
         emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
+        whisper_score: Optional[float] = None,
         speakers: Optional[list] = None,
     ) -> None:
         """Push a recognition result to all state topics."""
@@ -645,6 +664,16 @@ class MQTTClient:
             self._publish_state(
                 f"{prefix}/binary_sensor/speaker_recognized/state",
                 "ON" if is_known else "OFF",
+            ),
+            # Whispering is published as its own entity, so an automation
+            # can duck the TTS volume without parsing the JSON event.
+            self._publish_state(
+                f"{prefix}/binary_sensor/whisper/state",
+                "ON" if whisper else "OFF",
+            ),
+            self._publish_state(
+                f"{prefix}/sensor/whisper_score/state",
+                f"{whisper_score:.3f}" if whisper_score is not None else "",
             ),
             return_exceptions=True,
         )

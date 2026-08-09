@@ -876,10 +876,16 @@ async function toggleSamples(btn) {
                     <div class="quality-bar-track"><div class="quality-bar-fill ${qClass}" style="width:${qPct}%"></div></div>
                 </div>
             `;
+            // Which voiceprint this sample feeds. Whispered ones train a
+            // separate profile, so the list has to say which is which.
+            const styleBadge = (s.style === "whisper")
+                ? `<span class="badge whisper">${escapeHtml(t("speakers.style_whisper_badge"))}</span>`
+                : "";
             row.innerHTML = `
                 <div class="row">
                     ${filename}
                     ${sourceBadge}
+                    ${styleBadge}
                     ${satelliteBadge}
                     <span class="meta">${s.duration_sec.toFixed(1)}s · ${new Date(
                         s.created_at * 1000

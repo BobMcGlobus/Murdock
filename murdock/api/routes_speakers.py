@@ -38,6 +38,9 @@ class SampleOut(BaseModel):
     created_at: float
     quality_score: Optional[float] = None
     satellite_id: Optional[str] = None
+    # "normal" or "whisper" — the samples list badges the whispered ones
+    # so a whisper profile can be curated without playing every clip.
+    style: Optional[str] = None
 
 
 class QualityBreakdownOut(BaseModel):

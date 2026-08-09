@@ -676,6 +676,7 @@ class MurdockHandler(AsyncEventHandler):
                 margin=self._margin_of(result),
                 reason="early-reject",
                 whisper=self._whisper,
+            whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
             )
         except asyncio.CancelledError:
@@ -1449,6 +1450,7 @@ class MurdockHandler(AsyncEventHandler):
                 role=spk.role if spk else None,
                 ambiguities=self._transcript_hints or None,
                 whisper=self._whisper,
+            whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
             )
             await self._send_transcript_to_satellite(
@@ -1550,6 +1552,7 @@ class MurdockHandler(AsyncEventHandler):
             reason=sentinel,
             ambiguities=self._transcript_hints or None,
             whisper=self._whisper,
+            whisper_score=self._whisper_score,
             speakers=self._speakers or None,
         )
 
@@ -1862,7 +1865,7 @@ class MurdockHandler(AsyncEventHandler):
                 margin=margin,
                 transcript_ms=self._transcript_ms,
                 whisper=self._whisper,
-                whisper_score=self._whisper_score,
+            whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
             )
         except Exception:

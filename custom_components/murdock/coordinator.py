@@ -97,6 +97,8 @@ class SpeakerState:
     satellite_id: str
     recognized_at: datetime
     uncertain: bool = False          # margin gate said "too close to call"
+    whisper: bool = False            # the utterance was whispered
+    whisper_score: float | None = None
     reason: str | None = None        # why speaker is None
     ambiguities: list[Ambiguity] = field(default_factory=list)
     context_prior: float = 0.0       # plan §12, frozen at wake (phase 2)
@@ -305,6 +307,8 @@ class MurdockCoordinator:
             satellite_id=sat,
             recognized_at=dt_util.utcnow(),
             uncertain=bool(data.get("uncertain")),
+            whisper=bool(data.get("whisper")),
+            whisper_score=data.get("whisper_score"),
             reason=data.get("reason"),
             ambiguities=_parse_ambiguities(data.get("ambiguities")),
         )

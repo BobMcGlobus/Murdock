@@ -91,6 +91,9 @@
     "binary_sensor": {
       "connection": {
         "name": "Connection"
+      },
+      "whisper": {
+        "name": "Whispering"
       }
     }
   }
