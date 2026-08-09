@@ -77,6 +77,15 @@ class VerificationResult:
 # replace.
 SATELLITE_PROFILE_MIN_SAMPLES = 3
 
+# Speaking styles a sample can be enrolled under. "normal" is everything
+# that came before styles existed, so untagged rows read as normal.
+STYLE_NORMAL = "normal"
+STYLE_WHISPER = "whisper"
+
+# Whispered speech varies less than normal speech (no pitch to vary), so
+# a usable centroid forms from fewer samples than a satellite profile.
+WHISPER_PROFILE_MIN_SAMPLES = 2
+
 
 @dataclass
 class EnrollmentResult:
@@ -222,7 +231,7 @@ class SpeakerStore:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT id, duration_sec, source, filename, created_at, "
-                "quality_score, satellite_id "
+                "quality_score, satellite_id, style "
                 "FROM speaker_samples WHERE speaker_id = ? "
                 "ORDER BY created_at DESC",
                 (speaker_id,),
@@ -329,6 +338,7 @@ class SpeakerStore:
         role: Optional[str] = None,
         source: Optional[str] = None,
         filename: Optional[str] = None,
+        style: str = STYLE_NORMAL,
         skip_vad: bool = False,
         satellite_id: Optional[str] = None,
     ) -> EnrollmentResult:
@@ -439,16 +449,17 @@ class SpeakerStore:
             cur = self.conn.execute(
                 "INSERT INTO speaker_samples("
                 "speaker_id, audio, duration_sec, source, filename, created_at, "
-                "quality_score, satellite_id) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                "quality_score, satellite_id, style) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (speaker_id, wav_bytes, duration_sec, source, filename, now,
-                 quality_value, satellite_id),
+                 quality_value, satellite_id, style),
             )
             sample_id = int(cur.lastrowid)
 
             centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
             self._write_centroid(speaker_id, centroid)
             self._write_satellite_centroids(speaker_id, sat_centroids)
+            self._write_style_centroids(speaker_id)
 
             self.conn.execute(
                 "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
@@ -563,6 +574,7 @@ class SpeakerStore:
             centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
             self._write_centroid(speaker_id, centroid)
             self._write_satellite_centroids(speaker_id, sat_centroids)
+            self._write_style_centroids(speaker_id)
             self.conn.execute(
                 "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
                 (sample_count, now, speaker_id),
@@ -609,6 +621,7 @@ class SpeakerStore:
         speaker_thresholds: Optional[Dict[str, float]] = None,
         global_threshold: Optional[float] = None,
         tighten: float = 0.0,
+        whisper: bool = False,
     ) -> VerificationResult:
         """Score an embedding against the enrolled speakers.
 
@@ -629,6 +642,13 @@ class SpeakerStore:
           keeps applying to adaptive speakers too.
         * ``tighten`` — context tightening (media playing in the room),
           subtracted from whichever threshold won.
+        * ``whisper`` — the utterance was whispered, so also score against
+          each speaker's whisper centroid (if they enrolled whispered
+          samples). Whispering strips the pitch and moves the embedding a
+          long way; the same-style centroid is the only thing that closes
+          that gap. The threshold is *not* relaxed — without a whisper
+          profile the result stays "unknown", which is what stops this
+          from becoming a way past the gate.
         """
         base = threshold if threshold is not None else self.threshold
         glob = global_threshold if global_threshold is not None else base
@@ -644,6 +664,18 @@ class SpeakerStore:
                 "ORDER BY distance LIMIT 10",
                 (blob,),
             ).fetchall()
+            style_map: Dict[int, np.ndarray] = {}
+            if whisper:
+                style_rows = self.conn.execute(
+                    "SELECT speaker_id, embedding "
+                    "FROM speaker_style_centroids WHERE style = ?",
+                    (STYLE_WHISPER,),
+                ).fetchall()
+                style_map = {
+                    int(r["speaker_id"]): _blob_to_embedding(bytes(r["embedding"]))
+                    for r in style_rows
+                }
+
             sub_map: Dict[int, np.ndarray] = {}
             if satellite_id:
                 sub_rows = self.conn.execute(
@@ -665,7 +697,11 @@ class SpeakerStore:
                 threshold=max(0.0, base - tighten),
             )
 
-        # Effective distance per candidate: min(global, same-mic centroid).
+        # Effective distance per candidate: the best of the global
+        # centroid, the same-mic sub-centroid and — for a whispered
+        # utterance — the same-style centroid. Each extra voiceprint can
+        # only ever lower the distance for the speaker it belongs to, so
+        # this never helps an impostor who has no such profile.
         candidates: List[tuple[float, sqlite3.Row, bool]] = []
         for row in rows:
             dist = float(row["distance"])
@@ -675,6 +711,13 @@ class SpeakerStore:
                 sub_dist = CAMPPlusEmbedder.cosine_distance(embedding, sub)
                 if sub_dist < dist:
                     dist, used_sub = sub_dist, True
+            style_centroid = style_map.get(int(row["speaker_id"]))
+            if style_centroid is not None:
+                style_dist = CAMPPlusEmbedder.cosine_distance(
+                    embedding, style_centroid
+                )
+                if style_dist < dist:
+                    dist, used_sub = style_dist, True
             candidates.append((dist, row, used_sub))
         candidates.sort(key=lambda c: c[0])
 
@@ -952,11 +995,12 @@ class SpeakerStore:
         sub-centroid (too noisy to beat the global one).
         """
         rows = self.conn.execute(
-            "SELECT audio, satellite_id FROM speaker_samples "
+            "SELECT audio, satellite_id, style FROM speaker_samples "
             "WHERE speaker_id = ? ORDER BY id",
             (speaker_id,),
         ).fetchall()
         embeddings: List[np.ndarray] = []
+        whisper_embeddings: List[np.ndarray] = []
         per_sat: Dict[str, List[np.ndarray]] = {}
         for row in rows:
             from .audio import decode_wav, to_mono_16k_pcm
@@ -967,10 +1011,27 @@ class SpeakerStore:
             except ValueError as exc:
                 _LOGGER.warning("Skipping sample during centroid rebuild: %s", exc)
                 continue
+            style = (row["style"] if "style" in row.keys() else None) or STYLE_NORMAL
+            if style == STYLE_WHISPER:
+                # Deliberately excluded from the global and per-satellite
+                # centroids: a whispered sample would drag the normal
+                # voiceprint toward a voice that has no pitch, making
+                # ordinary recognition worse for everyone.
+                whisper_embeddings.append(emb)
+                continue
             embeddings.append(emb)
             sat = row["satellite_id"]
             if sat:
                 per_sat.setdefault(sat, []).append(emb)
+
+        style_centroids: Dict[str, tuple] = {}
+        if len(whisper_embeddings) >= WHISPER_PROFILE_MIN_SAMPLES:
+            style_centroids[STYLE_WHISPER] = (
+                CAMPPlusEmbedder.average(whisper_embeddings),
+                len(whisper_embeddings),
+            )
+        self._pending_style_centroids = style_centroids
+
         if not embeddings:
             return np.zeros(CAMPPlusEmbedder.EMBEDDING_DIM, dtype=np.float32), 0, {}
         centroid = CAMPPlusEmbedder.average(embeddings)
@@ -980,6 +1041,36 @@ class SpeakerStore:
             if len(embs) >= SATELLITE_PROFILE_MIN_SAMPLES
         }
         return centroid, len(embeddings), sat_centroids
+
+    def _write_style_centroids(self, speaker_id: int) -> None:
+        """Replace the speaker's per-style centroids (whisper for now).
+
+        Reads what the last rebuild computed, so callers only have to do
+        what they already did for satellites.
+        """
+        style_centroids = getattr(self, "_pending_style_centroids", {}) or {}
+        self.conn.execute(
+            "DELETE FROM speaker_style_centroids WHERE speaker_id = ?",
+            (speaker_id,),
+        )
+        now = time.time()
+        for style, (centroid, count) in style_centroids.items():
+            self.conn.execute(
+                "INSERT INTO speaker_style_centroids("
+                "speaker_id, style, embedding, sample_count, updated_at) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (speaker_id, style, _embedding_to_blob(centroid), count, now),
+            )
+        self._pending_style_centroids = {}
+
+    def whisper_profile_counts(self) -> Dict[int, int]:
+        """``{speaker_id: whispered sample count}`` for the UI."""
+        rows = self.conn.execute(
+            "SELECT speaker_id, COUNT(*) AS n FROM speaker_samples "
+            "WHERE style = ? GROUP BY speaker_id",
+            (STYLE_WHISPER,),
+        ).fetchall()
+        return {int(r["speaker_id"]): int(r["n"]) for r in rows}
 
     def _write_satellite_centroids(
         self, speaker_id: int,
@@ -1026,6 +1117,7 @@ class SpeakerStore:
         centroid, sample_count, sat_centroids = self._compute_centroid(speaker_id)
         self._write_centroid(speaker_id, centroid)
         self._write_satellite_centroids(speaker_id, sat_centroids)
+        self._write_style_centroids(speaker_id)
         self.conn.execute(
             "UPDATE speakers SET enrollment_count = ?, updated_at = ? WHERE id = ?",
             (sample_count, time.time(), speaker_id),

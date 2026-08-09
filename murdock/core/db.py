@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS unknown_samples (
     best_distance REAL NOT NULL,
     best_speaker TEXT,
     liveness_score REAL,
+    whisper_score REAL,
     tag TEXT,
     created_at REAL NOT NULL
 );
@@ -49,6 +50,19 @@ CREATE TABLE IF NOT EXISTS unknown_samples (
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+-- One extra voiceprint per speaking style. Whispered speech has no
+-- vocal-fold vibration, so its embedding sits far from a normal-speech
+-- centroid; a same-style centroid closes that gap without touching the
+-- normal one.
+CREATE TABLE IF NOT EXISTS speaker_style_centroids (
+    speaker_id INTEGER NOT NULL REFERENCES speakers(id) ON DELETE CASCADE,
+    style TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    sample_count INTEGER NOT NULL,
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (speaker_id, style)
 );
 
 -- Per-satellite sub-centroids: one voiceprint per (speaker, microphone).
@@ -85,7 +99,9 @@ CREATE TABLE IF NOT EXISTS recognition_events (
     margin REAL,
     transcript_ms REAL,
     shadow_ms REAL,
-    whisper INTEGER
+    whisper INTEGER,
+    whisper_score REAL,
+    speakers TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_unknown_created ON unknown_samples(created_at);
@@ -125,6 +141,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "satellite_id" not in sample_cols:
         conn.execute("ALTER TABLE speaker_samples ADD COLUMN satellite_id TEXT")
         _LOGGER.info("Migration: speaker_samples.satellite_id added")
+    if sample_cols and "style" not in sample_cols:
+        conn.execute("ALTER TABLE speaker_samples ADD COLUMN style TEXT")
+        _LOGGER.info("Migration: speaker_samples.style added")
+
+    # An empty column set means the table doesn't exist at all — a very
+    # old database, or a partial one in a test. ALTER would then fail and
+    # abort every migration after it.
+    unknown_cols = _table_columns(conn, "unknown_samples")
+    if unknown_cols and "whisper_score" not in unknown_cols:
+        conn.execute("ALTER TABLE unknown_samples ADD COLUMN whisper_score REAL")
+        _LOGGER.info("Migration: unknown_samples.whisper_score added")
 
     event_cols = _table_columns(conn, "recognition_events")
     if "emotion" not in event_cols:
@@ -148,6 +175,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "whisper" not in event_cols:
         conn.execute("ALTER TABLE recognition_events ADD COLUMN whisper INTEGER")
         _LOGGER.info("Migration: recognition_events.whisper added")
+    if "whisper_score" not in event_cols:
+        conn.execute("ALTER TABLE recognition_events ADD COLUMN whisper_score REAL")
+        conn.execute("ALTER TABLE recognition_events ADD COLUMN speakers TEXT")
+        _LOGGER.info("Migration: recognition_events whisper_score/speakers added")
 
     conn.commit()
 

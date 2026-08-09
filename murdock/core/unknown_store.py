@@ -29,6 +29,10 @@ class UnknownSample:
     liveness_score: Optional[float]
     tag: Optional[str]
     created_at: float
+    # How whispered the rejected sample was, so the postbox shows why a
+    # quiet utterance scored the way it did. Defaulted: older rows have
+    # no value, and it must stay after the required fields.
+    whisper_score: Optional[float] = None
 
 
 class UnknownStore:
@@ -56,6 +60,7 @@ class UnknownStore:
         best_speaker: Optional[str] = None,
         satellite_id: Optional[str] = None,
         liveness_score: Optional[float] = None,
+        whisper_score: Optional[float] = None,
     ) -> int:
         """Save an unknown audio sample and return its database id."""
         wav_bytes = encode_wav(pcm_bytes)
@@ -65,8 +70,9 @@ class UnknownStore:
             cur = self.conn.execute(
                 "INSERT INTO unknown_samples("
                 "session_id, satellite_id, audio, embedding, duration_sec, "
-                "best_distance, best_speaker, liveness_score, tag, created_at) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
+                "best_distance, best_speaker, liveness_score, whisper_score, "
+                "tag, created_at) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
                 (
                     session_id,
                     satellite_id,
@@ -76,6 +82,7 @@ class UnknownStore:
                     best_distance,
                     best_speaker,
                     liveness_score,
+                    whisper_score,
                     now,
                 ),
             )
@@ -91,7 +98,7 @@ class UnknownStore:
         with self._lock:
             rows = self.conn.execute(
                 "SELECT id, session_id, satellite_id, duration_sec, best_distance, "
-                "best_speaker, liveness_score, tag, created_at "
+                "best_speaker, liveness_score, whisper_score, tag, created_at "
                 f"FROM unknown_samples {where} ORDER BY created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -104,6 +111,7 @@ class UnknownStore:
                 best_distance=row["best_distance"],
                 best_speaker=row["best_speaker"],
                 liveness_score=row["liveness_score"],
+                whisper_score=row["whisper_score"] if "whisper_score" in row.keys() else None,
                 tag=row["tag"],
                 created_at=row["created_at"],
             )
@@ -143,7 +151,7 @@ class UnknownStore:
         with self._lock:
             row = self.conn.execute(
                 "SELECT id, session_id, satellite_id, duration_sec, best_distance, "
-                "best_speaker, liveness_score, tag, created_at "
+                "best_speaker, liveness_score, whisper_score, tag, created_at "
                 "FROM unknown_samples WHERE id = ?",
                 (sample_id,),
             ).fetchone()

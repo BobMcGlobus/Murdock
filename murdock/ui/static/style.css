@@ -876,3 +876,11 @@ button.chip:hover {
     color: #fbbf24;
     border: 1px solid rgba(251, 191, 36, 0.3);
 }
+
+/* Measured but below the whisper threshold — visible, not shouty. */
+.badge.whisper.below {
+    background: transparent;
+    color: var(--muted);
+    border-color: var(--border);
+    font-style: normal;
+}

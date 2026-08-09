@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.8.5
+
+**Fixes a regression in 0.8.4 that emptied the recognition log.** A
+search-and-replace in the 0.8.4 multi-speaker work put a publish-only
+keyword into the call that writes the audit row. Every insert raised
+TypeError, the handler swallowed it at debug level, and no utterance has
+been logged since. Two changes so this cannot repeat quietly:
+
+- the argument is now real — the speaker roster is persisted with the
+  event and shown in the log;
+- a failed audit write logs at **warning** level. A swallowed failure
+  here is indistinguishable from "nothing is happening", which is exactly
+  how it went unnoticed for a release.
+- New regression tests exercise the handler's call against a real store,
+  including a signature check that every forwarded keyword is accepted.
+  Nothing covered that seam before.
+
+**The whisper score is visible.** The detector always produced a number;
+only a yes/no reached the UI. Now:
+
+- the recognition log shows it — highlighted when over the threshold
+  (`geflüstert 0.87`), muted when measured but under it (`Flüstern 0.41`),
+  which is what makes the threshold tunable;
+- unknown samples carry it too, so a quiet rejected clip is explainable;
+- both are also in `GET /api/recognition` and `GET /api/unknown`.
+
+**Whisper voice profiles.** Speakers can now be recognised *while
+whispering*. Enrollment has a speaking-style selector; whispered samples
+build a second voiceprint.
+
+- Whispered samples **never** enter the normal voiceprint or the
+  per-satellite profiles — averaging in a voice with no pitch would make
+  ordinary recognition worse for everyone.
+- The whisper centroid is only consulted when the detector says the
+  utterance was whispered, and the threshold is unchanged. Someone who
+  never enrolled a whisper still comes back as unknown, so this stays a
+  recognition feature rather than a way past the gate.
+- Two whispered samples are enough (whispering varies less than normal
+  speech); below that no profile is built.
+
 ## 0.8.4
 
 **Profile health.** The Speakers tab now says what would concretely make

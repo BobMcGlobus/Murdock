@@ -40,6 +40,8 @@ class RecognitionEventOut(BaseModel):
     weight: Optional[float] = None
     margin: Optional[float] = None
     whisper: bool = False
+    whisper_score: Optional[float] = None
+    speakers: List[dict] = []
 
 
 class RecognitionListOut(BaseModel):
@@ -95,6 +97,8 @@ async def list_events(
                 weight=e.weight,
                 margin=e.margin,
                 whisper=e.whisper,
+                whisper_score=e.whisper_score,
+                speakers=e.speakers,
             )
             for e in events
         ]

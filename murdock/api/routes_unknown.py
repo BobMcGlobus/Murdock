@@ -30,6 +30,9 @@ class UnknownOut(BaseModel):
     best_distance: float
     best_speaker: Optional[str]
     liveness_score: Optional[float]
+    # How whispered the sample was, so a quiet rejected clip is
+    # explainable at a glance.
+    whisper_score: Optional[float] = None
     tag: Optional[str]
     created_at: float
 
@@ -54,6 +57,7 @@ async def list_unknown(
             best_distance=s.best_distance,
             best_speaker=s.best_speaker,
             liveness_score=s.liveness_score,
+            whisper_score=s.whisper_score,
             tag=s.tag,
             created_at=s.created_at,
         )
@@ -199,6 +203,7 @@ async def unknown_clusters(
                         best_speaker=m.best_speaker,
                         best_distance=m.best_distance,
                         liveness_score=m.liveness_score,
+                        whisper_score=m.whisper_score,
                         satellite_id=m.satellite_id,
                         created_at=m.created_at,
                         tag=m.tag,

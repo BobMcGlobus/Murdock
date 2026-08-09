@@ -183,6 +183,7 @@ class MurdockHandler(AsyncEventHandler):
 
         # Whisper detection result for this utterance (experimental).
         self._whisper: bool = False
+        self._whisper_score: Optional[float] = None
 
         # Every enrolled speaker heard in this utterance (from extraction).
         self._speakers: list = []
@@ -354,6 +355,7 @@ class MurdockHandler(AsyncEventHandler):
         self._shadow_ms = None
         self._canonicalizations = []
         self._whisper = False
+        self._whisper_score = None
         self._speakers = []
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
@@ -618,6 +620,8 @@ class MurdockHandler(AsyncEventHandler):
             # would silently kill exactly the utterances the whisper
             # feature exists to notice, so check before dropping.
             whisper_probe = self.context.detect_whisper(audio_16k)
+            if whisper_probe is not None:
+                self._whisper_score = round(whisper_probe.score, 4)
             if whisper_probe is not None and whisper_probe.is_whisper:
                 self._whisper = True
                 _LOGGER.info(
@@ -655,6 +659,7 @@ class MurdockHandler(AsyncEventHandler):
                         nearest,
                         self._satellite_id,
                         float(liveness.score),
+                        self._whisper_score,
                     )
                 except Exception:
                     _LOGGER.debug("[%s] Early-reject capture failed", sid,
@@ -1040,6 +1045,11 @@ class MurdockHandler(AsyncEventHandler):
         full verify gate behave identically.
         """
         kwargs: dict = {"tighten": tighten}
+        # A whispered utterance is matched against whisper centroids too,
+        # for speakers who enrolled whispered samples. The threshold is
+        # unchanged — no profile, no match.
+        if self._whisper:
+            kwargs["whisper"] = True
         try:
             if self._satellite_id and self.context.get_enable_satellite_profiles():
                 kwargs["satellite_id"] = self._satellite_id
@@ -1177,6 +1187,10 @@ class MurdockHandler(AsyncEventHandler):
         # liveness heuristic rejects as playback. Without checking first,
         # Murdock would discard the very utterances it should notice.
         whisper_features = self.context.detect_whisper(audio_16k)
+        if whisper_features is not None:
+            # Keep the score even below the bar: "0.55, just under" is the
+            # information you need to tune the threshold.
+            self._whisper_score = round(whisper_features.score, 4)
         if whisper_features is not None and whisper_features.is_whisper:
             self._whisper = True
             _LOGGER.info(
@@ -1848,12 +1862,16 @@ class MurdockHandler(AsyncEventHandler):
                 margin=margin,
                 transcript_ms=self._transcript_ms,
                 whisper=self._whisper,
+                whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
             )
         except Exception:
-            _LOGGER.debug(
-                "[%s] Failed to record audit row", self._session_id,
-                exc_info=True,
+            # Loud on purpose: a swallowed failure here looks exactly like
+            # "nothing is happening", which is how a bad keyword argument
+            # once emptied the whole recognition log unnoticed.
+            _LOGGER.warning(
+                "[%s] Failed to record audit row — the recognition log will "
+                "be missing this utterance", self._session_id, exc_info=True,
             )
             return 0
 

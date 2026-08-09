@@ -275,6 +275,10 @@ $("#enroll-form").addEventListener("submit", async (e) => {
     if (role) body.append("role", role);
     body.append("source", source);
     body.append("filename", filename);
+    // Whispered samples train a separate profile and are kept out of the
+    // normal voiceprint.
+    const styleSel = $("#enroll-style");
+    body.append("style", styleSel ? styleSel.value : "normal");
     body.append("audio", audioBlob, filename);
 
     try {
@@ -2705,9 +2709,17 @@ function renderRecognitionEvent(e) {
     const sat = e.satellite_id
         ? ` · <code>${escapeHtml(e.satellite_id)}</code>`
         : "";
-    const whisperChip = e.whisper
-        ? `<span class="badge whisper">${escapeHtml(t("rec.whisper"))}</span>`
-        : "";
+    const whisperChip = (() => {
+        const score = e.whisper_score;
+        const has = score !== null && score !== undefined;
+        if (!e.whisper && !has) return "";
+        const label = e.whisper
+            ? t("rec.whisper") + (has ? ` ${score.toFixed(2)}` : "")
+            : t("rec.whisper_score", { score: score.toFixed(2) });
+        // Detected → solid; measured but under the bar → muted.
+        const cls = e.whisper ? "badge whisper" : "badge whisper below";
+        return `<span class="${cls}">${escapeHtml(label)}</span>`;
+    })();
     const emotionChip = e.emotion
         ? `<span class="badge emotion">${escapeHtml(e.emotion)}${
               e.emotion_confidence != null
@@ -3306,3 +3318,19 @@ async function loadCoach() {
 
 const coachRefreshBtn = $("#coach-refresh-btn");
 if (coachRefreshBtn) coachRefreshBtn.addEventListener("click", loadCoach);
+
+// ── Enrollment style (normal vs whispered) ─────────────────────────
+function updateEnrollStyleHint() {
+    const sel = $("#enroll-style");
+    const hint = $("#enroll-style-hint");
+    if (!sel || !hint) return;
+    hint.textContent = sel.value === "whisper"
+        ? t("speakers.whisper_hint", { min: 2 })
+        : "";
+}
+
+const enrollStyleSel = $("#enroll-style");
+if (enrollStyleSel) {
+    enrollStyleSel.addEventListener("change", updateEnrollStyleHint);
+    updateEnrollStyleHint();
+}

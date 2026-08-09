@@ -58,6 +58,14 @@
                             <option value="" data-i18n="speakers.none">— none —</option>
                         </select>
                     </label>
+                    <label>
+                        <span data-i18n="speakers.style">Speaking style</span>
+                        <select name="style" id="enroll-style">
+                            <option value="normal" data-i18n="speakers.style_normal">Normal speech</option>
+                            <option value="whisper" data-i18n="speakers.style_whisper">Whispered — trains a separate whisper profile</option>
+                        </select>
+                        <small class="meta" id="enroll-style-hint"></small>
+                    </label>
                     <div class="recorder">
                         <button type="button" id="record-btn" data-i18n="speakers.start_recording">Start recording</button>
                         <span id="record-status" data-i18n="speakers.idle">Idle</span>

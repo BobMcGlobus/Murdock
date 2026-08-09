@@ -224,6 +224,9 @@ async def enroll(
     source: Optional[str] = Form(None),
     filename: Optional[str] = Form(None),
     satellite_id: Optional[str] = Form(None),
+    # "whisper" trains a separate whisper voiceprint; it never enters
+    # the normal one (see SpeakerStore._compute_centroid).
+    style: str = Form("normal"),
     audio: UploadFile = File(...),
     ctx: AppContext = Depends(get_context),
 ):
@@ -266,6 +269,7 @@ async def enroll(
             source=source,
             filename=effective_filename,
             satellite_id=satellite_id,
+            style=style,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
