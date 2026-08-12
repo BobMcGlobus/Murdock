@@ -31,6 +31,18 @@ import httpx
 
 _LOGGER = logging.getLogger("murdock.stt_backend")
 
+#: Sampling temperature for every cloud transcription request.
+#:
+#: Whisper checks its own output against ``compression_ratio_threshold``
+#: and ``log_prob_threshold`` after decoding, and on failure re-decodes
+#: the whole clip at temperature 0.2 → 0.4 → 0.6 → 0.8 → 1.0. That is up
+#: to six full passes, which is where multi-second outliers on otherwise
+#: sub-second audio come from. Pinning temperature to 0 disables the
+#: cascade: an utterance the model is unsure about now comes back wrong
+#: quickly instead of wrong slowly, and for a voice assistant the bounded
+#: latency is worth more than the retry.
+_TEMPERATURE = 0
+
 
 class STTBackendError(RuntimeError):
     """A cloud transcription attempt failed (network, HTTP, timeout)."""
@@ -109,10 +121,17 @@ class OpenAICompatibleBackend:
                     "data": base64.b64encode(wav_data).decode("ascii"),
                     "format": "wav",
                 },
+                "temperature": _TEMPERATURE,
             }
+            # OpenRouter takes the language hint in the JSON body. It used
+            # to be dropped here while the multipart branch honoured it,
+            # so the primary engine re-detected the language every time.
+            if lang:
+                payload["language"] = lang
             return {"json": payload}
         files = {"file": ("audio.wav", wav_data, "audio/wav")}
-        data: dict = {"model": self.model}
+        # Form fields are strings; httpx would reject a bare float.
+        data: dict = {"model": self.model, "temperature": str(_TEMPERATURE)}
         if lang:
             data["language"] = lang
         # Vocabulary biasing: hand the custom terms to whisper-family

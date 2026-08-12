@@ -85,7 +85,40 @@ def test_standard_request_is_multipart():
     kwargs = b._request_kwargs(b"RIFFfakewav", "de")
     assert "json" not in kwargs
     assert kwargs["files"]["file"][0] == "audio.wav"
-    assert kwargs["data"] == {"model": "gpt-4o-transcribe", "language": "de"}
+    assert kwargs["data"] == {
+        "model": "gpt-4o-transcribe", "language": "de", "temperature": "0",
+    }
+
+
+def test_language_reaches_both_request_shapes():
+    """HA sends the language; neither shape may drop it.
+
+    Regression: the OpenRouter branch built its JSON body without the
+    hint, so the primary engine re-detected the language on every
+    utterance while the multipart branch honoured it.
+    """
+    orb = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                  base_url="https://openrouter.ai")
+    assert orb._request_kwargs(b"RIFF", "de")["json"]["language"] == "de"
+    std = OpenAICompatibleBackend(api_key="k", model="gpt-4o-transcribe")
+    assert std._request_kwargs(b"RIFF", "de")["data"]["language"] == "de"
+    # No hint from HA — the field stays absent rather than being sent empty.
+    assert "language" not in orb._request_kwargs(b"RIFF", None)["json"]
+    assert "language" not in std._request_kwargs(b"RIFF", None)["data"]
+
+
+def test_temperature_is_pinned_to_zero():
+    """Whisper's temperature-fallback cascade is the multi-second tail.
+
+    Without an explicit 0 the endpoint re-decodes the whole clip up to
+    six times when its own quality thresholds fail.
+    """
+    orb = OpenAICompatibleBackend(api_key="k", model="openai/whisper-large-v3-turbo",
+                                  base_url="https://openrouter.ai")
+    assert orb._request_kwargs(b"RIFF", "de")["json"]["temperature"] == 0
+    std = OpenAICompatibleBackend(api_key="k", model="gpt-4o-transcribe")
+    # Multipart form fields must be strings, not floats.
+    assert std._request_kwargs(b"RIFF", "de")["data"]["temperature"] == "0"
 
 
 def test_vocabulary_prompt_sent_where_supported():
