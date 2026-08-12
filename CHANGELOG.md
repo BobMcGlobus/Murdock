@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.8.7
+
+**Transcript latency.** Speaker verification was never the slow part —
+it runs in 70–150 ms — but the cloud transcript could take anywhere from
+0.8 to 9 seconds, and nothing in the log could say why.
+
+- **The language hint was being dropped on the OpenRouter path.** Home
+  Assistant sends it and the multipart branch honoured it, but the
+  OpenRouter JSON body was built without it, so the primary engine
+  re-detected the language on every single utterance.
+- **No temperature was ever sent.** That leaves Whisper's fallback
+  cascade live: when its own compression-ratio and log-prob checks fail
+  it re-decodes the whole clip at 0.2 through 1.0 — up to six full
+  passes. It is now pinned to 0. This is the shape of the multi-second
+  outliers on otherwise sub-second audio, and it matches the A/B log,
+  where the slow transcripts are the ones the two engines disagree
+  about.
+- **The request is timed as TTFB plus body download**, not one number,
+  and the breakdown is persisted with the event and shown in the
+  recognition log. "The model thought hard" and "the upload crawled" are
+  now different-looking problems. Recorded on failure too.
+- **Audio is conditioned before upload**: leading and trailing silence
+  trimmed, level normalised. Models hallucinate in silence and the
+  invented text is what trips the re-decode. Only the ends are trimmed —
+  splicing internal pauses risks clipped word onsets. A VAD that finds
+  only a sliver of speech is distrusted outright, because Silero
+  under-detects whispering.
+- **The request timeout is configurable**, defaulting to 8 s instead of
+  the hard-coded 30 s that let a stalled provider hold the assistant for
+  half a minute. The existing local Wyoming fallback covers the expiry.
+
+The speaker embedding is unaffected by any of this: it is computed from
+the untouched audio, and fbank does its own per-utterance mean
+normalisation.
+
 ## 0.8.6
 
 **Whispering now leaves Murdock.** The detector has been reporting a
