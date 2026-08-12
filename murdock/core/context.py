@@ -282,6 +282,17 @@ class AppContext:
             return override.strip()
         return (self.settings.stt_language or "").strip()
 
+    def get_shadow_rescues_empty(self) -> bool:
+        override = get_setting(self.db, "shadow_rescues_empty")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.shadow_rescues_empty
+
+    def set_shadow_rescues_empty(self, enabled: bool) -> None:
+        set_setting(
+            self.db, "shadow_rescues_empty", "true" if enabled else "false"
+        )
+
     def set_stt_language(self, value: str) -> None:
         set_setting(self.db, "stt_language", (value or "").strip())
 

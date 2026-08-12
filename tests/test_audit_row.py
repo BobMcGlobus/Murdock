@@ -31,11 +31,15 @@ def _handler(tmp_path):
         _transcript_ms=412.0,
         _transcript_timing={"ttfb_ms": 401.2, "body_ms": 2.8,
                             "total_ms": 404.0, "sent_bytes": 105600},
+        _rescued_by=None,
         _whisper=True,
         _whisper_score=0.83,
         _speakers=[{"speaker": "Jonas", "seconds": 2.4},
                    {"speaker": "Anna", "seconds": 0.9}],
     )
+    # The real method, bound to the stand-in — stubbing it here would
+    # let the timing payload drift away from what the handler sends.
+    fake._timing_with_rescue = lambda: MurdockHandler._timing_with_rescue(fake)
     return fake, log
 
 

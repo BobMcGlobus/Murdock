@@ -177,6 +177,7 @@ class MurdockHandler(AsyncEventHandler):
         # comparison in the log covers speed, not just wording.
         self._transcript_ms: Optional[float] = None
         self._transcript_timing: Optional[dict] = None
+        self._rescued_by: Optional[str] = None
         self._stt_prep: Optional[dict] = None
         self._shadow_ms: Optional[float] = None
 
@@ -356,6 +357,7 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_ms = None
         self._transcript_timing = None
         self._stt_prep = None
+        self._rescued_by = None
         self._shadow_ms = None
         self._canonicalizations = []
         self._whisper = False
@@ -1022,6 +1024,8 @@ class MurdockHandler(AsyncEventHandler):
             return primary
 
         transcript = await self._primary_transcript(audio_16k)
+        if not (transcript or "").strip() and audio_16k:
+            transcript = await self._rescue_empty_transcript(audio_16k)
         if dictionary and transcript:
             from murdock.core.transcript_tools import (
                 apply_correction_dictionary_ex,
@@ -1894,7 +1898,7 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 margin=margin,
                 transcript_ms=self._transcript_ms,
-                transcript_timing=self._transcript_timing,
+                transcript_timing=self._timing_with_rescue(),
                 whisper=self._whisper,
                 whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
@@ -1931,6 +1935,48 @@ class MurdockHandler(AsyncEventHandler):
         if self.context.get_shadow_stt_backend() == "none":
             return
         asyncio.create_task(self._run_shadow(event_id, audio_16k))
+
+    def _timing_with_rescue(self) -> Optional[dict]:
+        """The request breakdown, noting which engine actually answered."""
+        if not self._rescued_by:
+            return self._transcript_timing
+        timing = dict(self._transcript_timing or {})
+        timing["rescued_by"] = self._rescued_by
+        return timing
+
+    async def _rescue_empty_transcript(self, audio_16k: bytes) -> str:
+        """Ask the shadow engine when the primary heard nothing.
+
+        A transducer that is unsure returns nothing rather than guessing
+        — honest, and useless to the person waiting. Where a second
+        engine is already configured for the A/B comparison, it can
+        answer instead. The cost is paid only on an empty result, which
+        is precisely the case where there is nothing left to lose: the
+        alternative is a failed interaction.
+
+        Never raises; on any failure the empty transcript stands.
+        """
+        if not self.context.get_shadow_rescues_empty():
+            return ""
+        if self.context.get_shadow_stt_backend() == "none":
+            return ""
+        sid = self._session_id
+        try:
+            text, engine = await asyncio.wait_for(
+                self._shadow_transcribe(audio_16k),
+                timeout=self.context.get_stt_timeout(),
+            )
+        except Exception as exc:
+            _LOGGER.info("[%s] Empty-transcript rescue failed: %s", sid, exc)
+            return ""
+        text = (text or "").strip()
+        if not text:
+            return ""
+        self._rescued_by = engine
+        _LOGGER.info(
+            "[%s] Primary heard nothing — using %s: %r", sid, engine, text[:80],
+        )
+        return text
 
     async def _shadow_transcribe(self, audio_16k: bytes) -> tuple[str, str]:
         """Transcribe with the configured shadow engine → (text, engine).

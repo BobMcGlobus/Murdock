@@ -1,3 +1,3 @@
 """Murdock v2 — Speaker Recognition Wyoming Proxy for Home Assistant."""
 
-__version__ = "0.8.9"
+__version__ = "0.9.0"

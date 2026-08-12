@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.9.0
+
+**The shadow engine can now answer when the primary heard nothing.**
+
+A transducer such as Parakeet that is unsure returns an empty transcript
+rather than guessing. That is the honest behaviour and the reason its
+latency is bounded — but it is useless to the person waiting, and until
+now Home Assistant got the empty result even though a second engine was
+already transcribing the same audio for the A/B comparison.
+
+Where the primary comes back empty, the shadow's transcript is used
+instead. The cost is paid only in that case, which is precisely where
+there is nothing left to lose: the alternative is a failed interaction.
+A shadow that also heard nothing changes nothing — two engines agreeing
+on silence is an answer — and a failing shadow never costs the
+utterance.
+
+The recognition log records which engine actually answered, so a fast
+local primary that leans on the cloud too often stays visible rather
+than quietly becoming a proxy.
+
+On by default where a shadow engine is configured; off does what it
+always did.
+
 ## 0.8.9
 
 **A running air conditioner made ordinary speech read as whispering.**

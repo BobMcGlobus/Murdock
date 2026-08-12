@@ -1388,6 +1388,9 @@ async function loadSettings() {
             if (sttForm.stt_language) {
                 sttForm.stt_language.value = s.stt_language ?? "";
             }
+            if (sttForm.shadow_rescues_empty) {
+                sttForm.shadow_rescues_empty.checked = !!s.shadow_rescues_empty;
+            }
             if (sttForm.stt_local_fallback) {
                 sttForm.stt_local_fallback.checked = !!s.stt_local_fallback;
             }
@@ -1791,6 +1794,9 @@ if (sttForm) {
         }
         if (sttForm.stt_language) {
             body.stt_language = sttForm.stt_language.value.trim();
+        }
+        if (sttForm.shadow_rescues_empty) {
+            body.shadow_rescues_empty = sttForm.shadow_rescues_empty.checked;
         }
         if (sttForm.stt_local_fallback) {
             body.stt_local_fallback = sttForm.stt_local_fallback.checked;
@@ -2716,6 +2722,9 @@ function renderRecognitionEvent(e) {
     }
     if (tt && tt.trimmed_ms > 0) {
         sttParts.push(`-${formatMs(tt.trimmed_ms)} ${t("rec.trimmed")}`);
+    }
+    if (tt && tt.rescued_by) {
+        sttParts.push(`${t("rec.rescued")} ${escapeHtml(tt.rescued_by)}`);
     }
     if (tt && tt.failed) {
         sttParts.push(escapeHtml(tt.failed));

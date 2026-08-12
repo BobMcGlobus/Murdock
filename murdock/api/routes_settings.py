@@ -48,6 +48,7 @@ class SettingsOut(BaseModel):
     enable_stt_prep: bool = True
     stt_timeout_sec: float = 8.0
     stt_language: str = "de"
+    shadow_rescues_empty: bool = True
     extraction_threshold: float = 0.25
     extraction_min_region_sec: float = 0.6
     enable_calibration: bool = True
@@ -147,6 +148,7 @@ class SettingsPatch(BaseModel):
     enable_stt_prep: Optional[bool] = None
     stt_timeout_sec: Optional[float] = Field(default=None, ge=1.0, le=120.0)
     stt_language: Optional[str] = None
+    shadow_rescues_empty: Optional[bool] = None
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     enable_calibration: Optional[bool] = None
@@ -248,6 +250,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         enable_stt_prep=ctx.get_enable_stt_prep(),
         stt_timeout_sec=ctx.get_stt_timeout(),
         stt_language=ctx.get_stt_language(),
+        shadow_rescues_empty=ctx.get_shadow_rescues_empty(),
         extraction_threshold=ctx.get_extraction_threshold(),
         extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
         enable_calibration=ctx.get_enable_calibration(),
@@ -364,6 +367,8 @@ async def patch_settings(
         ctx.set_stt_timeout(body.stt_timeout_sec)
     if body.stt_language is not None:
         ctx.set_stt_language(body.stt_language)
+    if body.shadow_rescues_empty is not None:
+        ctx.set_shadow_rescues_empty(body.shadow_rescues_empty)
     if body.extraction_threshold is not None:
         ctx.set_extraction_threshold(body.extraction_threshold)
     if body.extraction_min_region_sec is not None:

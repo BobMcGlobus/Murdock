@@ -643,6 +643,11 @@
                             <option value="openai" data-i18n="stt.shadow_openai">OpenAI-compatible</option>
                         </select>
                     </label>
+                    <label class="switch">
+                        <input type="checkbox" name="shadow_rescues_empty">
+                        <span data-i18n="stt.shadow_rescue">Let the shadow answer when the primary heard nothing</span>
+                        <small class="meta" data-i18n="stt.shadow_rescue_hint">A transducer that is unsure returns nothing rather than guessing — honest, and useless to the person waiting. Where the primary comes back empty, the shadow's transcript is used instead. Costs latency only in that case, where the alternative is a failed interaction. The recognition log marks which engine answered.</small>
+                    </label>
                     <div id="shadow-upstream-fields" hidden>
                         <label>
                             <span data-i18n="stt.shadow_uri">Shadow Wyoming URI</span>
