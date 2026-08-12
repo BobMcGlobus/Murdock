@@ -1245,9 +1245,6 @@ async function loadSettings() {
             form.auto_enroll.checked = !!s.auto_enroll;
         }
         // Speaker extraction (new fields — backwards-compatible)
-        if (form.enable_stt_prep) {
-            form.enable_stt_prep.checked = !!s.enable_stt_prep;
-        }
         if (form.enable_extraction) {
             form.enable_extraction.checked = !!s.enable_extraction;
         }
@@ -1381,6 +1378,12 @@ async function loadSettings() {
                     oaHint.textContent = s.openai_api_key_set
                         ? t("stt.key_set") : t("stt.key_empty");
                 }
+            }
+            if (sttForm.enable_stt_prep) {
+                sttForm.enable_stt_prep.checked = !!s.enable_stt_prep;
+            }
+            if (sttForm.stt_timeout_sec) {
+                sttForm.stt_timeout_sec.value = s.stt_timeout_sec ?? 8;
             }
             if (sttForm.stt_local_fallback) {
                 sttForm.stt_local_fallback.checked = !!s.stt_local_fallback;
@@ -1731,6 +1734,8 @@ function updateSttFieldVisibility() {
     // upstream path streams while the user is still speaking.
     const prep = $("#stt-prep-row");
     if (prep) prep.hidden = backend === "upstream";
+    const to = $("#stt-timeout-row");
+    if (to) to.hidden = backend === "upstream";
     // Shadow sub-fields per selected shadow engine.
     const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
     const su = $("#shadow-upstream-fields");
@@ -1772,6 +1777,12 @@ if (sttForm) {
             body.openai_model = sttForm.openai_model.value.trim();
             const oaKey = sttForm.openai_api_key.value;
             if (oaKey) body.openai_api_key = oaKey;
+        }
+        if (sttForm.enable_stt_prep) {
+            body.enable_stt_prep = sttForm.enable_stt_prep.checked;
+        }
+        if (sttForm.stt_timeout_sec && sttForm.stt_timeout_sec.value !== "") {
+            body.stt_timeout_sec = parseFloat(sttForm.stt_timeout_sec.value);
         }
         if (sttForm.stt_local_fallback) {
             body.stt_local_fallback = sttForm.stt_local_fallback.checked;
@@ -1904,9 +1915,6 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.auto_enroll) {
         body.auto_enroll = form.auto_enroll.checked;
-    }
-    if (form.enable_stt_prep) {
-        body.enable_stt_prep = form.enable_stt_prep.checked;
     }
     if (form.enable_extraction) {
         body.enable_extraction = form.enable_extraction.checked;

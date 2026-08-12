@@ -545,6 +545,11 @@
                             <input type="text" name="openai_model" placeholder="gpt-4o-transcribe">
                         </label>
                     </div>
+                    <label id="stt-timeout-row" hidden>
+                        <span data-i18n="stt.timeout">Request timeout (seconds)</span>
+                        <input type="number" step="0.5" min="1" max="120" name="stt_timeout_sec">
+                        <small class="meta" data-i18n="stt.timeout_hint">Hard ceiling on one cloud transcription. On expiry the local fallback takes over if it is enabled, otherwise the utterance comes back empty. "I didn't catch that" after a few seconds beats half a minute of silence. Default: 8 s.</small>
+                    </label>
                     <label class="switch" id="stt-fallback-row" hidden>
                         <input type="checkbox" name="stt_local_fallback">
                         <span data-i18n="stt.local_fallback">Local fallback via Wyoming upstream</span>

@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     # copy only — the speaker embedding is computed from the untouched
     # audio.
     enable_stt_prep: bool = Field(default=True)
+    # Hard ceiling on a cloud transcription request, in seconds. The old
+    # hard-coded 30 s meant a stalled provider held the assistant for
+    # half a minute. On expiry the local Wyoming fallback takes over when
+    # it is enabled; otherwise the utterance returns empty.
+    stt_timeout_sec: float = Field(default=8.0, ge=1.0, le=120.0)
     # Cosine-distance ceiling for claiming a region for a speaker. Should
     # be stricter (smaller) than verify_threshold — we only keep regions
     # we're confident about, then verify the concatenation at the normal

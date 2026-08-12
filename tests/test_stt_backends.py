@@ -20,22 +20,17 @@ from murdock.core.stt_backend import (
 
 def _ctx(tmp_path):
     db = open_db(tmp_path / "m.db")
-    settings = SimpleNamespace(
+    # The real Settings model, not a hand-written stand-in: every field
+    # added to the config used to have to be mirrored here, and the
+    # mirror silently went stale until a test blew up on the missing
+    # attribute.
+    settings = Settings(
         stt_backend="upstream",
         mistral_api_key="mk", mistral_model="voxtral-mini-latest",
         openai_base_url="https://api.openai.com",
         openai_api_key=None, openai_model="gpt-4o-transcribe",
         stt_local_fallback=False,
-        shadow_stt_backend="none",
-        shadow_upstream_uri=None,
-        shadow_mistral_model="voxtral-small-latest",
-        shadow_mistral_api_key=None,
-        shadow_openai_base_url="", shadow_openai_api_key=None,
-        shadow_openai_model="",
         upstream_uri="tcp://localhost:10300",
-        enable_stt_vocabulary=False, stt_vocabulary="",
-        enable_stt_dictionary=False, stt_dictionary="",
-        enable_dual_transcript=False,
     )
     return AppContext(
         settings=settings, db=db, embedder=None, vad=None, speakers=None,
@@ -382,3 +377,27 @@ def test_timing_is_recorded_even_when_the_request_fails(monkeypatch):
         asyncio.run(b.transcribe(b"\x00" * 3200))
     assert b.last_timing["failed"] == "timeout"
     assert b.last_timing["total_ms"] >= 0
+
+
+def test_timeout_is_configurable_and_reaches_every_backend(tmp_path):
+    """The old hard-coded 30s held the assistant for half a minute."""
+    ctx = _ctx(tmp_path)
+    ctx.set_openai_model("whisper-large-v3-turbo")
+    ctx.set_mistral_api_key("k")
+    assert ctx.get_stt_timeout() == 8.0
+    assert ctx.get_openai_backend().timeout == 8.0
+    assert ctx.get_voxtral_backend().timeout == 8.0
+
+    ctx.set_stt_timeout(3.5)
+    assert ctx.get_stt_timeout() == 3.5
+    assert ctx.get_openai_backend().timeout == 3.5
+    assert ctx.get_voxtral_backend().timeout == 3.5
+
+
+def test_timeout_is_clamped_to_something_sane(tmp_path):
+    """A 0-second timeout would fail every request before it started."""
+    ctx = _ctx(tmp_path)
+    ctx.set_stt_timeout(0.0)
+    assert ctx.get_stt_timeout() == 1.0
+    ctx.set_stt_timeout(9999.0)
+    assert ctx.get_stt_timeout() == 120.0

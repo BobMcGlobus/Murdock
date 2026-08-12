@@ -267,6 +267,19 @@ class AppContext:
     def set_enable_stt_prep(self, enabled: bool) -> None:
         set_setting(self.db, "enable_stt_prep", "true" if enabled else "false")
 
+    def get_stt_timeout(self) -> float:
+        override = get_setting(self.db, "stt_timeout_sec")
+        if override:
+            try:
+                return max(1.0, min(120.0, float(override)))
+            except ValueError:
+                pass
+        return float(self.settings.stt_timeout_sec)
+
+    def set_stt_timeout(self, value: float) -> None:
+        clamped = max(1.0, min(120.0, float(value)))
+        set_setting(self.db, "stt_timeout_sec", f"{clamped:.1f}")
+
     def get_extraction_threshold(self, satellite_id: Optional[str] = None) -> float:
         """Effective extraction distance ceiling.
 
@@ -1104,6 +1117,7 @@ class AppContext:
         return VoxtralBackend(
             api_key=api_key,
             model=self.get_mistral_model(),
+            timeout=self.get_stt_timeout(),
         )
 
     # ------------------------------------------------------------------
@@ -1479,6 +1493,7 @@ class AppContext:
             model=model,
             base_url=self.get_openai_base_url(),
             prompt=self.get_effective_vocabulary() or None,
+            timeout=self.get_stt_timeout(),
         )
 
     def get_active_cloud_backend(self):
@@ -1597,7 +1612,8 @@ class AppContext:
             if not api_key:
                 return None
             return VoxtralBackend(
-                api_key=api_key, model=self.get_shadow_mistral_model()
+                api_key=api_key, model=self.get_shadow_mistral_model(),
+                timeout=self.get_stt_timeout(),
             )
         if kind == "openai":
             model = self.get_shadow_openai_model()
@@ -1609,6 +1625,7 @@ class AppContext:
                 base_url=self.get_shadow_openai_base_url(),
                 name="shadow-openai",
                 prompt=self.get_effective_vocabulary() or None,
+                timeout=self.get_stt_timeout(),
             )
         return None
 
