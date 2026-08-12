@@ -48,6 +48,22 @@ class STTBackendError(RuntimeError):
     """A cloud transcription attempt failed (network, HTTP, timeout)."""
 
 
+def _normalize_language(tag: Optional[str]) -> Optional[str]:
+    """Reduce a BCP-47 tag to the ISO-639-1 code these endpoints expect.
+
+    Home Assistant hands over whatever the pipeline is configured with,
+    which is commonly a full tag like ``de-DE``. OpenAI's transcription
+    API documents ISO-639-1, and a local Parakeet server that cannot
+    match the tag falls back to its own default — English — which turns
+    a German sentence into confident English nonsense rather than an
+    error.
+    """
+    if not tag:
+        return None
+    code = str(tag).strip().replace("_", "-").split("-")[0].lower()
+    return code or None
+
+
 def _pcm_to_wav(pcm: bytes, rate: int = 16000, width: int = 2, channels: int = 1) -> bytes:
     """Wrap raw PCM in a WAV container for upload."""
     num_samples = len(pcm) // width
@@ -118,6 +134,9 @@ class OpenAICompatibleBackend:
 
     def _request_kwargs(self, wav_data: bytes, lang: Optional[str]) -> dict:
         """Build the httpx POST kwargs for this endpoint's request shape."""
+        # Normalised here rather than at the call site so the guarantee
+        # holds for every caller, not just the one that remembered.
+        lang = _normalize_language(lang)
         if self.is_openrouter:
             import base64
             payload: dict = {
@@ -167,7 +186,16 @@ class OpenAICompatibleBackend:
         callers can trigger the local fallback. A successful call that
         heard nothing legitimately returns ``""``.
         """
-        lang = language or self.language
+        # `self.language` is the configured fallback: an endpoint that
+        # gets no hint picks its own default, and for most of them that
+        # is English.
+        lang = _normalize_language(language) or _normalize_language(self.language)
+        if not lang:
+            _LOGGER.warning(
+                "%s: no language hint — the endpoint will guess, and most "
+                "default to English. Set the STT language in settings.",
+                self.label,
+            )
         wav_data = _pcm_to_wav(pcm_audio, rate, width, channels)
         self.last_timing = {
             "engine": self.label,

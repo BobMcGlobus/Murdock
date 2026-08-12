@@ -276,6 +276,15 @@ class AppContext:
                 pass
         return float(self.settings.stt_timeout_sec)
 
+    def get_stt_language(self) -> str:
+        override = get_setting(self.db, "stt_language")
+        if override is not None:
+            return override.strip()
+        return (self.settings.stt_language or "").strip()
+
+    def set_stt_language(self, value: str) -> None:
+        set_setting(self.db, "stt_language", (value or "").strip())
+
     def set_stt_timeout(self, value: float) -> None:
         clamped = max(1.0, min(120.0, float(value)))
         set_setting(self.db, "stt_timeout_sec", f"{clamped:.1f}")
@@ -1118,6 +1127,7 @@ class AppContext:
             api_key=api_key,
             model=self.get_mistral_model(),
             timeout=self.get_stt_timeout(),
+            language=self.get_stt_language() or None,
         )
 
     # ------------------------------------------------------------------
@@ -1494,6 +1504,7 @@ class AppContext:
             base_url=self.get_openai_base_url(),
             prompt=self.get_effective_vocabulary() or None,
             timeout=self.get_stt_timeout(),
+            language=self.get_stt_language() or None,
         )
 
     def get_active_cloud_backend(self):
@@ -1614,6 +1625,7 @@ class AppContext:
             return VoxtralBackend(
                 api_key=api_key, model=self.get_shadow_mistral_model(),
                 timeout=self.get_stt_timeout(),
+                language=self.get_stt_language() or None,
             )
         if kind == "openai":
             model = self.get_shadow_openai_model()
@@ -1626,6 +1638,7 @@ class AppContext:
                 name="shadow-openai",
                 prompt=self.get_effective_vocabulary() or None,
                 timeout=self.get_stt_timeout(),
+                language=self.get_stt_language() or None,
             )
         return None
 

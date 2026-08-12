@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # half a minute. On expiry the local Wyoming fallback takes over when
     # it is enabled; otherwise the utterance returns empty.
     stt_timeout_sec: float = Field(default=8.0, ge=1.0, le=120.0)
+    # Language hint used when Home Assistant sends none. Empty means
+    # "let the endpoint decide", which in practice means English for
+    # most of them — a German sentence then comes back as confident
+    # English nonsense rather than an error.
+    stt_language: str = Field(default="de")
     # Cosine-distance ceiling for claiming a region for a speaker. Should
     # be stricter (smaller) than verify_threshold — we only keep regions
     # we're confident about, then verify the concatenation at the normal

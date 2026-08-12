@@ -401,3 +401,40 @@ def test_timeout_is_clamped_to_something_sane(tmp_path):
     assert ctx.get_stt_timeout() == 1.0
     ctx.set_stt_timeout(9999.0)
     assert ctx.get_stt_timeout() == 120.0
+
+
+def test_full_language_tags_are_reduced_to_iso_639_1():
+    """HA sends what the pipeline is configured with, often `de-DE`.
+
+    OpenAI documents ISO-639-1, and a local Parakeet server that cannot
+    match the tag silently falls back to English — a German sentence
+    then comes back as confident English nonsense rather than an error.
+    """
+    from murdock.core.stt_backend import _normalize_language
+
+    assert _normalize_language("de-DE") == "de"
+    assert _normalize_language("de_DE") == "de"
+    assert _normalize_language("DE") == "de"
+    assert _normalize_language("de") == "de"
+    assert _normalize_language(None) is None
+    assert _normalize_language("") is None
+    assert _normalize_language("   ") is None
+
+    b = OpenAICompatibleBackend(api_key="k", model="m")
+    assert b._request_kwargs(b"RIFF", "de-DE")["data"]["language"] == "de"
+
+
+def test_configured_language_fills_in_when_ha_sends_none(tmp_path):
+    """An endpoint with no hint picks its own default, usually English."""
+    ctx = _ctx(tmp_path)
+    ctx.set_openai_model("parakeet-tdt-0.6b-v3")
+    assert ctx.get_stt_language() == "de"
+    assert ctx.get_openai_backend().language == "de"
+
+    # HA's value wins where it exists; the fallback covers its absence.
+    b = OpenAICompatibleBackend(api_key="k", model="m", language="de")
+    assert b._request_kwargs(b"RIFF", "en-GB")["data"]["language"] == "en"
+    assert b._request_kwargs(b"RIFF", None)["data"].get("language") is None
+
+    ctx.set_stt_language("")
+    assert ctx.get_openai_backend().language is None

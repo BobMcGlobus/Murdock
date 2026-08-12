@@ -1385,6 +1385,9 @@ async function loadSettings() {
             if (sttForm.stt_timeout_sec) {
                 sttForm.stt_timeout_sec.value = s.stt_timeout_sec ?? 8;
             }
+            if (sttForm.stt_language) {
+                sttForm.stt_language.value = s.stt_language ?? "";
+            }
             if (sttForm.stt_local_fallback) {
                 sttForm.stt_local_fallback.checked = !!s.stt_local_fallback;
             }
@@ -1736,6 +1739,8 @@ function updateSttFieldVisibility() {
     if (prep) prep.hidden = backend === "upstream";
     const to = $("#stt-timeout-row");
     if (to) to.hidden = backend === "upstream";
+    const la = $("#stt-language-row");
+    if (la) la.hidden = backend === "upstream";
     // Shadow sub-fields per selected shadow engine.
     const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
     const su = $("#shadow-upstream-fields");
@@ -1783,6 +1788,9 @@ if (sttForm) {
         }
         if (sttForm.stt_timeout_sec && sttForm.stt_timeout_sec.value !== "") {
             body.stt_timeout_sec = parseFloat(sttForm.stt_timeout_sec.value);
+        }
+        if (sttForm.stt_language) {
+            body.stt_language = sttForm.stt_language.value.trim();
         }
         if (sttForm.stt_local_fallback) {
             body.stt_local_fallback = sttForm.stt_local_fallback.checked;

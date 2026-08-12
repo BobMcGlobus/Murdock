@@ -545,6 +545,11 @@
                             <input type="text" name="openai_model" placeholder="gpt-4o-transcribe">
                         </label>
                     </div>
+                    <label id="stt-language-row" hidden>
+                        <span data-i18n="stt.language">Language hint (ISO 639-1)</span>
+                        <input type="text" name="stt_language" placeholder="de" maxlength="8">
+                        <small class="meta" data-i18n="stt.language_hint">Used when Home Assistant sends no language. Leave empty to let the endpoint decide — most default to English, which turns a German sentence into confident English nonsense rather than an error. Full tags like de-DE are reduced to de automatically.</small>
+                    </label>
                     <label id="stt-timeout-row" hidden>
                         <span data-i18n="stt.timeout">Request timeout (seconds)</span>
                         <input type="number" step="0.5" min="1" max="120" name="stt_timeout_sec">

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.8.8
+
+**The language hint is normalised, and there is a fallback when Home
+Assistant sends none.** Both failures produce the same symptom, and it
+is a nasty one: a German utterance comes back as fluent English
+nonsense rather than as an error, because a transcription endpoint that
+cannot place the language does not complain — it guesses, and nearly
+all of them guess English.
+
+- Home Assistant forwards whatever the pipeline is configured with,
+  commonly a full tag like `de-DE`. OpenAI documents ISO-639-1, and a
+  local Parakeet server that cannot match the tag falls back to its own
+  default. Tags are now reduced to their primary subtag where the
+  request is built, so every caller gets the guarantee.
+- A new **STT language** setting fills in when Home Assistant sends no
+  language at all. Default `de`; empty means "let the endpoint decide",
+  and the backend logs a warning when it comes to that.
+
+Verified against a real `parakeet-tdt-0.6b-v3` ONNX server: `de-DE` and
+an absent hint both arrive as `language=de`, where an unset hint had the
+server logging `language=en`.
+
 ## 0.8.7
 
 **Transcript latency.** Speaker verification was never the slow part —
