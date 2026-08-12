@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.1
+
+**The Wyoming upstream URI is now next to the backend that needs it.**
+
+Selecting "Upstream (Wyoming)" as the STT backend left no visible way to
+say *which* server: the URI field had been left behind in a collapsed
+advanced block inside the Speaker recognition group when the settings
+page was reorganised, a tab away from the selector. Reported by a user
+setting up a local Kroko container.
+
+It now sits directly under the backend picker, appears only in upstream
+mode — the way the Voxtral and OpenAI fields already did — and brings
+its own "Ping upstream" button. The normalised value is echoed back
+after saving, so a bare `host:port` visibly becomes `tcp://host:port`.
+
 ## 0.9.0
 
 **The shadow engine can now answer when the primary heard nothing.**

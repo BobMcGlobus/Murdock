@@ -397,11 +397,6 @@
                     <details class="advanced">
                         <summary data-i18n="settings.adv_upstream">adv_upstream</summary>
                         <label>
-                            <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
-                            <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
-                            <small id="upstream-hint" class="meta"></small>
-                        </label>
-                        <label>
                             <span data-i18n="settings.languages">Advertised languages (comma-separated, e.g. <code>de,en</code>)</span>
                             <input type="text" name="advertised_languages" data-i18n-ph="settings.ph_languages" placeholder="leave empty for auto-detect from upstream">
                             <small id="lang-hint" class="meta"></small>
@@ -544,6 +539,17 @@
                             <span data-i18n="stt.model">Model</span>
                             <input type="text" name="openai_model" placeholder="gpt-4o-transcribe">
                         </label>
+                    </div>
+                    <div id="stt-upstream-fields" hidden>
+                        <label>
+                            <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
+                            <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
+                            <small id="upstream-hint" class="meta"></small>
+                        </label>
+                        <div class="row">
+                            <button type="button" id="ping-upstream-btn2" class="secondary small" data-i18n="settings.ping">Ping upstream</button>
+                        </div>
+                        <div id="ping-result2" class="meta"></div>
                     </div>
                     <label id="stt-language-row" hidden>
                         <span data-i18n="stt.language">Language hint (ISO 639-1)</span>

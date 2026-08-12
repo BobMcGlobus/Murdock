@@ -1294,11 +1294,6 @@ async function loadSettings() {
             }
             updateSpeakerContextMode();
         }
-        if (s.upstream_uri_source === "override") {
-            form.upstream_uri.value = s.upstream_uri || "";
-        } else {
-            form.upstream_uri.value = "";
-        }
         renderUpstreamHint(s);
         if (s.advertised_languages_source === "override") {
             form.advertised_languages.value =
@@ -1387,6 +1382,11 @@ async function loadSettings() {
             }
             if (sttForm.stt_language) {
                 sttForm.stt_language.value = s.stt_language ?? "";
+            }
+            if (sttForm.upstream_uri) {
+                sttForm.upstream_uri.value =
+                    s.upstream_uri_source === "override"
+                        ? (s.upstream_uri || "") : "";
             }
             if (sttForm.shadow_rescues_empty) {
                 sttForm.shadow_rescues_empty.checked = !!s.shadow_rescues_empty;
@@ -1744,6 +1744,10 @@ function updateSttFieldVisibility() {
     if (to) to.hidden = backend === "upstream";
     const la = $("#stt-language-row");
     if (la) la.hidden = backend === "upstream";
+    // The Wyoming URI is the one field the upstream backend needs, and it
+    // used to live in a collapsed advanced block on a different tab.
+    const up = $("#stt-upstream-fields");
+    if (up) up.hidden = backend !== "upstream";
     // Shadow sub-fields per selected shadow engine.
     const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
     const su = $("#shadow-upstream-fields");
@@ -1795,6 +1799,9 @@ if (sttForm) {
         if (sttForm.stt_language) {
             body.stt_language = sttForm.stt_language.value.trim();
         }
+        if (sttForm.upstream_uri) {
+            body.upstream_uri = sttForm.upstream_uri.value.trim();
+        }
         if (sttForm.shadow_rescues_empty) {
             body.shadow_rescues_empty = sttForm.shadow_rescues_empty.checked;
         }
@@ -1835,11 +1842,19 @@ if (sttForm) {
             body.enable_dual_transcript = sttForm.enable_dual_transcript.checked;
         }
         try {
-            await api("/api/settings", {
+            const saved = await api("/api/settings", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             });
+            // The URI is normalised server-side (a bare host:port grows a
+            // tcp:// scheme), so show what was actually stored.
+            renderUpstreamHint(saved);
+            if (sttForm.upstream_uri) {
+                sttForm.upstream_uri.value =
+                    saved.upstream_uri_source === "override"
+                        ? (saved.upstream_uri || "") : "";
+            }
             if (fb) {
                 fb.className = "feedback ok";
                 fb.textContent = t("stt.saved");
@@ -1917,7 +1932,6 @@ $("#settings-form").addEventListener("submit", async (e) => {
         unknown_logging: form.unknown_logging.checked,
         require_speaker_match: form.require_speaker_match.checked,
         passthrough_when_no_speakers: form.passthrough_when_no_speakers.checked,
-        upstream_uri: (form.upstream_uri.value || "").trim(),
         advertised_languages: parseLanguages(form.advertised_languages.value),
     };
     // New fields (backwards-compatible)
@@ -1956,20 +1970,15 @@ $("#settings-form").addEventListener("submit", async (e) => {
         });
         renderUpstreamHint(s);
         renderLangHint(s);
-        if (s.upstream_uri_source === "override") {
-            form.upstream_uri.value = s.upstream_uri || "";
-        } else {
-            form.upstream_uri.value = "";
-        }
         setStatus(t("settings.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");
     }
 });
 
-$("#ping-upstream-btn").addEventListener("click", async () => {
-    const btn = $("#ping-upstream-btn");
-    const out = $("#ping-result");
+async function pingUpstream(btnSel, outSel) {
+    const btn = $(btnSel);
+    const out = $(outSel);
     btn.disabled = true;
     btn.textContent = t("ping.pinging");
     out.innerHTML = "";
@@ -2000,7 +2009,17 @@ $("#ping-upstream-btn").addEventListener("click", async () => {
         btn.disabled = false;
         btn.textContent = t("settings.ping");
     }
-});
+}
+
+// Both entry points: the one beside the backend selector, and the one
+// that has always sat in the recognition group.
+$("#ping-upstream-btn").addEventListener("click", () =>
+    pingUpstream("#ping-upstream-btn", "#ping-result"));
+const pingBtn2 = $("#ping-upstream-btn2");
+if (pingBtn2) {
+    pingBtn2.addEventListener("click", () =>
+        pingUpstream("#ping-upstream-btn2", "#ping-result2"));
+}
 
 // --- Threshold recommendation ----------------------------------------------
 
