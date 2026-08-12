@@ -290,3 +290,95 @@ def test_defaults():
     assert s.stt_local_fallback is False
     assert s.shadow_stt_backend == "none"
     assert s.openai_model == "gpt-4o-transcribe"
+
+
+def _timing_backend(monkeypatch, *, ttfb_delay=0.05, body_delay=0.0, payload=None):
+    """An OpenAI-compatible backend whose transport is a stopwatch.
+
+    Fakes httpx at the send/aread boundary so the split can be asserted
+    without a network: the delay before headers must land in ttfb_ms,
+    the delay while reading the body must land in body_ms.
+    """
+    import time as _time
+    import murdock.core.stt_backend as mod
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self):
+            self._payload = payload if payload is not None else {"text": "hallo"}
+
+        async def aread(self):
+            if body_delay:
+                await asyncio.sleep(body_delay)
+
+        async def aclose(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def build_request(self, *a, **kw):
+            return object()
+
+        async def send(self, request, stream=False):
+            if ttfb_delay:
+                await asyncio.sleep(ttfb_delay)
+            return _Resp()
+
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _Client)
+    return mod.OpenAICompatibleBackend(api_key="k", model="whisper-large-v3-turbo")
+
+
+def test_timing_splits_ttfb_from_body(monkeypatch):
+    b = _timing_backend(monkeypatch, ttfb_delay=0.06, body_delay=0.02)
+    text = asyncio.run(b.transcribe(b"\x00" * 32000))
+    assert text == "hallo"
+    t = b.last_timing
+    # Headers waited ~60ms, body ~20ms — the split must reflect that and
+    # not collapse into one number.
+    assert t["ttfb_ms"] >= 50
+    assert t["body_ms"] >= 15
+    assert t["total_ms"] >= t["ttfb_ms"]
+    # 32000 bytes of 16-bit 16 kHz PCM is exactly 1 second.
+    assert 990 <= t["audio_ms"] <= 1010
+    assert t["sent_bytes"] > 32000  # WAV header included
+    assert t["engine"] == "openai:whisper-large-v3-turbo"
+
+
+def test_timing_is_recorded_even_when_the_request_fails(monkeypatch):
+    """A timeout's breakdown is what tells a stalled upload from a slow model."""
+    import murdock.core.stt_backend as mod
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def build_request(self, *a, **kw):
+            return object()
+
+        async def send(self, request, stream=False):
+            raise mod.httpx.ConnectTimeout("nope")
+
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _Client)
+    b = mod.OpenAICompatibleBackend(api_key="k", model="m")
+    with pytest.raises(mod.STTBackendError):
+        asyncio.run(b.transcribe(b"\x00" * 3200))
+    assert b.last_timing["failed"] == "timeout"
+    assert b.last_timing["total_ms"] >= 0

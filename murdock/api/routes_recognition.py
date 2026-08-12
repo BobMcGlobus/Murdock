@@ -37,6 +37,8 @@ class RecognitionEventOut(BaseModel):
     # Wall-clock time per STT engine, so the A/B view compares speed too.
     transcript_ms: Optional[float] = None
     shadow_ms: Optional[float] = None
+    # {"ttfb_ms", "body_ms", "total_ms", "sent_bytes", "audio_ms", …}
+    transcript_timing: Optional[dict] = None
     weight: Optional[float] = None
     margin: Optional[float] = None
     whisper: bool = False
@@ -94,6 +96,7 @@ async def list_events(
                 shadow_engine=e.shadow_engine,
                 transcript_ms=e.transcript_ms,
                 shadow_ms=e.shadow_ms,
+                transcript_timing=e.transcript_timing,
                 weight=e.weight,
                 margin=e.margin,
                 whisper=e.whisper,

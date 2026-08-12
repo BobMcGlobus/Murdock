@@ -2674,6 +2674,26 @@ function renderRecognitionEvent(e) {
         e.verify_ms !== null && e.verify_ms !== undefined
             ? `verify=${e.verify_ms.toFixed(0)}ms`
             : "";
+    // Request breakdown for the primary cloud engine. TTFB carries the
+    // upload, the queue and the decode; the body is a few hundred bytes,
+    // so a body figure that isn't ~0 means the network, not the model.
+    const tt = e.transcript_timing || null;
+    const sttParts = [];
+    if (tt && tt.ttfb_ms !== undefined && tt.ttfb_ms !== null) {
+        sttParts.push(`ttfb=${formatMs(tt.ttfb_ms)}`);
+    }
+    if (tt && tt.body_ms !== undefined && tt.body_ms !== null) {
+        sttParts.push(`body=${formatMs(tt.body_ms)}`);
+    }
+    if (tt && tt.sent_bytes) {
+        sttParts.push(`${Math.round(tt.sent_bytes / 1024)}kB`);
+    }
+    if (tt && tt.failed) {
+        sttParts.push(escapeHtml(tt.failed));
+    }
+    const sttLine = sttParts.length
+        ? `<div class="meta">stt: ${sttParts.join(" · ")}</div>`
+        : "";
     const scoreLine = [dist, thr, vms].filter(Boolean).join(" · ");
     // Engine timing badge. In upstream mode the primary streams while the
     // audio is still arriving, so its figure is the remaining wait — the
@@ -2752,6 +2772,7 @@ function renderRecognitionEvent(e) {
             ${shadow}
             ${nearestHint}
             ${scoreLine ? `<div class="meta">${scoreLine}</div>` : ""}
+            ${sttLine}
             ${assignBtn ? `<div class="row">${assignBtn}</div>` : ""}
         </div>
     `;

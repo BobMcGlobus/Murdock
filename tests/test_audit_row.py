@@ -29,6 +29,8 @@ def _handler(tmp_path):
         _session_id="s1",
         _satellite_id="wohnzimmer",
         _transcript_ms=412.0,
+        _transcript_timing={"ttfb_ms": 401.2, "body_ms": 2.8,
+                            "total_ms": 404.0, "sent_bytes": 105600},
         _whisper=True,
         _whisper_score=0.83,
         _speakers=[{"speaker": "Jonas", "seconds": 2.4},
@@ -117,3 +119,29 @@ def test_no_roster_stores_nothing(tmp_path):
     fake._speakers = []
     MurdockHandler._record_event(fake, outcome="match", duration_sec=1.0)
     assert log.list_events(limit=1)[0].speakers == []
+
+
+def test_transcript_timing_round_trips(tmp_path):
+    """The breakdown must survive the DB, not just exist in memory."""
+    log = RecognitionLog(open_db(tmp_path / "m.db"))
+    timing = {
+        "engine": "openai:whisper-large-v3-turbo",
+        "ttfb_ms": 812.4,
+        "body_ms": 3.1,
+        "total_ms": 815.5,
+        "sent_bytes": 107584,
+        "audio_ms": 3360.0,
+    }
+    log.record(
+        session_id="s1", satellite_id="wohnzimmer", duration_sec=3.36,
+        outcome="match", matched_speaker="Jonas", transcript_ms=815.5,
+        transcript_timing=timing,
+    )
+    [event] = log.list_events(limit=1)
+    assert event.transcript_timing == timing
+    # An event without a breakdown stays None rather than becoming {}.
+    log.record(
+        session_id="s2", satellite_id="wohnzimmer", duration_sec=1.0,
+        outcome="match", matched_speaker="Jonas",
+    )
+    assert log.list_events(limit=1)[0].transcript_timing is None

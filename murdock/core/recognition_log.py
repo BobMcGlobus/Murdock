@@ -69,12 +69,27 @@ class RecognitionEvent:
     # A/B comparison covers speed and not just wording.
     transcript_ms: Optional[float] = None
     shadow_ms: Optional[float] = None
+    # Breakdown of the primary engine's request: TTFB vs body download,
+    # plus what was actually uploaded. One number can't distinguish
+    # "the model thought hard" from "the upload crawled".
+    transcript_timing: Optional[dict] = None
     # Whether the utterance was whispered, and how strongly — the score
     # is what makes the threshold tunable against real recordings.
     whisper: bool = False
     whisper_score: Optional[float] = None
     # Every enrolled voice heard in the clip, JSON-decoded.
     speakers: List[dict] = field(default_factory=list)
+
+
+def _decode_timing(raw) -> Optional[dict]:
+    """Decode the stored request breakdown, tolerating anything malformed."""
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _decode_speakers(raw) -> List[dict]:
@@ -122,6 +137,7 @@ class RecognitionLog:
         weight: Optional[float] = None,
         margin: Optional[float] = None,
         transcript_ms: Optional[float] = None,
+        transcript_timing: Optional[dict] = None,
         whisper: bool = False,
         whisper_score: Optional[float] = None,
         speakers: Optional[List[dict]] = None,
@@ -141,8 +157,8 @@ class RecognitionLog:
                     "outcome, matched_speaker, distance, threshold, "
                     "verify_ms, transcript, emotion, emotion_confidence, "
                     "weight, margin, transcript_ms, whisper, "
-                    "whisper_score, speakers) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "whisper_score, speakers, transcript_timing) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -162,6 +178,7 @@ class RecognitionLog:
                         1 if whisper else 0,
                         whisper_score,
                         json.dumps(speakers) if speakers else None,
+                        json.dumps(transcript_timing) if transcript_timing else None,
                     ),
                 )
                 row_id = int(cur.lastrowid)
@@ -215,7 +232,8 @@ class RecognitionLog:
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
                 "transcript, emotion, emotion_confidence, "
                 "shadow_transcript, shadow_engine, weight, margin, "
-                "transcript_ms, shadow_ms, whisper, whisper_score, speakers "
+                "transcript_ms, shadow_ms, whisper, whisper_score, speakers, "
+                "transcript_timing "
                 f"FROM recognition_events {where} "
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
@@ -241,6 +259,10 @@ class RecognitionLog:
                 margin=row["margin"] if "margin" in row.keys() else None,
                 transcript_ms=row["transcript_ms"] if "transcript_ms" in row.keys() else None,
                 shadow_ms=row["shadow_ms"] if "shadow_ms" in row.keys() else None,
+                transcript_timing=_decode_timing(
+                    row["transcript_timing"]
+                    if "transcript_timing" in row.keys() else None
+                ),
                 whisper=bool(row["whisper"]) if "whisper" in row.keys() and row["whisper"] else False,
                 whisper_score=row["whisper_score"] if "whisper_score" in row.keys() else None,
                 speakers=_decode_speakers(row["speakers"] if "speakers" in row.keys() else None),

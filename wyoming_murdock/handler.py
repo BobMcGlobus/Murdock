@@ -176,6 +176,7 @@ class MurdockHandler(AsyncEventHandler):
         # How long each STT engine took on this utterance, so the A/B
         # comparison in the log covers speed, not just wording.
         self._transcript_ms: Optional[float] = None
+        self._transcript_timing: Optional[dict] = None
         self._shadow_ms: Optional[float] = None
 
         # Canonicalizations applied to this transcript, for the log.
@@ -352,6 +353,7 @@ class MurdockHandler(AsyncEventHandler):
         self._dual_shadow = None
         self._transcript_hints = []
         self._transcript_ms = None
+        self._transcript_timing = None
         self._shadow_ms = None
         self._canonicalizations = []
         self._whisper = False
@@ -806,6 +808,12 @@ class MurdockHandler(AsyncEventHandler):
             except STTBackendError as exc:
                 _LOGGER.warning("[%s] Cloud STT failed: %s", sid, exc)
                 failed = True
+            finally:
+                # Kept on the failure path too: a timeout's breakdown is
+                # exactly what tells a stalled upload from a slow model.
+                self._transcript_timing = getattr(
+                    backend, "last_timing", None
+                ) or None
 
         if failed and self.context.get_stt_local_fallback():
             uri = self.context.get_upstream_uri()
@@ -1864,6 +1872,7 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 margin=margin,
                 transcript_ms=self._transcript_ms,
+                transcript_timing=self._transcript_timing,
                 whisper=self._whisper,
                 whisper_score=self._whisper_score,
                 speakers=self._speakers or None,

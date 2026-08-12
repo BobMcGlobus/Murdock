@@ -99,6 +99,11 @@ class OpenAICompatibleBackend:
         self.language = language
         self.timeout = timeout
         self.prompt = (prompt or "").strip() or None
+        #: Breakdown of the most recent :meth:`transcribe` call. The
+        #: context builds a fresh backend per transcription, so this
+        #: never spans two utterances. Populated even when the request
+        #: fails, so a timeout is as diagnosable as a slow success.
+        self.last_timing: dict = {}
         self.base_url = (base_url or "https://api.openai.com").rstrip("/")
         # OpenRouter deviates from the OpenAI shape: JSON body with
         # base64 audio instead of a multipart file, model slugs carry a
@@ -164,6 +169,11 @@ class OpenAICompatibleBackend:
         """
         lang = language or self.language
         wav_data = _pcm_to_wav(pcm_audio, rate, width, channels)
+        self.last_timing = {
+            "engine": self.label,
+            "sent_bytes": len(wav_data),
+            "audio_ms": round(len(pcm_audio) / (rate * width * channels) * 1000, 1),
+        }
         t0 = time.monotonic()
 
         try:
@@ -175,12 +185,29 @@ class OpenAICompatibleBackend:
                 headers=headers,
                 timeout=self.timeout,
             ) as client:
-                resp = await client.post(
+                # Sent streaming so the response headers can be timed
+                # separately from the body. Upload + queueing + decode all
+                # land in TTFB, which is the number that actually moves;
+                # a transcript body is a few hundred bytes and should be
+                # noise. When it isn't, the problem is the network, not
+                # the model — and that distinction is the whole point.
+                request = client.build_request(
+                    "POST",
                     "/v1/audio/transcriptions",
                     **self._request_kwargs(wav_data, lang),
                 )
-
+                resp = await client.send(request, stream=True)
+                ttfb_ms = (time.monotonic() - t0) * 1000
+                try:
+                    await resp.aread()
+                finally:
+                    await resp.aclose()
                 elapsed_ms = (time.monotonic() - t0) * 1000
+                self.last_timing.update(
+                    ttfb_ms=round(ttfb_ms, 1),
+                    body_ms=round(elapsed_ms - ttfb_ms, 1),
+                    total_ms=round(elapsed_ms, 1),
+                )
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
@@ -194,8 +221,9 @@ class OpenAICompatibleBackend:
                 result = resp.json()
                 text = result.get("text", "")
                 _LOGGER.info(
-                    "%s transcript (%.0fms): %r",
-                    self.label, elapsed_ms, text[:100],
+                    "%s transcript (%.0fms: ttfb %.0f, body %.0f): %r",
+                    self.label, elapsed_ms, ttfb_ms, elapsed_ms - ttfb_ms,
+                    text[:100],
                 )
                 return text
 
@@ -203,10 +231,12 @@ class OpenAICompatibleBackend:
             raise
         except httpx.TimeoutException as exc:
             elapsed_ms = (time.monotonic() - t0) * 1000
+            self.last_timing.update(total_ms=round(elapsed_ms, 1), failed="timeout")
             _LOGGER.warning("%s timeout after %.0fms", self.label, elapsed_ms)
             raise STTBackendError(f"{self.label}: timeout") from exc
         except Exception as exc:
             elapsed_ms = (time.monotonic() - t0) * 1000
+            self.last_timing.update(total_ms=round(elapsed_ms, 1), failed="error")
             _LOGGER.warning(
                 "%s request failed (%.0fms): %s", self.label, elapsed_ms, exc
             )
