@@ -549,6 +549,8 @@ const I18N = (() => {
             "ping.failed": "Ping failed: {err}",
             "ping.languages": "languages:",
             "ping.upstream_supports": "Upstream supports {n} languages:",
+            "ping.unsaved_note": "Tested the address in the field above — save the form to actually use it.",
+            "ping.unsaved_note": "Getestet wurde die Adresse aus dem Feld oben — zum Verwenden das Formular speichern.",
             "ping.advertise_note": "This is what the upstream STT can do — Murdock only advertises the languages you set above.",
 
             // -- Refresh --

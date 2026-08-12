@@ -12,7 +12,7 @@
 # optional language overrides. Everything else is editable live.
 
 name: Murdock
-version: "0.9.1"
+version: "0.9.2"
 slug: murdock
 description: >-
   Speaker-recognition proxy for Home Assistant (Wyoming). Identifies

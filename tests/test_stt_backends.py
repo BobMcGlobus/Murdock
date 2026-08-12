@@ -438,3 +438,26 @@ def test_configured_language_fills_in_when_ha_sends_none(tmp_path):
 
     ctx.set_stt_language("")
     assert ctx.get_openai_backend().language is None
+
+
+def test_ping_accepts_an_unsaved_uri_to_test():
+    """The button sits beside the input, so it must test what was typed.
+
+    Pinging the stored value while the user looks at an edited field
+    reads as "my input is being ignored" — which is exactly how it was
+    reported.
+    """
+    import inspect
+
+    from murdock.api.routes_settings import UpstreamPingIn, ping_upstream
+
+    assert "uri" in UpstreamPingIn.model_fields
+    # Optional body: no argument still pings the live URI.
+    params = inspect.signature(ping_upstream).parameters
+    assert params["body"].default is None
+
+    from murdock.core.context import _normalize_wyoming_uri
+
+    # A bare host:port from the field grows the scheme before dialling.
+    assert _normalize_wyoming_uri("192.168.2.25:10400") == "tcp://192.168.2.25:10400"
+    assert _normalize_wyoming_uri("tcp://h:1") == "tcp://h:1"

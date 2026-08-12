@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.2
+
+**"Ping upstream" now tests the address in the field**, not the one
+already stored.
+
+Sitting the button directly under the input in 0.9.1 made it look like a
+test of what you typed, while it still dialled the saved value. Entering
+a new host and pressing it reported a failure against the *old* address
+— which reads as "the field is being ignored", and was reported exactly
+that way.
+
+The endpoint takes an optional URI to test instead of the stored one,
+normalising a bare `host:port` the same way saving does. Nothing is
+persisted by a ping, so a successful test of an unsaved address now says
+so rather than leaving the opposite impression.
+
 ## 0.9.1
 
 **The Wyoming upstream URI is now next to the backend that needs it.**

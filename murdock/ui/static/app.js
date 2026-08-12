@@ -1976,14 +1976,23 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
 });
 
-async function pingUpstream(btnSel, outSel) {
+async function pingUpstream(btnSel, outSel, uriSel) {
     const btn = $(btnSel);
     const out = $(outSel);
+    // Test what is in the field, falling back to the stored value. A
+    // ping that silently uses the saved URI while the user looks at an
+    // edited one reads as "my input is being ignored".
+    const uriEl = uriSel ? $(uriSel) : null;
+    const typed = uriEl ? (uriEl.value || "").trim() : "";
     btn.disabled = true;
     btn.textContent = t("ping.pinging");
     out.innerHTML = "";
     try {
-        const res = await api("/api/settings/ping-upstream", { method: "POST" });
+        const res = await api("/api/settings/ping-upstream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(typed ? { uri: typed } : {}),
+        });
         if (res.ok) {
             const langArr = res.languages || [];
             const langs = langArr.join(", ") || "(none)";
@@ -1992,7 +2001,8 @@ async function pingUpstream(btnSel, outSel) {
                 `<code>${escapeHtml(res.upstream_uri)}</code> — ` +
                 `${res.latency_ms.toFixed(0)}ms<br>` +
                 `${escapeHtml(t("ping.upstream_supports", { n: langArr.length }))} ${escapeHtml(langs)}<br>` +
-                `<small class="meta">${escapeHtml(t("ping.advertise_note"))}</small>`;
+                `<small class="meta">${escapeHtml(t("ping.advertise_note"))}</small>` +
+                (typed ? `<br><small class="meta">${escapeHtml(t("ping.unsaved_note"))}</small>` : "");
             setStatus(t("ping.upstream_ok"), "ok");
         } else {
             out.innerHTML =
@@ -2018,7 +2028,8 @@ $("#ping-upstream-btn").addEventListener("click", () =>
 const pingBtn2 = $("#ping-upstream-btn2");
 if (pingBtn2) {
     pingBtn2.addEventListener("click", () =>
-        pingUpstream("#ping-upstream-btn2", "#ping-result2"));
+        pingUpstream("#ping-upstream-btn2", "#ping-result2",
+                     '#stt-form [name="upstream_uri"]'));
 }
 
 // --- Threshold recommendation ----------------------------------------------

@@ -523,22 +523,36 @@ class UpstreamPingOut(BaseModel):
     error: Optional[str] = None
 
 
+class UpstreamPingIn(BaseModel):
+    # A URI to test *instead of* the stored one, so the button beside the
+    # input tests what was typed. Pinging the saved value while the user
+    # looks at an edited field reads as "the field is being ignored".
+    uri: Optional[str] = None
+
+
 @router.post("/ping-upstream", response_model=UpstreamPingOut)
-async def ping_upstream(ctx: AppContext = Depends(get_context)):
-    """Open a Wyoming connection to the upstream STT and describe it.
+async def ping_upstream(
+    body: Optional[UpstreamPingIn] = None,
+    ctx: AppContext = Depends(get_context),
+):
+    """Open a Wyoming connection to an upstream STT and describe it.
 
     Pure diagnostic endpoint: lets the user verify from the Settings tab
-    that Murdock can actually reach its configured upstream, instead of
-    having to interpret the container logs.
+    that Murdock can actually reach its upstream, instead of having to
+    interpret the container logs. With no body it tests the live URI (UI
+    override > compose default), which is what the handler would use.
     """
     import time as _time
 
     from wyoming.client import AsyncClient
     from wyoming.info import Describe, Info
 
-    # Use the LIVE URI (UI override > compose default), not the static
-    # env value, so the button actually pings what the handler would.
-    upstream_uri = ctx.get_upstream_uri()
+    from murdock.core.context import _normalize_wyoming_uri
+
+    candidate = (body.uri or "").strip() if body else ""
+    upstream_uri = (
+        _normalize_wyoming_uri(candidate) if candidate else ctx.get_upstream_uri()
+    )
     t0 = _time.monotonic()
     try:
         async with AsyncClient.from_uri(upstream_uri) as client:
