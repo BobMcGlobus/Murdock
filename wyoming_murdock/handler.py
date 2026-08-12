@@ -177,6 +177,7 @@ class MurdockHandler(AsyncEventHandler):
         # comparison in the log covers speed, not just wording.
         self._transcript_ms: Optional[float] = None
         self._transcript_timing: Optional[dict] = None
+        self._stt_prep: Optional[dict] = None
         self._shadow_ms: Optional[float] = None
 
         # Canonicalizations applied to this transcript, for the log.
@@ -354,6 +355,7 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_hints = []
         self._transcript_ms = None
         self._transcript_timing = None
+        self._stt_prep = None
         self._shadow_ms = None
         self._canonicalizations = []
         self._whisper = False
@@ -796,10 +798,29 @@ class MurdockHandler(AsyncEventHandler):
             )
             failed = True
         else:
+            # Condition a *copy* for the upload. The embedding was already
+            # computed from the untouched audio — fbank does its own mean
+            # normalisation, and changing the level under it would shift
+            # every distance.
+            upload_audio = audio_16k
+            if self.context.get_enable_stt_prep():
+                from murdock.core.stt_prep import prepare_for_upload
+
+                upload_audio, prep_info = await asyncio.to_thread(
+                    prepare_for_upload, audio_16k, self.context.vad
+                )
+                self._stt_prep = prep_info
+                if prep_info:
+                    _LOGGER.info(
+                        "[%s] Upload prep: trimmed %.0fms, level %.1f → %.1f dBFS",
+                        sid, prep_info["trimmed_ms"],
+                        prep_info["level_before_dbfs"],
+                        prep_info["level_after_dbfs"],
+                    )
             _LOGGER.info("[%s] Transcribing via %s…", sid, backend.label)
             try:
                 return await backend.transcribe(
-                    audio_16k,
+                    upload_audio,
                     rate=16000,
                     width=2,
                     channels=1,
@@ -811,9 +832,10 @@ class MurdockHandler(AsyncEventHandler):
             finally:
                 # Kept on the failure path too: a timeout's breakdown is
                 # exactly what tells a stalled upload from a slow model.
-                self._transcript_timing = getattr(
-                    backend, "last_timing", None
-                ) or None
+                timing = dict(getattr(backend, "last_timing", None) or {})
+                if timing and self._stt_prep:
+                    timing.update(self._stt_prep)
+                self._transcript_timing = timing or None
 
         if failed and self.context.get_stt_local_fallback():
             uri = self.context.get_upstream_uri()

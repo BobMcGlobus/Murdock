@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     # clean concatenation. Fast-path skips it entirely for single-region
     # utterances, so the common case pays only one cheap VAD pass.
     enable_extraction: bool = Field(default=True)
+    # Condition the audio sent to a cloud STT endpoint: trim the silence
+    # before and after the utterance, and normalise the level. Upload
+    # copy only — the speaker embedding is computed from the untouched
+    # audio.
+    enable_stt_prep: bool = Field(default=True)
     # Cosine-distance ceiling for claiming a region for a speaker. Should
     # be stricter (smaller) than verify_threshold — we only keep regions
     # we're confident about, then verify the concatenation at the normal

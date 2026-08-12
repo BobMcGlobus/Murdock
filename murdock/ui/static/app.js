@@ -1245,6 +1245,9 @@ async function loadSettings() {
             form.auto_enroll.checked = !!s.auto_enroll;
         }
         // Speaker extraction (new fields — backwards-compatible)
+        if (form.enable_stt_prep) {
+            form.enable_stt_prep.checked = !!s.enable_stt_prep;
+        }
         if (form.enable_extraction) {
             form.enable_extraction.checked = !!s.enable_extraction;
         }
@@ -1724,6 +1727,10 @@ function updateSttFieldVisibility() {
     // Local fallback only makes sense for buffering cloud backends.
     const fb = $("#stt-fallback-row");
     if (fb) fb.hidden = backend === "upstream";
+    // Upload conditioning only applies where audio is uploaded — the
+    // upstream path streams while the user is still speaking.
+    const prep = $("#stt-prep-row");
+    if (prep) prep.hidden = backend === "upstream";
     // Shadow sub-fields per selected shadow engine.
     const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
     const su = $("#shadow-upstream-fields");
@@ -1897,6 +1904,9 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.auto_enroll) {
         body.auto_enroll = form.auto_enroll.checked;
+    }
+    if (form.enable_stt_prep) {
+        body.enable_stt_prep = form.enable_stt_prep.checked;
     }
     if (form.enable_extraction) {
         body.enable_extraction = form.enable_extraction.checked;
@@ -2687,6 +2697,9 @@ function renderRecognitionEvent(e) {
     }
     if (tt && tt.sent_bytes) {
         sttParts.push(`${Math.round(tt.sent_bytes / 1024)}kB`);
+    }
+    if (tt && tt.trimmed_ms > 0) {
+        sttParts.push(`-${formatMs(tt.trimmed_ms)} ${t("rec.trimmed")}`);
     }
     if (tt && tt.failed) {
         sttParts.push(escapeHtml(tt.failed));

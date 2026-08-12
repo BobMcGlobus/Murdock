@@ -550,6 +550,11 @@
                         <span data-i18n="stt.local_fallback">Local fallback via Wyoming upstream</span>
                         <small class="meta" data-i18n="stt.local_fallback_hint">If the cloud backend fails (internet down, provider outage), the buffered audio is transcribed by the Wyoming upstream instead of returning an empty transcript. Needs a reachable upstream URI.</small>
                     </label>
+                    <label class="switch" id="stt-prep-row" hidden>
+                        <input type="checkbox" name="enable_stt_prep">
+                        <span data-i18n="stt.prep">Condition audio before upload</span>
+                        <small class="meta" data-i18n="stt.prep_hint">Trims the silence before and after the utterance and normalises the level. Transcription models hallucinate in silence, and that invented text is what pushes Whisper into re-decoding the clip. The speaker embedding is computed from the untouched audio and is not affected.</small>
+                    </label>
                     <h3 data-i18n="stt.quality_title">Transcript quality</h3>
                     <label class="switch">
                         <input type="checkbox" name="enable_stt_vocabulary">

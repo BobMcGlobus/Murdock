@@ -45,6 +45,7 @@ class SettingsOut(BaseModel):
     min_liveness_score: float
     auto_enroll: bool
     enable_extraction: bool = True
+    enable_stt_prep: bool = True
     extraction_threshold: float = 0.25
     extraction_min_region_sec: float = 0.6
     enable_calibration: bool = True
@@ -141,6 +142,7 @@ class SettingsPatch(BaseModel):
     min_liveness_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     auto_enroll: Optional[bool] = None
     enable_extraction: Optional[bool] = None
+    enable_stt_prep: Optional[bool] = None
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     enable_calibration: Optional[bool] = None
@@ -239,6 +241,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         min_liveness_score=ctx.get_min_liveness_score(),
         auto_enroll=ctx.get_auto_enroll(),
         enable_extraction=ctx.get_enable_extraction(),
+        enable_stt_prep=ctx.get_enable_stt_prep(),
         extraction_threshold=ctx.get_extraction_threshold(),
         extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
         enable_calibration=ctx.get_enable_calibration(),
@@ -349,6 +352,8 @@ async def patch_settings(
         ctx.set_auto_enroll(body.auto_enroll)
     if body.enable_extraction is not None:
         ctx.set_enable_extraction(body.enable_extraction)
+    if body.enable_stt_prep is not None:
+        ctx.set_enable_stt_prep(body.enable_stt_prep)
     if body.extraction_threshold is not None:
         ctx.set_extraction_threshold(body.extraction_threshold)
     if body.extraction_min_region_sec is not None:

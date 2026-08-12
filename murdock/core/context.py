@@ -258,6 +258,15 @@ class AppContext:
     def set_enable_extraction(self, enabled: bool) -> None:
         set_setting(self.db, "enable_extraction", "true" if enabled else "false")
 
+    def get_enable_stt_prep(self) -> bool:
+        override = get_setting(self.db, "enable_stt_prep")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return self.settings.enable_stt_prep
+
+    def set_enable_stt_prep(self, enabled: bool) -> None:
+        set_setting(self.db, "enable_stt_prep", "true" if enabled else "false")
+
     def get_extraction_threshold(self, satellite_id: Optional[str] = None) -> float:
         """Effective extraction distance ceiling.
 
