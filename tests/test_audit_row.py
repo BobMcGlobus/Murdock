@@ -32,6 +32,8 @@ def _handler(tmp_path):
         _transcript_timing={"ttfb_ms": 401.2, "body_ms": 2.8,
                             "total_ms": 404.0, "sent_bytes": 105600},
         _rescued_by=None,
+        _gate_ms=310.0,
+        _answer_ms=6950.0,
         _whisper=True,
         _whisper_score=0.83,
         _speakers=[{"speaker": "Jonas", "seconds": 2.4},

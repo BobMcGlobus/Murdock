@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.9.3
+
+**Murdock now measures the stretch a user actually waits for.**
+
+A pipeline trace showed 6.95 s between Home Assistant's last audio chunk
+and the transcript coming back, while Murdock's own log reported a 0 ms
+primary, an 847 ms rescue and a 137 ms verify. Those are not
+contradictory — the request breakdown only ever covered the request, so
+everything around it was invisible, and no amount of reading the log
+could locate the gap.
+
+Two figures are now recorded with every event and shown in the
+recognition log:
+
+- **`answer`** — from the last audio chunk to the transcript going back.
+  This is the number the person waiting experiences.
+- **`gate`** — the share of it spent before the embedder runs: resample,
+  whisper detection, liveness, extraction, media tightening.
+
+`answer` minus `gate` minus the engine's own time is what is left to
+explain, and it is now a subtraction rather than a guess.
+
 ## 0.9.2
 
 **"Ping upstream" now tests the address in the field**, not the one

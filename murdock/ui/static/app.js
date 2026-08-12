@@ -2753,6 +2753,12 @@ function renderRecognitionEvent(e) {
     if (tt && tt.trimmed_ms > 0) {
         sttParts.push(`-${formatMs(tt.trimmed_ms)} ${t("rec.trimmed")}`);
     }
+    if (tt && tt.answer_ms !== undefined && tt.answer_ms !== null) {
+        sttParts.push(`${t("rec.answer")}=${formatMs(tt.answer_ms)}`);
+    }
+    if (tt && tt.gate_ms !== undefined && tt.gate_ms !== null) {
+        sttParts.push(`${t("rec.gate")}=${formatMs(tt.gate_ms)}`);
+    }
     if (tt && tt.rescued_by) {
         sttParts.push(`${t("rec.rescued")} ${escapeHtml(tt.rescued_by)}`);
     }

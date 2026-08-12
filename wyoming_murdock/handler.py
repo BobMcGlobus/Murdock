@@ -135,6 +135,12 @@ class MurdockHandler(AsyncEventHandler):
         self._language: Optional[str] = None
         self._responded = False
         self._stream_start: Optional[float] = None
+        # When HA stopped sending audio. Everything the caller
+        # actually waits for happens after this instant, and it
+        # was the one stretch Murdock could not account for.
+        self._stop_at: Optional[float] = None
+        self._gate_ms: Optional[float] = None
+        self._answer_ms: Optional[float] = None
         self._session_id = uuid.uuid4().hex[:8]
         self._satellite_id: Optional[str] = None
         # Room/area of the satellite (from the active_satellite signal),
@@ -1147,6 +1153,7 @@ class MurdockHandler(AsyncEventHandler):
 
     async def _finish_session(self) -> None:
         sid = self._session_id
+        self._stop_at = time.monotonic()
         self._resolve_satellite_id()
         from murdock.core.audio import to_mono_16k_pcm
 
@@ -1415,6 +1422,10 @@ class MurdockHandler(AsyncEventHandler):
             )
         verify_kwargs = self._verify_kwargs(tighten=tighten)
 
+        if self._stop_at is not None:
+            # Everything up to here — resample, whisper, liveness,
+            # extraction, media tightening — before the embedder runs.
+            self._gate_ms = (time.monotonic() - self._stop_at) * 1000
         verify_start = time.monotonic()
         embedding: Optional[np.ndarray] = None
         result = None
@@ -1706,10 +1717,14 @@ class MurdockHandler(AsyncEventHandler):
         us whether the bug is upstream or satellite-side.
         """
         sid = self._session_id
+        if self._stop_at is not None and self._answer_ms is None:
+            self._answer_ms = (time.monotonic() - self._stop_at) * 1000
         try:
             await self.write_event(Transcript(text=text).event())
             _LOGGER.info(
-                "[%s] → satellite Transcript (%s): %r", sid, label, text
+                "[%s] → satellite Transcript (%s) after %.0fms since "
+                "AudioStop (gate %.0fms): %r",
+                sid, label, self._answer_ms or 0.0, self._gate_ms or 0.0, text,
             )
         except Exception as exc:
             _LOGGER.error(
@@ -1937,12 +1952,21 @@ class MurdockHandler(AsyncEventHandler):
         asyncio.create_task(self._run_shadow(event_id, audio_16k))
 
     def _timing_with_rescue(self) -> Optional[dict]:
-        """The request breakdown, noting which engine actually answered."""
-        if not self._rescued_by:
-            return self._transcript_timing
+        """The request breakdown, plus what happened around it.
+
+        ``answer_ms`` is the number a user actually feels: from Home
+        Assistant's last audio chunk to the transcript going back. The
+        engine's own figure only covers the request, so a gap between
+        the two used to be invisible — and unexplainable.
+        """
         timing = dict(self._transcript_timing or {})
-        timing["rescued_by"] = self._rescued_by
-        return timing
+        if self._rescued_by:
+            timing["rescued_by"] = self._rescued_by
+        if self._gate_ms is not None:
+            timing["gate_ms"] = round(self._gate_ms, 1)
+        if self._answer_ms is not None:
+            timing["answer_ms"] = round(self._answer_ms, 1)
+        return timing or None
 
     async def _rescue_empty_transcript(self, audio_16k: bytes) -> str:
         """Ask the shadow engine when the primary heard nothing.
