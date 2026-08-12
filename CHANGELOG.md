@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.9
+
+**A running air conditioner made ordinary speech read as whispering.**
+Reported from a real install at score 0.78, and reproducible: the same
+voiced utterance scores 0.01 in a quiet room and 0.69 with steady
+broadband noise underneath — over the 0.62 bar.
+
+Two causes, both in the frame selection rather than the acoustics:
+
+- The silence floor was **absolute** (RMS 0.004), and a fan or air
+  conditioner sits above it. Its frames counted as active, and having no
+  periodicity they dragged the voiced ratio down. The activity bar is
+  now lifted relative to *this clip's* own room tone, so the noise never
+  gets a vote.
+- The voiced ratio was a **plain frame count**, so a long tail of quiet
+  frames that only just cleared the bar could outvote a few loud voiced
+  syllables. It is now energy-weighted: the question is what share of
+  the speech is voiced, not what share of the frames.
+
+The bar is capped at half the loudest frame so a quiet whisper in a loud
+room is still judged. Scoring it 0 would read as "definitely not
+whispering" when the truth is "could not tell" — and the absolute floor
+still wins underneath, or a clip of pure room tone would judge itself.
+
+Across noise levels from a quiet room to a very loud one, speech now
+scores 0.00 and whispering 0.69–1.00.
+
 ## 0.8.8
 
 **The language hint is normalised, and there is a fallback when Home

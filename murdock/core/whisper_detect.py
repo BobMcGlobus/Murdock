@@ -46,9 +46,16 @@ _HOP = 256
 _MIN_LAG = int(_SAMPLE_RATE / 350)
 _MAX_LAG = int(_SAMPLE_RATE / 70)
 
-# Frames quieter than this are silence, not whispering — scoring them
-# would drown the decision in room tone.
+# Absolute floor: frames quieter than this are silence, not whispering.
 _SILENCE_RMS = 0.004
+
+# …but an absolute floor is not enough. A running air conditioner sits
+# above it, so its frames counted as "active" and, having no periodicity,
+# dragged the voiced ratio down until ordinary speech scored as a
+# whisper. The activity bar is therefore also lifted relative to *this
+# clip's* own room tone, estimated from its quietest frames.
+_NOISE_PERCENTILE = 20
+_NOISE_MARGIN = 2.5
 
 # Decision bar for :attr:`WhisperFeatures.is_whisper`. Tuned so ordinary
 # speech sits far below and a genuine whisper clears it; adjustable per
@@ -147,7 +154,20 @@ def analyze(
         return WhisperFeatures(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, threshold)
 
     rms_per_frame = np.sqrt(np.mean(frames ** 2, axis=1))
-    loud = rms_per_frame >= _SILENCE_RMS
+    # Room tone for this clip, then an activity bar above it. In a quiet
+    # room the absolute floor still governs; in a noisy one the bar rises
+    # so the noise itself never gets a vote.
+    noise_floor = float(np.percentile(rms_per_frame, _NOISE_PERCENTILE))
+    bar = max(_SILENCE_RMS, noise_floor * _NOISE_MARGIN)
+    # …but never so high that nothing is left to judge. A whisper in a
+    # noisy room is only just above the room tone, and silently scoring
+    # it 0 would read as "definitely not whispering" when the truth is
+    # "could not tell". Capping the bar at half the loudest frame keeps
+    # the utterance itself in the running whatever the room is doing.
+    # The cap only relaxes the adaptive part; the absolute silence floor
+    # still wins, or a clip of pure room tone would judge itself.
+    bar = max(_SILENCE_RMS, min(bar, float(rms_per_frame.max()) * 0.5))
+    loud = rms_per_frame >= bar
     if not np.any(loud):
         # Nothing but room tone — no opinion rather than a false positive.
         return WhisperFeatures(
@@ -155,12 +175,17 @@ def analyze(
         )
 
     active = frames[loud]
+    active_rms = rms_per_frame[loud]
     harmonics = np.array([_harmonicity(f) for f in active])
     zcrs = np.array([_zcr(f) for f in active])
     tilts = np.array([_tilt(f) for f in active])
 
-    # A frame counts as voiced when its periodicity is unmistakable.
-    voiced_ratio = float(np.mean(harmonics > 0.5))
+    # Energy-weighted rather than a plain frame count: the question is
+    # what share of the *speech* is voiced, and a handful of loud voiced
+    # syllables should not be outvoted by a long tail of quiet frames
+    # that only just cleared the bar.
+    weights = active_rms / max(float(active_rms.sum()), 1e-9)
+    voiced_ratio = float(np.sum(weights * (harmonics > 0.5)))
     score = _combine(
         float(harmonics.mean()), float(zcrs.mean()), float(tilts.mean()),
         voiced_ratio,

@@ -117,3 +117,50 @@ def test_features_are_reported_for_tuning():
     assert 0.0 <= f.spectral_tilt <= 1.0
     assert f.rms > 0.0
     assert f.threshold == DEFAULT_THRESHOLD
+
+
+def _room_tone(level: float, seconds: float, seed: int = 2) -> np.ndarray:
+    """Steady broadband noise — an air conditioner, a fan, a fridge."""
+    rng = np.random.default_rng(seed)
+    return rng.normal(0, level, int(seconds * _SR)).astype(np.float32)
+
+
+def _utterance(signal: np.ndarray, noise_level: float) -> np.ndarray:
+    """Speech with room tone under it, plus the usual lead-in and tail."""
+    return np.concatenate([
+        _room_tone(noise_level, 1.7),
+        signal + _room_tone(noise_level, len(signal) / _SR),
+        _room_tone(noise_level, 1.8, seed=3),
+    ])
+
+
+@pytest.mark.parametrize("noise", [0.001, 0.006, 0.015, 0.03])
+def test_room_noise_does_not_turn_speech_into_a_whisper(noise):
+    """Reported from a real install: an air conditioner scored 0.78.
+
+    An absolute silence floor let the noise frames count as active, and
+    having no periodicity they dragged the voiced ratio down until
+    ordinary speech cleared the whisper bar. The activity bar now rises
+    with the room, so the same voice reads the same in any room.
+    """
+    f = analyze(_utterance(voiced(), noise))
+    assert not f.is_whisper, f"score {f.score:.2f} at noise {noise}"
+    assert f.voiced_ratio > 0.8
+
+
+@pytest.mark.parametrize("noise", [0.001, 0.006, 0.015, 0.03])
+def test_whispering_is_still_caught_through_the_same_noise(noise):
+    """The noise fix must not cost the feature its actual job."""
+    f = analyze(_utterance(whispered(), noise))
+    assert f.is_whisper, f"score {f.score:.2f} at noise {noise}"
+
+
+def test_a_quiet_whisper_in_a_loud_room_is_still_judged():
+    """Never return 'not whispering' when the truth is 'could not tell'.
+
+    Capping the activity bar at half the loudest frame keeps the
+    utterance in the running however loud the room is.
+    """
+    f = analyze(_utterance(whispered(amp=0.03), 0.02))
+    assert f.voiced_ratio == 0.0
+    assert f.score > 0.0
