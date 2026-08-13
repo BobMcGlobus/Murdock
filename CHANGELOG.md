@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.9.4
+
+**A streaming upstream had its transcripts cut off mid-word.**
+
+"Was ist die Hauptstadt von Niedersach". "Und wann findet die Maker-Fähr
+in Han". "Wir müssen nochmal einen Latenzte". Every utterance truncated
+at the end, while the cloud shadow on the same audio returned the full
+sentence.
+
+The reader took the *first* Transcript event from upstream and hung up.
+A one-shot engine sends exactly one, after AudioStop, so that was
+indistinguishable from correct. A streaming recogniser sends one every
+time it firms up another word — and the first of those is the beginning
+of the sentence, captured while the user is still speaking.
+
+A Transcript now only counts as final once AudioStop has gone upstream.
+Earlier ones are kept as the best-so-far and used when a session ends
+without a final result, so a dropped connection degrades to a partial
+answer rather than to none — which is also why an empty final no longer
+erases a good interim.
+
 ## 0.9.3
 
 **Murdock now measures the stretch a user actually waits for.**

@@ -154,6 +154,12 @@ class MurdockHandler(AsyncEventHandler):
         self._upstream_failed: bool = False
         self._upstream_reader_task: Optional[asyncio.Task] = None
         self._upstream_transcript: Optional[asyncio.Future[str]] = None
+        # A streaming recogniser emits interim Transcripts while the
+        # user is still talking. Keeping the newest one means a
+        # session that ends without a final result falls back to the
+        # best partial instead of to nothing.
+        self._upstream_interim: str = ""
+        self._audio_stop_sent: bool = False
 
         # Streaming-Verify (early cutoff) state.
         self._early_probe_task: Optional[asyncio.Task] = None
@@ -412,7 +418,17 @@ class MurdockHandler(AsyncEventHandler):
                 self._upstream_transcript.set_result("")
 
     async def _read_upstream_transcript(self) -> None:
-        """Wait for the first Transcript event from upstream.
+        """Resolve the transcript from upstream, ignoring interim results.
+
+        A *streaming* recogniser sends Transcript events while the user is
+        still speaking, each one a little longer than the last. Taking the
+        first and hanging up truncated every utterance mid-word — "was ist
+        die Hauptstadt von Niedersach" — so a Transcript only counts as
+        final once AudioStop has gone upstream. Anything before that is
+        kept as the best-so-far and used if the session ends without one.
+
+        A one-shot engine is unaffected: its single Transcript arrives
+        after AudioStop and is final by that definition.
 
         Logs every event type we see from the upstream so that a broken
         STT (wrong model, language mismatch, half-open socket, …) is
@@ -429,12 +445,12 @@ class MurdockHandler(AsyncEventHandler):
                 event_count += 1
                 if event is None:
                     _LOGGER.warning(
-                        "[%s] Upstream closed without transcript "
-                        "(after %d events)",
-                        sid, event_count,
+                        "[%s] Upstream closed without a final transcript "
+                        "(after %d events) — falling back to %r",
+                        sid, event_count, self._upstream_interim,
                     )
                     if fut is not None and not fut.done():
-                        fut.set_result("")
+                        fut.set_result(self._upstream_interim)
                     return
                 # Log every non-Transcript event at DEBUG so --log-level
                 # debug shows the full upstream chatter, but keep the
@@ -442,12 +458,21 @@ class MurdockHandler(AsyncEventHandler):
                 # the STT output without enabling debug.
                 if Transcript.is_type(event.type):
                     transcript = Transcript.from_event(event)
+                    text = transcript.text or ""
+                    if not self._audio_stop_sent:
+                        # Interim: the user is still talking. Remember it
+                        # and keep listening for a longer one.
+                        if text:
+                            self._upstream_interim = text
+                        _LOGGER.debug(
+                            "[%s] Upstream interim transcript: %r", sid, text
+                        )
+                        continue
                     _LOGGER.info(
-                        "[%s] Upstream transcript received: %r",
-                        sid, transcript.text,
+                        "[%s] Upstream transcript received: %r", sid, text,
                     )
                     if fut is not None and not fut.done():
-                        fut.set_result(transcript.text or "")
+                        fut.set_result(text or self._upstream_interim)
                     return
                 _LOGGER.debug(
                     "[%s] Upstream event (ignored): %s", sid, event.type
@@ -779,9 +804,10 @@ class MurdockHandler(AsyncEventHandler):
             return text
         except asyncio.TimeoutError:
             _LOGGER.warning(
-                "[%s] Upstream transcript timeout after %.0fs", sid, timeout
+                "[%s] Upstream transcript timeout after %.0fs — falling back "
+                "to the last interim %r", sid, timeout, self._upstream_interim,
             )
-            return ""
+            return self._upstream_interim
 
     async def _transcribe_cloud(self, audio_16k: bytes) -> str:
         """Transcribe buffered audio via the active cloud backend.
@@ -1173,6 +1199,7 @@ class MurdockHandler(AsyncEventHandler):
         if not self._is_voxtral:
             try:
                 if self._upstream_open and self._upstream_client is not None:
+                    self._audio_stop_sent = True
                     await self._upstream_client.write_event(AudioStop().event())
                     _LOGGER.debug("[%s] AudioStop sent to upstream", sid)
             except Exception as exc:
