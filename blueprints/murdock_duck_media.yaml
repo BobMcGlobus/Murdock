@@ -1,0 +1,119 @@
+blueprint:
+  name: Murdock — duck media while Assist is listening
+  description: >-
+    Lowers the volume of the media players in a room while its voice
+    satellite is listening and answering, then puts it back.
+
+    The trigger is the satellite's own state, which flips to `listening`
+    the moment the wake word lands — earlier than any speech-to-text
+    service ever sees audio, which is why this belongs in Home Assistant
+    rather than in Murdock.
+
+    Only the volume is touched. Playback state is deliberately left
+    alone: restoring a snapshot could resume something you paused
+    mid-conversation.
+
+    If the satellite never returns to idle — a crashed pipeline, a lost
+    connection — the volume is restored anyway after the timeout below,
+    so a failure can never leave the room quiet forever.
+  domain: automation
+  source_url: https://github.com/BobMcGlobus/Murdock/blob/main/blueprints/murdock_duck_media.yaml
+  input:
+    satellite:
+      name: Voice satellite
+      description: The assist_satellite entity for this room.
+      selector:
+        entity:
+          filter:
+            domain: assist_satellite
+    media_players:
+      name: Media players
+      description: Everything that should get quieter in this room.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            domain: media_player
+    duck_level:
+      name: Duck to
+      description: >-
+        Percentage of the current volume to keep while listening. 20 %
+        of a volume of 0.5 leaves 0.1. Set to 0 for silence.
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+    restore_timeout:
+      name: Safety timeout
+      description: >-
+        Restore the volume after this long even if the satellite never
+        reports idle.
+      default: 45
+      selector:
+        number:
+          min: 5
+          max: 300
+          step: 5
+          unit_of_measurement: s
+          mode: slider
+
+# A second wake word while still answering must reset the timer rather
+# than queue a second restore — the same reason a motion light uses it.
+mode: restart
+
+variables:
+  players: !input media_players
+  duck_pct: !input duck_level
+  # Captured when the automation triggers, i.e. before anything is
+  # lowered. A namespace loop rather than a map filter so this does not
+  # depend on `state_attr` being registered as a filter.
+  levels: >-
+    {% set ns = namespace(v=[]) %}
+    {% for p in players %}
+      {% set ns.v = ns.v + [state_attr(p, 'volume_level')] %}
+    {% endfor %}
+    {{ ns.v }}
+
+triggers:
+  - trigger: state
+    entity_id: !input satellite
+    to: listening
+
+actions:
+  - repeat:
+      for_each: "{{ players }}"
+      sequence:
+        # A player with no volume_level (an unavailable speaker, a
+        # grouped member) is skipped rather than set to zero.
+        - condition: template
+          value_template: "{{ state_attr(repeat.item, 'volume_level') is not none }}"
+        - action: media_player.volume_set
+          target:
+            entity_id: "{{ repeat.item }}"
+          data:
+            volume_level: >-
+              {{ (state_attr(repeat.item, 'volume_level') | float(0)
+                  * duck_pct / 100) | round(3) }}
+
+  - wait_for_trigger:
+      - trigger: state
+        entity_id: !input satellite
+        to: idle
+    timeout:
+      seconds: !input restore_timeout
+    continue_on_timeout: true
+
+  - repeat:
+      for_each: "{{ players }}"
+      sequence:
+        - condition: template
+          value_template: "{{ levels[repeat.index - 1] is not none }}"
+        - action: media_player.volume_set
+          target:
+            entity_id: "{{ repeat.item }}"
+          data:
+            volume_level: "{{ levels[repeat.index - 1] | float }}"
