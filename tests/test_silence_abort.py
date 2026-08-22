@@ -91,3 +91,68 @@ def test_the_setting_clamps_and_defaults(tmp_path):
     assert ctx.get_silence_abort_sec() == 0.0
     ctx.set_silence_abort_sec(9999)
     assert ctx.get_silence_abort_sec() == 30.0
+
+
+def _status_ctx(tmp_path, speakers=(), events=()):
+    from types import SimpleNamespace
+
+    from murdock.config import Settings
+    from murdock.core.context import AppContext
+    from murdock.core.db import open_db
+    from murdock.core.recognition_log import RecognitionLog
+
+    db = open_db(tmp_path / "m.db")
+    log = RecognitionLog(db)
+    for outcome, speaker in events:
+        log.record(session_id="s", satellite_id="wz", duration_sec=1.0,
+                   outcome=outcome, matched_speaker=speaker)
+    store = SimpleNamespace(
+        list_speakers=lambda: [
+            SimpleNamespace(name=n, enrollment_count=c) for n, c in speakers
+        ]
+    )
+    return AppContext(
+        settings=Settings(), db=db, embedder=None, vad=None, speakers=store,
+        unknown=None, ha=SimpleNamespace(configured=False),
+        mqtt=SimpleNamespace(connected=False), recognition=log,
+    )
+
+
+def test_the_setup_checklist_reports_what_is_missing(tmp_path):
+    """The one screen a new user reads before they know any vocabulary."""
+    import asyncio
+
+    from murdock.api.routes_status import status
+
+    ctx = _status_ctx(tmp_path)
+    out = asyncio.run(status(ctx))
+    assert out.setup_complete is False
+    open_steps = [s.key for s in out.setup if not s.done]
+    # Everything except picking a backend, which has a default.
+    assert open_steps == ["speakers", "samples", "delivery", "first_recognition"]
+
+    # A speaker with too few samples is called out by name rather than
+    # leaving the user to guess which profile is thin.
+    ctx2 = _status_ctx(tmp_path / "b", speakers=[("Jonas", 1)])
+    (tmp_path / "b").mkdir(exist_ok=True)
+    out2 = asyncio.run(status(_status_ctx(tmp_path, speakers=[("Jonas", 1)])))
+    samples_step = next(s for s in out2.setup if s.key == "samples")
+    assert samples_step.done is False
+    assert "Jonas" in samples_step.detail
+
+
+def test_the_counts_match_the_log(tmp_path):
+    import asyncio
+
+    from murdock.api.routes_status import status
+
+    ctx = _status_ctx(
+        tmp_path,
+        speakers=[("Jonas", 5)],
+        events=[("match", "Jonas"), ("match", "Jonas"),
+                ("unknown-forwarded", None)],
+    )
+    out = asyncio.run(status(ctx))
+    assert (out.events_24h, out.matches_24h, out.unknown_24h) == (3, 2, 1)
+    assert out.speakers == 1 and out.samples == 5
+    assert out.last_event_at is not None

@@ -17,6 +17,7 @@ from .routes_backup import router as backup_router
 from .routes_integration import router as integration_router
 from .routes_recognition import router as recognition_router
 from .routes_settings import router as settings_router
+from .routes_status import router as status_router
 from .routes_speakers import router as speakers_router
 from .routes_unknown import router as unknown_router
 
@@ -41,6 +42,7 @@ def create_app(context: AppContext) -> FastAPI:
         allow_headers=["*"],
     )
 
+    app.include_router(status_router)
     app.include_router(speakers_router)
     app.include_router(unknown_router)
     app.include_router(settings_router)

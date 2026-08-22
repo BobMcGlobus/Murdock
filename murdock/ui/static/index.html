@@ -17,7 +17,8 @@
     <header>
         <h1><img src="static/favicon.png?v=__VERSION__" alt="" class="logo-mark">Murdock</h1>
         <nav>
-            <button data-tab="speakers" class="tab-btn active" data-i18n="nav.speakers">Speakers</button>
+            <button data-tab="overview" class="tab-btn active" data-i18n="nav.overview">Overview</button>
+            <button data-tab="speakers" class="tab-btn" data-i18n="nav.speakers">Speakers</button>
             <button data-tab="verify" class="tab-btn" data-i18n="nav.verify">Verify</button>
             <button data-tab="recognition" class="tab-btn" data-i18n="nav.recognition">Recognition log</button>
             <button data-tab="unknown" class="tab-btn" data-i18n="nav.unknown">Unknown</button>
@@ -34,7 +35,21 @@
 
     <main>
         <!-- Speakers tab -->
-        <section id="tab-speakers" class="tab active">
+        <section id="tab-overview" class="tab active">
+            <div class="card" id="setup-card" hidden>
+                <h2 data-i18n="overview.setup_title">Getting started</h2>
+                <p class="meta" data-i18n="overview.setup_hint">Each step depends on the one above it. Murdock works once all of them are ticked.</p>
+                <ol id="setup-steps" class="setup-list"></ol>
+            </div>
+
+            <div class="card">
+                <h2 data-i18n="overview.status_title">At a glance</h2>
+                <div id="status-tiles" class="status-tiles"></div>
+                <div id="status-note" class="meta"></div>
+            </div>
+        </section>
+
+        <section id="tab-speakers" class="tab">
             <div class="card">
                 <h2 data-i18n="speakers.enroll_title">Enroll speaker</h2>
                 <form id="enroll-form">

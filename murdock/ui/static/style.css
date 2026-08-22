@@ -884,3 +884,55 @@ button.chip:hover {
     border-color: var(--border);
     font-style: normal;
 }
+
+/* --- Overview ---------------------------------------------------------- */
+
+/* Auto-fit rather than a fixed column count: the same markup has to read
+   on a phone held sideways and on a dashboard tab. */
+.status-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.status-tile {
+    background: var(--bg-elev, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+}
+
+.status-value {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.status-label {
+    font-weight: 500;
+    margin-top: 0.15rem;
+}
+
+.setup-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0;
+}
+
+.setup-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+}
+
+.setup-mark {
+    width: 1.2rem;
+    flex: 0 0 1.2rem;
+    text-align: center;
+}
+
+.setup-list li.done { opacity: 0.6; }
+.setup-list li.done .setup-mark { color: var(--ok, #4caf50); }
+.setup-list li.todo { font-weight: 500; }

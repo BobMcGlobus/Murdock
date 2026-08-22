@@ -66,6 +66,81 @@ if (langSelector) {
 // Translate static elements on first load.
 I18N.translatePage();
 
+// --- Overview -------------------------------------------------------------
+
+// Ordered by dependency, not importance: a transcription backend is
+// useless without a speaker to recognise, and a speaker is useless if
+// nothing reaches Home Assistant. Somebody following the list top to
+// bottom never hits a step that cannot succeed yet.
+const SETUP_ORDER = ["stt", "speakers", "samples", "delivery", "first_recognition"];
+
+function renderSetup(status) {
+    const card = $("#setup-card");
+    const list = $("#setup-steps");
+    if (!card || !list) return;
+    // Once everything is done the checklist stops taking up the screen.
+    card.hidden = !!status.setup_complete;
+    if (status.setup_complete) return;
+
+    const byKey = {};
+    (status.setup || []).forEach((s) => { byKey[s.key] = s; });
+    list.innerHTML = SETUP_ORDER.map((key) => {
+        const step = byKey[key];
+        if (!step) return "";
+        const mark = step.done ? "✓" : "○";
+        const cls = step.done ? "done" : "todo";
+        const detail = step.detail
+            ? `<span class="meta">${escapeHtml(t("overview.step_" + key + "_detail", { detail: step.detail }))}</span>`
+            : "";
+        return `<li class="${cls}"><span class="setup-mark">${mark}</span>` +
+               `<span>${escapeHtml(t("overview.step_" + key))}</span> ${detail}</li>`;
+    }).join("");
+}
+
+function renderStatusTiles(status) {
+    const box = $("#status-tiles");
+    if (!box) return;
+    const tiles = [
+        { label: t("overview.tile_speakers"),
+          value: status.speakers,
+          sub: t("overview.tile_samples", { n: status.samples }) },
+        { label: t("overview.tile_recognised"),
+          value: status.matches_24h,
+          sub: t("overview.tile_of_events", { n: status.events_24h }) },
+        { label: t("overview.tile_unknown"),
+          value: status.unknown_24h,
+          sub: t("overview.tile_last_24h") },
+        { label: t("overview.tile_delivery"),
+          value: status.delivery === "none"
+              ? t("overview.delivery_none")
+              : status.delivery.toUpperCase(),
+          sub: t("overview.tile_stt", { backend: status.stt_backend }) },
+    ];
+    box.innerHTML = tiles.map((x) =>
+        `<div class="status-tile"><div class="status-value">${escapeHtml(String(x.value))}</div>` +
+        `<div class="status-label">${escapeHtml(x.label)}</div>` +
+        `<div class="meta">${escapeHtml(x.sub)}</div></div>`
+    ).join("");
+
+    const note = $("#status-note");
+    if (note) {
+        note.textContent = status.last_event_at
+            ? t("overview.last_event", { when: formatTimestamp(status.last_event_at) })
+            : t("overview.no_events_yet");
+    }
+}
+
+async function loadOverview() {
+    try {
+        const status = await api("/api/status");
+        renderSetup(status);
+        renderStatusTiles(status);
+    } catch (err) {
+        const note = $("#status-note");
+        if (note) note.textContent = t("generic.error", { err: err.message });
+    }
+}
+
 // --- Tabs -----------------------------------------------------------------
 
 $$(".tab-btn").forEach((btn) => {
@@ -74,6 +149,7 @@ $$(".tab-btn").forEach((btn) => {
         $$(".tab").forEach((t) => t.classList.remove("active"));
         btn.classList.add("active");
         $("#tab-" + btn.dataset.tab).classList.add("active");
+        if (btn.dataset.tab === "overview") loadOverview();
         if (btn.dataset.tab === "speakers") { loadSpeakers(); loadCoach(); }
         if (btn.dataset.tab === "verify") loadRoles();
         if (btn.dataset.tab === "unknown") loadUnknown();
@@ -3005,6 +3081,7 @@ function initCollapsibleCards() {
 }
 
 // Initial load
+loadOverview();
 loadRoles();
 loadSpeakers();
 initMicAvailability();
