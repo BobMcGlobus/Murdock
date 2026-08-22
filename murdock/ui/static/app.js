@@ -2755,7 +2755,7 @@ function renderRecognitionEvent(e) {
             ? `<span class="muted">${escapeHtml(t("rec.passthrough"))}</span>`
             : `<span class="muted">${escapeHtml(t("rec.unknown"))}</span>`;
     const nearestHint = !isMatch && e.matched_speaker
-        ? `<div class="meta">${escapeHtml(t("rec.nearest", { name: e.matched_speaker }))}</div>`
+        ? escapeHtml(t("rec.nearest", { name: e.matched_speaker }))
         : "";
     const dist =
         e.distance !== null && e.distance !== undefined
@@ -2798,9 +2798,7 @@ function renderRecognitionEvent(e) {
     if (tt && tt.failed) {
         sttParts.push(escapeHtml(tt.failed));
     }
-    const sttLine = sttParts.length
-        ? `<div class="meta">stt: ${sttParts.join(" · ")}</div>`
-        : "";
+    const sttText = sttParts.length ? `stt: ${sttParts.join(" · ")}` : "";
     const scoreLine = [dist, thr, vms].filter(Boolean).join(" · ");
     // Engine timing badge. In upstream mode the primary streams while the
     // audio is still arriving, so its figure is the remaining wait — the
@@ -2839,8 +2837,11 @@ function renderRecognitionEvent(e) {
             ${same ? "" : `<span class="meta"> ${escapeHtml(t("rec.shadow_differs"))}</span>`}
         </div>`;
     }
+    // The room, not the entity id — the id is still there on hover for
+    // anyone who needs it.
     const sat = e.satellite_id
-        ? ` · <code>${escapeHtml(e.satellite_id)}</code>`
+        ? ` · <span title="${escapeHtml(e.satellite_id)}">${escapeHtml(
+              e.satellite_name || e.satellite_id)}</span>`
         : "";
     const whisperChip = (() => {
         const score = e.whisper_score;
@@ -2859,6 +2860,46 @@ function renderRecognitionEvent(e) {
         ? `<button type="button" class="secondary small" data-assign-sample="${e.unknown_sample_id}"
              data-nearest="${escapeHtml(e.matched_speaker || "")}">${escapeHtml(t("rec.add_to_speaker"))}</button>`
         : "";
+    // One sentence a person can read, from the numbers underneath. The
+    // raw figures stay available, but they are evidence for a claim
+    // rather than the claim itself.
+    const verdict = (() => {
+        const answered = tt && tt.answer_ms != null
+            ? t("rec.answered_in", { ms: formatMs(tt.answer_ms) })
+            : "";
+        if (isMatch) {
+            const margin = (e.distance != null && e.threshold != null)
+                ? t("rec.margin_to_spare", {
+                      n: (e.threshold - e.distance).toFixed(2) })
+                : "";
+            return [t("rec.verdict_match"), margin, answered]
+                .filter(Boolean).join(" · ");
+        }
+        if (e.outcome === "uncertain-forwarded") {
+            return [t("rec.verdict_uncertain"), answered]
+                .filter(Boolean).join(" · ");
+        }
+        if (e.matched_speaker && e.distance != null && e.threshold != null) {
+            return [t("rec.verdict_too_far", {
+                name: e.matched_speaker,
+                d: e.distance.toFixed(2),
+                th: e.threshold.toFixed(2),
+            }), answered].filter(Boolean).join(" · ");
+        }
+        return [t("rec.verdict_nobody"), answered].filter(Boolean).join(" · ");
+    })();
+
+    // Everything that used to sit in three grey lines. Collapsed by
+    // default: it is what you open when something looks wrong, not what
+    // you read to find out whether it does.
+    const detailRows = [scoreLine, sttText, nearestHint].filter(Boolean);
+    const details = detailRows.length
+        ? `<details class="rec-details">
+               <summary>${escapeHtml(t("rec.details"))}</summary>
+               ${detailRows.map((r) => `<div class="meta">${r}</div>`).join("")}
+           </details>`
+        : "";
+
     return `
         <div class="list-item">
             <div class="row">
@@ -2869,9 +2910,8 @@ function renderRecognitionEvent(e) {
             </div>
             ${transcript}
             ${shadow}
-            ${nearestHint}
-            ${scoreLine ? `<div class="meta">${scoreLine}</div>` : ""}
-            ${sttLine}
+            <div class="meta verdict">${escapeHtml(verdict)}</div>
+            ${details}
             ${assignBtn ? `<div class="row">${assignBtn}</div>` : ""}
         </div>
     `;

@@ -135,6 +135,8 @@ def test_recognition_api_exposes_timings(tmp_path):
     ctx = SimpleNamespace(
         recognition=log,
         unknown=SimpleNamespace(map_sessions_to_samples=lambda ids: {}),
+        # The log renders a room name where one was announced.
+        satellite_label=lambda sid: sid or "",
     )
     out = asyncio.run(list_events(limit=10, outcome=None, speaker=None, ctx=ctx))
     ev = out.events[0]

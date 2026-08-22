@@ -19,6 +19,9 @@ class RecognitionEventOut(BaseModel):
     created_at: float
     session_id: str
     satellite_id: Optional[str]
+    # Friendly name where one was announced; the log should read
+    # like a room, not like an entity id.
+    satellite_name: str = ""
     duration_sec: float
     outcome: str
     matched_speaker: Optional[str]
@@ -77,6 +80,7 @@ async def list_events(
         events=[
             RecognitionEventOut(
                 id=e.id,
+                satellite_name=ctx.satellite_label(e.satellite_id),
                 created_at=e.created_at,
                 session_id=e.session_id,
                 satellite_id=e.satellite_id,

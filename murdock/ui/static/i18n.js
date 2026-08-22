@@ -162,6 +162,13 @@ const I18N = (() => {
             "rec.confirm_clear": "Clear the entire recognition log?",
             "rec.cleared": "Cleared {n} events",
             "rec.no_transcript": "(no transcript)",
+            "rec.details": "Details",
+            "rec.answered_in": "answered in {ms}",
+            "rec.verdict_match": "Recognised",
+            "rec.margin_to_spare": "{n} to spare",
+            "rec.verdict_uncertain": "Two profiles were too close to tell apart",
+            "rec.verdict_too_far": "{name} was closest, but not close enough ({d} vs {th})",
+            "rec.verdict_nobody": "No enrolled voice was close enough",
             "rec.nearest": "nearest: {name}",
             "rec.trimmed": "trimmed",
             "rec.rescued": "answered by",
@@ -191,6 +198,10 @@ const I18N = (() => {
             "outcome.blocked-early-reject": "Blocked — early reject",
             "outcome.passthrough-short": "Passthrough — short",
             "outcome.passthrough-no-speakers": "Passthrough — no speakers",
+            "outcome.uncertain-forwarded": "Uncertain (forwarded)",
+            "outcome.blocked-uncertain": "Blocked (uncertain)",
+            "outcome.cancelled": "Cancelled",
+            "outcome.no-speech": "Nobody spoke",
             "outcome.empty": "Empty",
 
             // -- Unknown tab --
@@ -576,7 +587,6 @@ const I18N = (() => {
             "ping.languages": "languages:",
             "ping.upstream_supports": "Upstream supports {n} languages:",
             "ping.unsaved_note": "Tested the address in the field above — save the form to actually use it.",
-            "ping.unsaved_note": "Getestet wurde die Adresse aus dem Feld oben — zum Verwenden das Formular speichern.",
             "ping.advertise_note": "This is what the upstream STT can do — Murdock only advertises the languages you set above.",
 
             // -- Refresh --
@@ -756,6 +766,13 @@ const I18N = (() => {
             "rec.confirm_clear": "Das gesamte Erkennungsprotokoll löschen?",
             "rec.cleared": "{n} Einträge gelöscht",
             "rec.no_transcript": "(kein Transkript)",
+            "rec.details": "Details",
+            "rec.answered_in": "beantwortet in {ms}",
+            "rec.verdict_match": "Erkannt",
+            "rec.margin_to_spare": "{n} Reserve",
+            "rec.verdict_uncertain": "Zwei Profile lagen zu dicht beieinander",
+            "rec.verdict_too_far": "{name} war am nächsten, aber nicht nah genug ({d} statt {th})",
+            "rec.verdict_nobody": "Keine angelegte Stimme war nah genug",
             "rec.nearest": "nächster: {name}",
             "rec.trimmed": "gekürzt",
             "rec.rescued": "beantwortet von",
@@ -785,6 +802,10 @@ const I18N = (() => {
             "outcome.blocked-early-reject": "Blockiert — Early Reject",
             "outcome.passthrough-short": "Durchleitung — zu kurz",
             "outcome.passthrough-no-speakers": "Durchleitung — keine Sprecher",
+            "outcome.uncertain-forwarded": "Unsicher (weitergeleitet)",
+            "outcome.blocked-uncertain": "Blockiert (unsicher)",
+            "outcome.cancelled": "Abgebrochen",
+            "outcome.no-speech": "Niemand hat gesprochen",
             "outcome.empty": "Leer",
 
             // -- Unknown tab --
@@ -1169,6 +1190,7 @@ const I18N = (() => {
             "ping.failed": "Ping fehlgeschlagen: {err}",
             "ping.languages": "Sprachen:",
             "ping.upstream_supports": "Upstream unterstützt {n} Sprachen:",
+            "ping.unsaved_note": "Getestet wurde die Adresse aus dem Feld oben — zum Verwenden das Formular speichern.",
             "ping.advertise_note": "Das ist, was der Upstream-STT kann — Murdock bewirbt nur die oben eingestellten Sprachen.",
 
             // -- Refresh --
@@ -1277,6 +1299,12 @@ const I18N = (() => {
             "passthrough-short": { label: t("outcome.passthrough-short"), cls: "" },
             "passthrough-no-speakers": { label: t("outcome.passthrough-no-speakers"), cls: "" },
             "empty": { label: t("outcome.empty"), cls: "" },
+            // Missing entries fell through to the raw key, which is how
+            // "uncertain-forwarded" ended up in the log as-is.
+            "uncertain-forwarded": { label: t("outcome.uncertain-forwarded"), cls: "warn" },
+            "blocked-uncertain": { label: t("outcome.blocked-uncertain"), cls: "err" },
+            "cancelled": { label: t("outcome.cancelled"), cls: "" },
+            "no-speech": { label: t("outcome.no-speech"), cls: "" },
         };
     }
 

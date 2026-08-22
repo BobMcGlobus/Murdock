@@ -936,3 +936,25 @@ button.chip:hover {
 .setup-list li.done { opacity: 0.6; }
 .setup-list li.done .setup-mark { color: var(--ok, #4caf50); }
 .setup-list li.todo { font-weight: 500; }
+
+/* --- Recognition log readability --------------------------------------- */
+
+/* The one line that says what happened, in words. Sits above the
+   collapsed diagnostics rather than among them. */
+.verdict {
+    margin-top: 0.15rem;
+}
+
+.rec-details {
+    margin-top: 0.35rem;
+}
+
+.rec-details > summary {
+    cursor: pointer;
+    font-size: 0.85em;
+    opacity: 0.7;
+    user-select: none;
+}
+
+.rec-details > summary:hover { opacity: 1; }
+.rec-details[open] > summary { margin-bottom: 0.25rem; }
