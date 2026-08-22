@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.10.0
+
+**The interface, rearranged around what you came to do.**
+
+- **A new Overview opens the app**, with four counts and a setup
+  checklist ordered by dependency rather than importance — a
+  transcription backend is useless without a speaker to recognise, and a
+  speaker is useless if nothing reaches Home Assistant. Somebody working
+  down the list never hits a step that cannot succeed yet, and a thin
+  profile is named rather than left to guess at. The checklist
+  disappears once every step is ticked.
+- **The recognition log states what happened in a sentence** — "Jonas
+  was closest, but not close enough (0.32 against 0.30)" — and keeps
+  `d=`, `th=`, `verify=` and the request breakdown behind a collapsed
+  *Details*. Satellites read as their room name, with the entity id on
+  hover.
+- **One detail area per speaker** instead of five buttons competing for
+  the row. Opening it goes straight to the samples, because that is what
+  people come for.
+- **Collapsible settings cards work again.** They target direct children
+  of the settings tab, and the cards moved inside group containers some
+  releases ago, so the selector had quietly stopped matching anything and
+  every card rendered expanded. The first card of each group is open now
+  and the rest are folded, per group rather than per page.
+- **The A/B shadow engine is folded away** — nine fields you configure
+  once while comparing engines and then never look at again.
+
+Two labels were missing outright: `uncertain-forwarded` had been
+rendering as its own raw key in the log, and the outcomes added in 0.9.5
+had never been given any. A test now derives the expected set from the
+`OUTCOME_` constants and checks that both locales define the same keys,
+which immediately turned up a German string written into the English
+block, overwriting it.
+
+**Also in this release**
+
+- **Cancel phrases** and a **silence abort**: a turn nobody started ends
+  by itself, and a phrase like "Abbruch" drops one that should never
+  have begun. Neither can shorten the recording — Home Assistant decides
+  that — but both skip the transcript, the conversation agent and the
+  spoken reply.
+
 ## 0.9.5
 
 **A polish release: false wakes, and the parts of the UI that made you

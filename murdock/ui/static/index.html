@@ -648,7 +648,8 @@
                         <p class="meta" data-i18n="canon.learned_hint">A correction that keeps recurring is no longer a guess. Promote it to become an exact dictionary rule — faster, deterministic, and never re-decided by the fuzzy matcher.</p>
                         <div id="canon-learned-list" class="list"></div>
                     </div>
-                    <h3 data-i18n="stt.shadow_title">A/B shadow engine</h3>
+                    <details class="advanced shadow-block">
+                        <summary data-i18n="stt.shadow_title">A/B shadow engine</summary>
                     <p class="meta" data-i18n="stt.shadow_hint">Transcribe every utterance with a second engine in the background. The shadow result is never returned to Home Assistant — it appears next to the primary transcript in the recognition log, so you can compare two engines on your real commands before switching.</p>
                     <label>
                         <span data-i18n="stt.shadow_backend">Shadow engine</span>
@@ -791,6 +792,7 @@
                         <input type="password" name="mqtt_password" autocomplete="off" data-i18n-ph="mqtt.ph_password" placeholder="paste password here">
                         <small id="mqtt-password-hint" class="meta"></small>
                     </label>
+                                        </details>
                     <h3 data-i18n="mqtt.advanced">Advanced</h3>
                     <label>
                         <span data-i18n="mqtt.topic_prefix">Topic prefix</span>

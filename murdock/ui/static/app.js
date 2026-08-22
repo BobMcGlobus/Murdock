@@ -732,15 +732,22 @@ async function loadSpeakers() {
                     ${s.ha_user_id ? `<span class="meta">HA: ${escapeHtml(s.ha_user_id)}</span>` : ""}
                 </div>
                 <div class="row">
-                    <button class="secondary" data-view="${s.id}">${escapeHtml(t("speakers.view_samples"))}</button>
-                    <button class="secondary" data-edit="${s.id}">${escapeHtml(t("speakers.edit"))}</button>
-                    <button class="secondary" data-rescore="${s.id}">${escapeHtml(t("quality.rescore_one"))}</button>
-                    <button class="secondary" data-health="${s.id}">${escapeHtml(t("health_panel.btn"))}</button>
+                    <button class="secondary" data-detail="${s.id}">${escapeHtml(t("speakers.details"))}</button>
                     <button class="danger" data-del="${s.id}">${escapeHtml(t("speakers.delete_speaker"))}</button>
                 </div>
-                <div class="edit-panel" hidden></div>
-                <div class="samples" hidden></div>
-                <div class="health-panel" hidden></div>
+                <!-- One place for everything about this person, instead of
+                     four panels competing for the same row. -->
+                <div class="detail-panel" hidden>
+                    <div class="row detail-tools">
+                        <button class="secondary small" data-view="${s.id}">${escapeHtml(t("speakers.view_samples"))}</button>
+                        <button class="secondary small" data-edit="${s.id}">${escapeHtml(t("speakers.edit"))}</button>
+                        <button class="secondary small" data-rescore="${s.id}">${escapeHtml(t("quality.rescore_one"))}</button>
+                        <button class="secondary small" data-health="${s.id}">${escapeHtml(t("health_panel.btn"))}</button>
+                    </div>
+                    <div class="edit-panel" hidden></div>
+                    <div class="samples" hidden></div>
+                    <div class="health-panel" hidden></div>
+                </div>
             `;
             list.appendChild(item);
             // Fire-and-forget per-speaker quality fetch
@@ -752,6 +759,9 @@ async function loadSpeakers() {
                 await api("/api/speakers/" + btn.dataset.del, { method: "DELETE" });
                 loadSpeakers();
             })
+        );
+        list.querySelectorAll("button[data-detail]").forEach((btn) =>
+            btn.addEventListener("click", () => toggleDetail(btn))
         );
         list.querySelectorAll("button[data-view]").forEach((btn) =>
             btn.addEventListener("click", () => toggleSamples(btn))
@@ -793,6 +803,23 @@ async function loadSpeakers() {
         );
     } catch (err) {
         list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
+    }
+}
+
+// Opening the details goes straight to the samples: it is what people
+// come here for, and an empty panel with four buttons in it would just
+// move the decision one click later.
+function toggleDetail(btn) {
+    const item = btn.closest(".list-item");
+    const panel = item.querySelector(".detail-panel");
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    btn.classList.toggle("active", !panel.hidden);
+    if (!panel.hidden) {
+        const samples = item.querySelector(".samples");
+        if (samples && samples.hidden) {
+            toggleSamples(item.querySelector("button[data-view]"));
+        }
     }
 }
 
@@ -3103,19 +3130,29 @@ function escapeHtml(s) {
 // is remembered per card in localStorage. Hidden cards still receive
 // their loadSettings() population — display:none doesn't affect that.
 function initCollapsibleCards() {
-    document.querySelectorAll("#tab-settings > .card").forEach((card, i) => {
-        const h2 = card.querySelector("h2");
-        if (!h2) return;
-        const key = "murdock.collapse." + (h2.dataset.i18n || i);
-        card.classList.add("collapsible");
-        const stored = localStorage.getItem(key);
-        const collapsed = stored === null ? i > 0 : stored === "1";
-        card.classList.toggle("collapsed", collapsed);
-        h2.addEventListener("click", () => {
-            card.classList.toggle("collapsed");
-            localStorage.setItem(
-                key, card.classList.contains("collapsed") ? "1" : "0"
-            );
+    // Descendant, not direct child: the cards moved inside .settings-group
+    // containers and this selector quietly stopped matching anything, so
+    // every card had been rendering expanded ever since.
+    const groups = document.querySelectorAll("#tab-settings .settings-group");
+    const scopes = groups.length ? groups : [$("#tab-settings")];
+    scopes.forEach((scope) => {
+        scope.querySelectorAll(".card").forEach((card, i) => {
+            const h2 = card.querySelector("h2");
+            if (!h2) return;
+            const key = "murdock.collapse." + (h2.dataset.i18n || i);
+            card.classList.add("collapsible");
+            const stored = localStorage.getItem(key);
+            // First card of each group open, the rest folded away — the
+            // index is per group, so switching group does not land on a
+            // wall of collapsed headings.
+            const collapsed = stored === null ? i > 0 : stored === "1";
+            card.classList.toggle("collapsed", collapsed);
+            h2.addEventListener("click", () => {
+                card.classList.toggle("collapsed");
+                localStorage.setItem(
+                    key, card.classList.contains("collapsed") ? "1" : "0"
+                );
+            });
         });
     });
 }
