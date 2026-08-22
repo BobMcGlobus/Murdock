@@ -53,6 +53,7 @@ from murdock.core.recognition_log import (
     OUTCOME_BLOCKED_NO_MATCH,
     OUTCOME_BLOCKED_NO_SPEAKERS,
     OUTCOME_BLOCKED_TV_NOISE,
+    OUTCOME_CANCELLED,
     OUTCOME_BLOCKED_UNCERTAIN,
     OUTCOME_EMPTY,
     OUTCOME_MATCH,
@@ -160,6 +161,10 @@ class MurdockHandler(AsyncEventHandler):
         # best partial instead of to nothing.
         self._upstream_interim: str = ""
         self._audio_stop_sent: bool = False
+        # Set as soon as a cancel phrase is heard — from an interim
+        # transcript if possible, so the session dies before the
+        # command it was never meant to carry gets acted on.
+        self._cancelled: bool = False
 
         # Streaming-Verify (early cutoff) state.
         self._early_probe_task: Optional[asyncio.Task] = None
@@ -464,6 +469,12 @@ class MurdockHandler(AsyncEventHandler):
                         # and keep listening for a longer one.
                         if text:
                             self._upstream_interim = text
+                            if not self._cancelled and                                     self.context.is_cancel_phrase(text):
+                                self._cancelled = True
+                                _LOGGER.info(
+                                    "[%s] CANCEL heard mid-utterance: %r",
+                                    sid, text,
+                                )
                         _LOGGER.debug(
                             "[%s] Upstream interim transcript: %r", sid, text
                         )
@@ -1058,6 +1069,16 @@ class MurdockHandler(AsyncEventHandler):
         transcript = await self._primary_transcript(audio_16k)
         if not (transcript or "").strip() and audio_16k:
             transcript = await self._rescue_empty_transcript(audio_16k)
+        # Second chance at catching a cancellation: a cloud backend or a
+        # one-shot engine produces no interim results, so the only place
+        # to see the phrase is the finished transcript.
+        if not self._cancelled and self.context.is_cancel_phrase(transcript):
+            self._cancelled = True
+            _LOGGER.info(
+                "[%s] CANCEL in the final transcript: %r",
+                self._session_id, transcript,
+            )
+            return ""
         if dictionary and transcript:
             from murdock.core.transcript_tools import (
                 apply_correction_dictionary_ex,
@@ -1248,6 +1269,22 @@ class MurdockHandler(AsyncEventHandler):
             self._log_total_latency("blocked-early-reject")
             return
 
+        # The user called it off. Nothing downstream should run: no
+        # embedding, no gates, no transcript. An empty result is what
+        # tells Home Assistant to drop the turn.
+        if self._cancelled:
+            _LOGGER.info("[%s] CANCELLED by phrase — dropping the turn", sid)
+            await self._send_transcript_to_satellite("", label="cancelled")
+            self._responded = True
+            await self._close_upstream(send_stop=False)
+            self._record_event(
+                outcome=OUTCOME_CANCELLED,
+                duration_sec=duration,
+                transcript="",
+            )
+            self._log_total_latency("cancelled")
+            return
+
         settings = self.context.settings
         speaker_count = len(self.context.speakers.list_speakers())
 
@@ -1322,9 +1359,26 @@ class MurdockHandler(AsyncEventHandler):
             )
             return
 
+        # What is playing in this room right now. Computed once here and
+        # reused by the verify gate below — it can reach out to Home
+        # Assistant, so doing it twice per utterance was wasteful.
+        media_tighten = await self.context.compute_media_tightening(
+            self._satellite_id, self._satellite_area
+        )
+
         # Gate 2b: liveness / TV-noise rejection. Skipped for whispers —
         # see above; the two look alike to a spectral heuristic.
         min_liveness = self.context.get_min_liveness_score()
+        if min_liveness > 0 and media_tighten > 0:
+            # A playing TV is exactly when a marginal liveness score is
+            # most likely to *be* the TV, so the bar rises with it.
+            boost = self.context.get_liveness_media_boost()
+            if boost > 0:
+                min_liveness = min(0.99, min_liveness + boost)
+                _LOGGER.info(
+                    "[%s] Media playing — liveness bar raised to %.3f",
+                    sid, min_liveness,
+                )
         if min_liveness > 0 and not self._whisper:
             try:
                 liveness = await asyncio.to_thread(analyze_liveness, audio_16k)
@@ -1334,8 +1388,9 @@ class MurdockHandler(AsyncEventHandler):
                 )
                 if liveness.score < min_liveness:
                     _LOGGER.info(
-                        "[%s] TV/NOISE detected (liveness=%.3f < %.3f) — blocking",
-                        sid, liveness.score, min_liveness,
+                        "[%s] TV/NOISE detected (liveness=%.3f < %.3f, "
+                        "media=%s) — blocking",
+                        sid, liveness.score, min_liveness, media_tighten > 0,
                     )
                     self.context.publish_recognition(
                         speaker="tv-noise",
@@ -1440,9 +1495,7 @@ class MurdockHandler(AsyncEventHandler):
         # Gate 3: full embedder + verify (runs in parallel with STT).
         threshold = self.context.get_verify_threshold(self._satellite_id)
         require_match = self.context.get_require_match()
-        tighten = await self.context.compute_media_tightening(
-            self._satellite_id, self._satellite_area
-        )
+        tighten = media_tighten
         if tighten > 0:
             _LOGGER.debug(
                 "[%s] Media playing — tightening threshold by %.3f", sid, tighten,

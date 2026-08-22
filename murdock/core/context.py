@@ -78,6 +78,10 @@ class AppContext:
     _calibrator: Calibrator = field(default_factory=Calibrator)
     _recalibration_task: "Optional[asyncio.Task]" = None
     _recalibration_pending: bool = False
+    # (fingerprint, result) of the last 2-D embedding map. Building it
+    # re-embeds every stored sample, which is far too expensive to redo
+    # each time somebody opens the view.
+    _embedding_map_cache: "Optional[tuple]" = None
 
     # ------------------------------------------------------------------
     # Runtime-configurable settings (persisted in the settings table)
@@ -257,6 +261,74 @@ class AppContext:
 
     def set_enable_extraction(self, enabled: bool) -> None:
         set_setting(self.db, "enable_extraction", "true" if enabled else "false")
+
+    def get_liveness_media_boost(self) -> float:
+        override = get_setting(self.db, "liveness_media_boost")
+        if override:
+            try:
+                return max(0.0, min(0.9, float(override)))
+            except ValueError:
+                pass
+        return float(self.settings.liveness_media_boost)
+
+    def set_liveness_media_boost(self, value: float) -> None:
+        clamped = max(0.0, min(0.9, float(value)))
+        set_setting(self.db, "liveness_media_boost", f"{clamped:.4f}")
+
+    # ------------------------------------------------------------------
+    # Satellite display names
+    # ------------------------------------------------------------------
+
+    def get_satellite_names(self) -> dict:
+        raw = get_setting(self.db, "satellite_names")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def remember_satellite_name(self, satellite_id: str, name: str) -> None:
+        """Persist a friendly name announced over MQTT.
+
+        Kept in the database rather than only in memory so the UI can
+        name a satellite that has not spoken since the last restart.
+        """
+        sat = (satellite_id or "").strip()
+        label = (name or "").strip()
+        if not sat or not label:
+            return
+        names = self.get_satellite_names()
+        if names.get(sat) == label:
+            return
+        names[sat] = label
+        set_setting(self.db, "satellite_names", json.dumps(names))
+
+    def satellite_label(self, satellite_id: Optional[str]) -> str:
+        """What a human should see for this satellite."""
+        if not satellite_id:
+            return ""
+        return self.get_satellite_names().get(satellite_id) or satellite_id
+
+    def get_cancel_words(self) -> list:
+        from .cancel_word import parse_cancel_words
+
+        override = get_setting(self.db, "cancel_words")
+        raw = override if override is not None else self.settings.cancel_words
+        return parse_cancel_words(raw or "")
+
+    def set_cancel_words(self, value: str) -> None:
+        set_setting(self.db, "cancel_words", (value or "").strip())
+
+    def is_cancel_phrase(self, text: str) -> bool:
+        """True when the utterance is the user calling off a false wake."""
+        words = self.get_cancel_words()
+        if not words:
+            return False
+        from .cancel_word import is_cancel
+
+        return is_cancel(text, words)
 
     def get_enable_stt_prep(self) -> bool:
         override = get_setting(self.db, "enable_stt_prep")
@@ -1833,6 +1905,9 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
     # Load any persisted calibration so confidence is calibrated from the
     # first recognition after a restart (no need to refit on every boot).
     _CONTEXT.load_calibration()
+    # Names announced over MQTT are persisted, so a satellite keeps its
+    # label across restarts and shows up named even before it next speaks.
+    mqtt.on_satellite_name = _CONTEXT.remember_satellite_name
     return _CONTEXT
 
 

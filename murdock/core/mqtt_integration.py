@@ -82,6 +82,12 @@ class MQTTClient:
         self.discovery_prefix = discovery_prefix
         self.node_id = node_id
 
+        # Friendly names announced by the active-satellite automation,
+        # so the UI can stop showing raw entity ids. A callback lets the
+        # context persist them; without one they stay in memory.
+        self.satellite_names: dict = {}
+        self.on_satellite_name = None
+
         self._client = None
         self._connected = False
         self._connect_task: Optional[asyncio.Task] = None
@@ -315,9 +321,10 @@ class MQTTClient:
         """Record which satellite HA says is currently active.
 
         Payload is either a bare id string (e.g. an entity id or room) or
-        a JSON object ``{"id": "...", "area": "..."}``. The optional area
-        lets media playing in that room tighten the threshold. An empty
-        payload clears it.
+        a JSON object ``{"id": "...", "area": "...", "name": "..."}``. The
+        optional area lets media playing in that room tighten the
+        threshold; the optional name is what the UI shows instead of the
+        entity id. An empty payload clears it.
         """
         raw = message.payload
         if isinstance(raw, (bytes, bytearray)):
@@ -337,6 +344,17 @@ class MQTTClient:
                 sat_id = str(obj.get("id") or obj.get("satellite") or "").strip() or raw
                 a = obj.get("area")
                 area = str(a).strip() if a else None
+                n = obj.get("name") or obj.get("friendly_name")
+                name = str(n).strip() if n else ""
+                if sat_id and name and self.satellite_names.get(sat_id) != name:
+                    self.satellite_names[sat_id] = name
+                    if self.on_satellite_name is not None:
+                        try:
+                            self.on_satellite_name(sat_id, name)
+                        except Exception:
+                            _LOGGER.debug(
+                                "Storing satellite name failed", exc_info=True
+                            )
         if not sat_id:
             self._active_satellite = None
             return

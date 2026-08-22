@@ -23,6 +23,11 @@ router = APIRouter(prefix="/api/speakers", tags=["speakers"])
 class SpeakerOut(BaseModel):
     id: int
     name: str
+    # How many whispered samples this speaker has, and whether that is
+    # enough for a whisper voiceprint. Without it the profile page could
+    # not say why whispering is or is not recognised for this person.
+    whisper_samples: int = 0
+    has_whisper_profile: bool = False
     ha_user_id: Optional[str]
     role: Optional[str]
     enrollment_count: int
@@ -89,10 +94,15 @@ class SpeakerPatch(BaseModel):
     clear_role: bool = False
 
 
-def _speaker_to_out(s) -> "SpeakerOut":
+def _speaker_to_out(s, whisper_counts: Optional[dict] = None) -> "SpeakerOut":
+    from murdock.core.speaker_store import WHISPER_PROFILE_MIN_SAMPLES
+
+    n_whisper = int((whisper_counts or {}).get(s.id, 0))
     return SpeakerOut(
         id=s.id,
         name=s.name,
+        whisper_samples=n_whisper,
+        has_whisper_profile=n_whisper >= WHISPER_PROFILE_MIN_SAMPLES,
         ha_user_id=s.ha_user_id,
         role=s.role,
         enrollment_count=s.enrollment_count,
@@ -106,30 +116,74 @@ async def list_roles():
     return {"roles": list(VALID_ROLES), "sources": list(VALID_SAMPLE_SOURCES)}
 
 
+def _map_fingerprint(ctx: AppContext, include_unknown: bool) -> tuple:
+    """Cheap signature of everything the map is derived from.
+
+    Deliberately derived from the data rather than invalidated by hand:
+    every future code path that adds, deletes or renames something gets
+    correct cache behaviour without having to remember a hook.
+    """
+    row = ctx.db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS mx, "
+        "COALESCE(MAX(created_at), 0) AS ts FROM speaker_samples"
+    ).fetchone()
+    spk = ctx.db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), 0) AS ts FROM speakers"
+    ).fetchone()
+    unk = (0, 0)
+    if include_unknown:
+        u = ctx.db.execute(
+            "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS mx FROM unknown_samples"
+        ).fetchone()
+        unk = (int(u["n"]), int(u["mx"]))
+    return (
+        int(row["n"]), int(row["mx"]), float(row["ts"]),
+        int(spk["n"]), float(spk["ts"]), unk, bool(include_unknown),
+    )
+
+
 @router.get("/embedding-map")
 async def embedding_map(
     include_unknown: bool = True,
+    refresh: bool = False,
     ctx: AppContext = Depends(get_context),
 ):
     """2-D PCA projection of all sample embeddings, centroids and unknowns.
 
-    Embedding-heavy (re-embeds every stored sample), so it runs in a
-    thread and is only triggered by an explicit UI action. Declared
-    before the /{speaker_id} routes so the literal path isn't swallowed
-    by the int path parameter.
+    Re-embedding every stored sample took seconds and happened on every
+    single view, which made opening the map feel like running a fresh
+    enrolment. The result is now cached against a fingerprint of the
+    enrolment data, so an unchanged set is returned instantly and a
+    changed one is recomputed without anyone having to ask.
+
+    Declared before the /{speaker_id} routes so the literal path isn't
+    swallowed by the int path parameter.
     """
     import asyncio
 
     from murdock.core.embedding_map import compute_embedding_map
 
-    return await asyncio.to_thread(
+    fingerprint = _map_fingerprint(ctx, include_unknown)
+    cached = getattr(ctx, "_embedding_map_cache", None)
+    if not refresh and cached is not None and cached[0] == fingerprint:
+        result = dict(cached[1])
+        result["cached"] = True
+        return result
+
+    result = await asyncio.to_thread(
         compute_embedding_map, ctx.speakers, ctx.unknown, include_unknown
     )
+    ctx._embedding_map_cache = (fingerprint, result)
+    out = dict(result)
+    out["cached"] = False
+    return out
 
 
 @router.get("", response_model=List[SpeakerOut])
 async def list_speakers(ctx: AppContext = Depends(get_context)):
-    return [_speaker_to_out(s) for s in ctx.speakers.list_speakers()]
+    # One query for everybody rather than one per speaker.
+    counts = ctx.speakers.whisper_profile_counts()
+    return [_speaker_to_out(s, counts) for s in ctx.speakers.list_speakers()]
 
 
 class CreateSpeakerBody(BaseModel):

@@ -46,6 +46,8 @@ class SettingsOut(BaseModel):
     auto_enroll: bool
     enable_extraction: bool = True
     enable_stt_prep: bool = True
+    liveness_media_boost: float = 0.15
+    cancel_words: str = ""
     stt_timeout_sec: float = 8.0
     stt_language: str = "de"
     shadow_rescues_empty: bool = True
@@ -146,6 +148,8 @@ class SettingsPatch(BaseModel):
     auto_enroll: Optional[bool] = None
     enable_extraction: Optional[bool] = None
     enable_stt_prep: Optional[bool] = None
+    liveness_media_boost: Optional[float] = Field(default=None, ge=0.0, le=0.9)
+    cancel_words: Optional[str] = None
     stt_timeout_sec: Optional[float] = Field(default=None, ge=1.0, le=120.0)
     stt_language: Optional[str] = None
     shadow_rescues_empty: Optional[bool] = None
@@ -248,6 +252,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         auto_enroll=ctx.get_auto_enroll(),
         enable_extraction=ctx.get_enable_extraction(),
         enable_stt_prep=ctx.get_enable_stt_prep(),
+        liveness_media_boost=ctx.get_liveness_media_boost(),
+        cancel_words=", ".join(ctx.get_cancel_words()),
         stt_timeout_sec=ctx.get_stt_timeout(),
         stt_language=ctx.get_stt_language(),
         shadow_rescues_empty=ctx.get_shadow_rescues_empty(),
@@ -363,6 +369,10 @@ async def patch_settings(
         ctx.set_enable_extraction(body.enable_extraction)
     if body.enable_stt_prep is not None:
         ctx.set_enable_stt_prep(body.enable_stt_prep)
+    if body.liveness_media_boost is not None:
+        ctx.set_liveness_media_boost(body.liveness_media_boost)
+    if body.cancel_words is not None:
+        ctx.set_cancel_words(body.cancel_words)
     if body.stt_timeout_sec is not None:
         ctx.set_stt_timeout(body.stt_timeout_sec)
     if body.stt_language is not None:
@@ -829,6 +839,9 @@ async def mqtt_context(ctx: AppContext = Depends(get_context)):
 
 class SatelliteThresholdEntry(BaseModel):
     satellite_id: str
+    # What a human should see. Falls back to the id until the
+    # active-satellite automation announces a name.
+    name: str = ""
     threshold: Optional[float] = None  # None = no override, falls back to global
     seen_events: int = 0               # recognition_events count (for sorting)
     last_seen: Optional[float] = None  # epoch seconds of last event
@@ -873,6 +886,7 @@ async def list_satellite_thresholds(ctx: AppContext = Depends(get_context)):
         entries.append(
             SatelliteThresholdEntry(
                 satellite_id=sid,
+                name=ctx.satellite_label(sid),
                 threshold=overrides.get(sid),
                 seen_events=count,
                 last_seen=last,
@@ -884,7 +898,10 @@ async def list_satellite_thresholds(ctx: AppContext = Depends(get_context)):
     for sid, th in overrides.items():
         if sid not in covered:
             entries.append(
-                SatelliteThresholdEntry(satellite_id=sid, threshold=th)
+                SatelliteThresholdEntry(
+                    satellite_id=sid, name=ctx.satellite_label(sid),
+                    threshold=th,
+                )
             )
     return SatelliteThresholdList(
         default_threshold=ctx.get_verify_threshold(),

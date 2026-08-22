@@ -213,6 +213,10 @@ const I18N = (() => {
             "settings.min_liveness_hint": "Voices below this score are classified as TV/noise and blocked. Set to 0 to disable. Default: 0.35.",
             "settings.auto_enroll": "Auto-enroll on match (aging/re-training)",
             "settings.auto_enroll_hint": "Automatically add fresh embeddings when a known speaker is recognized, so the model adapts over time.",
+            "settings.liveness_media_boost": "Liveness bar while media plays (+)",
+            "settings.liveness_media_boost_hint": "Added to the minimum liveness score while something is playing in the satellite's room. A playing TV is exactly when a marginal score is most likely to be the TV. 0 disables it. Default: 0.15.",
+            "settings.cancel_words": "Cancel phrases",
+            "settings.cancel_words_hint": "Comma-separated. Saying one of these drops the turn — for a wake word that fired on a phone call or the television. The phrase has to start the utterance, so \"kein Abbruch nötig\" is still a normal request. Recognised mid-sentence where the upstream sends interim results, and phonetically, so a mangled \"Abruch\" still counts. Empty disables it.",
             "settings.enable_extraction": "Speaker extraction (isolate target from TV/second voice)",
             "settings.enable_extraction_hint": "When an utterance has multiple speech regions, embed each and keep only the dominant enrolled speaker's. Single-region clips are skipped (no added latency).",
             "settings.extraction_threshold": "Extraction threshold (stricter than verify)",
@@ -353,6 +357,10 @@ const I18N = (() => {
             "backup.result_samples": "{n} samples imported",
             "backup.result_errors": "{n} error(s)",
 
+            "speakers.whisper_profile_badge": "whisper profile",
+            "speakers.whisper_profile_tooltip": "This speaker has a whisper voiceprint — whispered speech is matched against it instead of the normal one.",
+            "speakers.whisper_partial_badge": "{n} whispered",
+            "speakers.whisper_partial_tooltip": "Not enough whispered samples yet for a whisper voiceprint. Two are needed.",
             "speakers.satellite_tooltip": "Satellite that captured this sample",
 
             // -- Sample quality --
@@ -783,6 +791,10 @@ const I18N = (() => {
             "settings.min_liveness_hint": "Stimmen unter diesem Wert werden als TV/Hintergrund eingestuft und blockiert. Auf 0 setzen zum Deaktivieren. Standard: 0,35.",
             "settings.auto_enroll": "Automatische Nachregistrierung bei Treffer (Alterung/Nachtraining)",
             "settings.auto_enroll_hint": "Fügt automatisch frische Embeddings hinzu, wenn ein bekannter Sprecher erkannt wird, damit sich das Modell mit der Zeit anpasst.",
+            "settings.liveness_media_boost": "Liveness-Latte bei laufenden Medien (+)",
+            "settings.liveness_media_boost_hint": "Wird zur Mindest-Liveness addiert, solange im Raum des Satelliten etwas läuft. Ein laufender Fernseher ist genau die Situation, in der ein Grenzwert am ehesten der Fernseher ist. 0 schaltet es ab. Standard: 0.15.",
+            "settings.cancel_words": "Abbruch-Wörter",
+            "settings.cancel_words_hint": "Kommagetrennt. Eines davon zu sagen verwirft den Durchgang — für ein Wakeword, das beim Telefonieren oder am Fernseher ausgelöst hat. Die Phrase muss die Äußerung anführen, „kein Abbruch nötig\" bleibt also eine normale Anfrage. Wird schon mitten im Satz erkannt, wenn der Upstream Zwischenergebnisse liefert, und phonetisch, damit auch ein verunglücktes „Abruch\" zählt. Leer schaltet es ab.",
             "settings.enable_extraction": "Sprecher-Extraktion (Ziel von TV/zweiter Stimme isolieren)",
             "settings.enable_extraction_hint": "Bei mehreren Sprachregionen in einer Äußerung wird jede eingebettet und nur die des dominanten bekannten Sprechers behalten. Ein-Regionen-Clips werden übersprungen (keine Zusatzlatenz).",
             "settings.extraction_threshold": "Extraktions-Schwelle (strenger als Verify)",
@@ -923,6 +935,10 @@ const I18N = (() => {
             "backup.result_samples": "{n} Proben importiert",
             "backup.result_errors": "{n} Fehler",
 
+            "speakers.whisper_profile_badge": "Flüsterprofil",
+            "speakers.whisper_profile_tooltip": "Diese Person hat einen Flüster-Stimmabdruck — geflüsterte Sprache wird dagegen abgeglichen statt gegen den normalen.",
+            "speakers.whisper_partial_badge": "{n}× geflüstert",
+            "speakers.whisper_partial_tooltip": "Noch zu wenige geflüsterte Proben für einen Flüster-Stimmabdruck. Zwei werden gebraucht.",
             "speakers.satellite_tooltip": "Satellite, der diese Probe aufgenommen hat",
 
             // -- Sample quality --

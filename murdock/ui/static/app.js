@@ -645,6 +645,14 @@ async function loadSpeakers() {
                     <span class="badge">${s.enrollment_count} ${escapeHtml(t("speakers.samples"))}</span>
                     <span class="badge quality" data-quality-for="${s.id}" title="${escapeHtml(t("quality.training_label"))}">…</span>
                     ${s.role ? `<span class="badge role">${escapeHtml(s.role)}</span>` : ""}
+                    ${s.whisper_samples ? `<span class="badge whisper" title="${escapeHtml(
+                        s.has_whisper_profile
+                            ? t("speakers.whisper_profile_tooltip")
+                            : t("speakers.whisper_partial_tooltip"))}">${escapeHtml(
+                        s.has_whisper_profile
+                            ? t("speakers.whisper_profile_badge")
+                            : t("speakers.whisper_partial_badge", { n: s.whisper_samples })
+                    )}</span>` : ""}
                     ${s.ha_user_id ? `<span class="meta">HA: ${escapeHtml(s.ha_user_id)}</span>` : ""}
                 </div>
                 <div class="row">
@@ -1245,6 +1253,13 @@ async function loadSettings() {
             form.auto_enroll.checked = !!s.auto_enroll;
         }
         // Speaker extraction (new fields — backwards-compatible)
+        if (form.liveness_media_boost) {
+            form.liveness_media_boost.value =
+                (s.liveness_media_boost ?? 0.15).toFixed(2);
+        }
+        if (form.cancel_words) {
+            form.cancel_words.value = s.cancel_words ?? "";
+        }
         if (form.enable_extraction) {
             form.enable_extraction.checked = !!s.enable_extraction;
         }
@@ -1509,7 +1524,7 @@ async function loadSatelliteThresholds() {
                 : "–";
             row.innerHTML = `
                 <div class="row">
-                    <span class="badge satellite">${escapeHtml(e.satellite_id)}</span>
+                    <span class="badge satellite" title="${escapeHtml(e.satellite_id)}">${escapeHtml(e.name || e.satellite_id)}</span>
                     <span class="meta">${escapeHtml(t("sat_threshold.events", { n: e.seen_events }))} · ${escapeHtml(t("sat_threshold.last_seen"))} ${escapeHtml(lastSeen)}</span>
                 </div>
                 <div class="row">
@@ -1943,6 +1958,12 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.auto_enroll) {
         body.auto_enroll = form.auto_enroll.checked;
+    }
+    if (form.liveness_media_boost && form.liveness_media_boost.value !== "") {
+        body.liveness_media_boost = parseFloat(form.liveness_media_boost.value);
+    }
+    if (form.cancel_words) {
+        body.cancel_words = form.cancel_words.value.trim();
     }
     if (form.enable_extraction) {
         body.enable_extraction = form.enable_extraction.checked;

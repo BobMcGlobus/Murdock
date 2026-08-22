@@ -360,6 +360,16 @@
                             <input type="number" step="0.01" min="0" max="1" name="min_liveness_score">
                             <small class="meta" data-i18n="settings.min_liveness_hint">Voices below this score are classified as TV/noise and blocked. Set to 0 to disable. Default: 0.35.</small>
                         </label>
+                        <label>
+                            <span data-i18n="settings.liveness_media_boost">Liveness bar while media plays (+)</span>
+                            <input type="number" step="0.05" min="0" max="0.9" name="liveness_media_boost">
+                            <small class="meta" data-i18n="settings.liveness_media_boost_hint">Added to the minimum liveness score while something is playing in the satellite's room. A playing TV is exactly when a marginal score is most likely to be the TV. 0 disables it. Default: 0.15.</small>
+                        </label>
+                        <label>
+                            <span data-i18n="settings.cancel_words">Cancel phrases</span>
+                            <input type="text" name="cancel_words" placeholder="Abbruch, stop">
+                            <small class="meta" data-i18n="settings.cancel_words_hint">Comma-separated. Saying one of these drops the turn — for a wake word that fired on a phone call or the television. The phrase has to start the utterance, so "kein Abbruch nötig" is still a normal request. Recognised mid-sentence where the upstream sends interim results, and phonetically, so a mangled "Abruch" still counts. Empty disables it.</small>
+                        </label>
                         <label class="switch">
                             <input type="checkbox" name="enable_extraction">
                             <span data-i18n="settings.enable_extraction">Speaker extraction (isolate target from TV/second voice)</span>

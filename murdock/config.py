@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     # copy only — the speaker embedding is computed from the untouched
     # audio.
     enable_stt_prep: bool = Field(default=True)
+    # How much higher the liveness bar sits while something is playing in
+    # the satellite's room. Media tightening already existed, but it only
+    # ever moved the *verify* threshold — which decides who spoke, not
+    # whether anyone did. A playing TV is precisely when a marginal
+    # liveness score is most likely to be the TV.
+    liveness_media_boost: float = Field(default=0.15, ge=0.0, le=0.9)
+    # Phrases that abort the current utterance, comma-separated. Empty
+    # disables the feature — a default that silently swallows requests
+    # after an upgrade would be worse than having to switch it on.
+    cancel_words: str = Field(default="")
     # Hard ceiling on a cloud transcription request, in seconds. The old
     # hard-coded 30 s meant a stalled provider held the assistant for
     # half a minute. On expiry the local Wyoming fallback takes over when
