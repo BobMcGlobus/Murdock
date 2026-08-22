@@ -41,6 +41,8 @@ OUTCOME_BLOCKED_EARLY_REJECT = "blocked-early-reject"
 OUTCOME_EMPTY = "empty"
 # The speaker said the wake word was a mistake.
 OUTCOME_CANCELLED = "cancelled"
+# The wake word fired and nobody said anything.
+OUTCOME_NO_SPEECH = "no-speech"
 
 
 @dataclass

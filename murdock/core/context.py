@@ -327,6 +327,28 @@ class AppContext:
             satellite_id, rms, whispered=whispered
         )
 
+    def get_silence_abort_sec(self) -> float:
+        override = get_setting(self.db, "silence_abort_sec")
+        if override is not None:
+            try:
+                return max(0.0, min(30.0, float(override)))
+            except ValueError:
+                pass
+        return float(self.settings.silence_abort_sec)
+
+    def set_silence_abort_sec(self, value: float) -> None:
+        clamped = max(0.0, min(30.0, float(value)))
+        set_setting(self.db, "silence_abort_sec", f"{clamped:.2f}")
+
+    def get_silence_abort_floor(self) -> float:
+        override = get_setting(self.db, "silence_abort_speech_floor")
+        if override is not None:
+            try:
+                return max(0.0, min(2.0, float(override)))
+            except ValueError:
+                pass
+        return float(self.settings.silence_abort_speech_floor)
+
     def get_cancel_words(self) -> list:
         from .cancel_word import parse_cancel_words
 

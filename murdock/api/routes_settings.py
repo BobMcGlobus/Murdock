@@ -48,6 +48,7 @@ class SettingsOut(BaseModel):
     enable_stt_prep: bool = True
     liveness_media_boost: float = 0.15
     cancel_words: str = ""
+    silence_abort_sec: float = 3.0
     stt_timeout_sec: float = 8.0
     stt_language: str = "de"
     shadow_rescues_empty: bool = True
@@ -145,6 +146,7 @@ class SettingsPatch(BaseModel):
     enable_stt_prep: Optional[bool] = None
     liveness_media_boost: Optional[float] = Field(default=None, ge=0.0, le=0.9)
     cancel_words: Optional[str] = None
+    silence_abort_sec: Optional[float] = Field(default=None, ge=0.0, le=30.0)
     stt_timeout_sec: Optional[float] = Field(default=None, ge=1.0, le=120.0)
     stt_language: Optional[str] = None
     shadow_rescues_empty: Optional[bool] = None
@@ -246,6 +248,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         enable_stt_prep=ctx.get_enable_stt_prep(),
         liveness_media_boost=ctx.get_liveness_media_boost(),
         cancel_words=", ".join(ctx.get_cancel_words()),
+        silence_abort_sec=ctx.get_silence_abort_sec(),
         stt_timeout_sec=ctx.get_stt_timeout(),
         stt_language=ctx.get_stt_language(),
         shadow_rescues_empty=ctx.get_shadow_rescues_empty(),
@@ -362,6 +365,8 @@ async def patch_settings(
         ctx.set_liveness_media_boost(body.liveness_media_boost)
     if body.cancel_words is not None:
         ctx.set_cancel_words(body.cancel_words)
+    if body.silence_abort_sec is not None:
+        ctx.set_silence_abort_sec(body.silence_abort_sec)
     if body.stt_timeout_sec is not None:
         ctx.set_stt_timeout(body.stt_timeout_sec)
     if body.stt_language is not None:

@@ -346,6 +346,11 @@
                             <small class="meta" data-i18n="settings.liveness_media_boost_hint">Added to the minimum liveness score while something is playing in the satellite's room. A playing TV is exactly when a marginal score is most likely to be the TV. 0 disables it. Default: 0.15.</small>
                         </label>
                         <label>
+                            <span data-i18n="settings.silence_abort">Give up after silence (seconds)</span>
+                            <input type="number" step="0.5" min="0" max="30" name="silence_abort_sec">
+                            <small class="meta" data-i18n="settings.silence_abort_hint">Ends a turn in which nobody said anything — a wake word that fired on its own. Only triggers when essentially no speech was detected, so drawing breath before speaking never costs you the turn. It cannot shorten the recording itself (Home Assistant decides that), but it does skip the transcript, the conversation agent and the spoken reply. 0 disables it.</small>
+                        </label>
+                        <label>
                             <span data-i18n="settings.cancel_words">Cancel phrases</span>
                             <input type="text" name="cancel_words" placeholder="Abbruch, stop">
                             <small class="meta" data-i18n="settings.cancel_words_hint">Comma-separated. Saying one of these drops the turn — for a wake word that fired on a phone call or the television. The phrase has to start the utterance, so "kein Abbruch nötig" is still a normal request. Recognised mid-sentence where the upstream sends interim results, and phonetically, so a mangled "Abruch" still counts. Empty disables it.</small>

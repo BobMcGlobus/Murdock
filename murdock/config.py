@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     # disables the feature — a default that silently swallows requests
     # after an upgrade would be worse than having to switch it on.
     cancel_words: str = Field(default="")
+    # Give up on a session in which nobody said anything, after this many
+    # seconds. Aimed at a wake word that fired on its own: the turn ends
+    # without a transcript, so no request is invented from silence.
+    # 0 disables it.
+    silence_abort_sec: float = Field(default=3.0, ge=0.0, le=30.0)
+    # …but only when essentially no speech was detected at all. Someone
+    # drawing breath before speaking must not lose their turn.
+    silence_abort_speech_floor: float = Field(default=0.2, ge=0.0, le=2.0)
     # Hard ceiling on a cloud transcription request, in seconds. The old
     # hard-coded 30 s meant a stalled provider held the assistant for
     # half a minute. On expiry the local Wyoming fallback takes over when

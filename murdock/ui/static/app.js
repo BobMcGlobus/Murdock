@@ -1260,6 +1260,9 @@ async function loadSettings() {
         if (form.cancel_words) {
             form.cancel_words.value = s.cancel_words ?? "";
         }
+        if (form.silence_abort_sec) {
+            form.silence_abort_sec.value = (s.silence_abort_sec ?? 3).toFixed(1);
+        }
         if (form.enable_extraction) {
             form.enable_extraction.checked = !!s.enable_extraction;
         }
@@ -1905,6 +1908,9 @@ $("#settings-form").addEventListener("submit", async (e) => {
     }
     if (form.cancel_words) {
         body.cancel_words = form.cancel_words.value.trim();
+    }
+    if (form.silence_abort_sec && form.silence_abort_sec.value !== "") {
+        body.silence_abort_sec = parseFloat(form.silence_abort_sec.value);
     }
     if (form.enable_extraction) {
         body.enable_extraction = form.enable_extraction.checked;

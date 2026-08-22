@@ -54,6 +54,7 @@ from murdock.core.recognition_log import (
     OUTCOME_BLOCKED_NO_SPEAKERS,
     OUTCOME_BLOCKED_TV_NOISE,
     OUTCOME_CANCELLED,
+    OUTCOME_NO_SPEECH,
     OUTCOME_BLOCKED_UNCERTAIN,
     OUTCOME_EMPTY,
     OUTCOME_MATCH,
@@ -165,6 +166,9 @@ class MurdockHandler(AsyncEventHandler):
         # transcript if possible, so the session dies before the
         # command it was never meant to carry gets acted on.
         self._cancelled: bool = False
+        # A wake word that fired with nobody there to talk.
+        self._no_speech: bool = False
+        self._silence_probed: bool = False
 
         # Streaming-Verify (early cutoff) state.
         self._early_probe_task: Optional[asyncio.Task] = None
@@ -317,6 +321,20 @@ class MurdockHandler(AsyncEventHandler):
                     self._early_probe_task = asyncio.create_task(
                         self._run_early_probe(snapshot)
                     )
+
+            # --- Silence abort ---
+            # A wake word that fired on its own leaves a stream with no
+            # speech in it. Checked once, after the configured window, so
+            # the turn can end without inventing a request out of silence.
+            abort_after = self.context.get_silence_abort_sec()
+            if (
+                not self._silence_probed
+                and abort_after > 0
+                and self.context.vad is not None
+                and len(self._audio_buffer) >= int(abort_after * 16000 * 2)
+            ):
+                self._silence_probed = True
+                await self._probe_for_silence(bytes(self._audio_buffer))
 
             # --- Early reject (opt-in) ---
             # Fires once there are ~1.5 s of voice AFTER the chime trim,
@@ -733,6 +751,42 @@ class MurdockHandler(AsyncEventHandler):
             return
         except Exception:
             _LOGGER.debug("[%s] Early-reject probe failed", sid, exc_info=True)
+
+    async def _probe_for_silence(self, audio: bytes) -> None:
+        """End a session in which nobody has said anything yet.
+
+        Only fires when essentially *no* speech was detected — someone
+        drawing breath before speaking must not lose their turn, so the
+        floor is the deciding condition and the timer is only the cue to
+        look.
+
+        This cannot shorten the recording itself: Home Assistant decides
+        when to stop sending audio. What it does save is the transcript,
+        the conversation agent and the spoken reply, which is the part
+        that makes a phantom wake word feel like a malfunction.
+        """
+        sid = self._session_id
+        try:
+            result = await asyncio.to_thread(
+                self.context.vad.analyze_pcm, audio
+            )
+        except Exception:
+            _LOGGER.debug("[%s] Silence probe failed", sid, exc_info=True)
+            return
+        floor = self.context.get_silence_abort_floor()
+        if result.speech_seconds > floor:
+            _LOGGER.debug(
+                "[%s] Silence probe: %.2fs of speech — carrying on",
+                sid, result.speech_seconds,
+            )
+            return
+        self._no_speech = True
+        _LOGGER.info(
+            "[%s] NO SPEECH after %.1fs (%.2fs detected, floor %.2fs) — "
+            "dropping the turn",
+            sid, len(audio) / (16000 * 2), result.speech_seconds, floor,
+        )
+        await self._close_upstream(send_stop=False)
 
     async def _maybe_extract(self, verify_audio: bytes) -> bytes:
         """Run adaptive speaker extraction, returning the audio to verify.
@@ -1274,6 +1328,19 @@ class MurdockHandler(AsyncEventHandler):
         # The user called it off. Nothing downstream should run: no
         # embedding, no gates, no transcript. An empty result is what
         # tells Home Assistant to drop the turn.
+        if self._no_speech and not self._cancelled:
+            _LOGGER.info("[%s] NO SPEECH — dropping the turn", sid)
+            await self._send_transcript_to_satellite("", label="no-speech")
+            self._responded = True
+            await self._close_upstream(send_stop=False)
+            self._record_event(
+                outcome=OUTCOME_NO_SPEECH,
+                duration_sec=duration,
+                transcript="",
+            )
+            self._log_total_latency("no-speech")
+            return
+
         if self._cancelled:
             _LOGGER.info("[%s] CANCELLED by phrase — dropping the turn", sid)
             await self._send_transcript_to_satellite("", label="cancelled")
