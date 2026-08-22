@@ -17,7 +17,6 @@ from ..config import Settings, get_settings
 from .calibration import Calibrator, calibrator_from_pairs
 from .db import get_setting, open_db, set_setting
 from .embeddings import CAMPPlusEmbedder
-from .emotion import EmotionClassifier
 from .ha_integration import HomeAssistantClient
 from .mqtt_integration import MQTTClient
 from .recognition_log import RecognitionLog
@@ -72,7 +71,6 @@ class AppContext:
     ha: HomeAssistantClient
     mqtt: MQTTClient
     recognition: RecognitionLog
-    emotion: Optional[EmotionClassifier] = None
     info_cache: "Optional[UpstreamInfoCache]" = None
     _overrides: dict = field(default_factory=dict)
     _calibrator: Calibrator = field(default_factory=Calibrator)
@@ -82,6 +80,9 @@ class AppContext:
     # re-embeds every stored sample, which is far too expensive to redo
     # each time somebody opens the view.
     _embedding_map_cache: "Optional[tuple]" = None
+    # Running per-satellite speech-level baseline, so "quiet" means
+    # quiet *for this room* rather than below some fixed number.
+    _voice_style: "Optional[object]" = None
 
     # ------------------------------------------------------------------
     # Runtime-configurable settings (persisted in the settings table)
@@ -310,6 +311,21 @@ class AppContext:
         if not satellite_id:
             return ""
         return self.get_satellite_names().get(satellite_id) or satellite_id
+
+    def classify_voice_style(
+        self, satellite_id, rms, whispered: bool = False
+    ) -> str:
+        """Coarse label for how this utterance was spoken.
+
+        Free: it reuses the level the whisper detector already measured.
+        """
+        from .voice_style import VoiceStyleTracker
+
+        if self._voice_style is None:
+            self._voice_style = VoiceStyleTracker()
+        return self._voice_style.classify(
+            satellite_id, rms, whispered=whispered
+        )
 
     def get_cancel_words(self) -> list:
         from .cancel_word import parse_cancel_words
@@ -757,36 +773,6 @@ class AppContext:
     def set_auto_enroll(self, enabled: bool) -> None:
         set_setting(self.db, "auto_enroll", "true" if enabled else "false")
 
-    # ------------------------------------------------------------------
-    # Emotion detection (experimental, opt-in)
-    # ------------------------------------------------------------------
-    #
-    # The flag is honoured live (no restart needed) and guards every CPU
-    # path in the classifier. Even with the flag on, the handler skips
-    # classification whenever the model file is missing so users can
-    # safely pre-flip the switch while waiting for a model release.
-
-    def get_enable_emotion(self) -> bool:
-        override = get_setting(self.db, "enable_emotion")
-        if override is not None:
-            return override.lower() in ("1", "true", "yes", "on")
-        return self.settings.enable_emotion
-
-    def set_enable_emotion(self, enabled: bool) -> None:
-        set_setting(self.db, "enable_emotion", "true" if enabled else "false")
-
-    def emotion_model_available(self) -> bool:
-        """Whether the on-disk model file exists and the classifier can run."""
-        return self.emotion is not None and self.emotion.is_available()
-
-    def emotion_ready(self) -> bool:
-        """True when the feature is both enabled AND a model is on disk."""
-        return self.get_enable_emotion() and self.emotion_model_available()
-
-    # ------------------------------------------------------------------
-    # Home Assistant integration (live-editable, persisted in DB)
-    # ------------------------------------------------------------------
-
     def get_ha_url(self) -> str:
         override = get_setting(self.db, "ha_url")
         if override is not None:
@@ -850,12 +836,6 @@ class AppContext:
     def set_ha_role_entity(self, value: str) -> None:
         set_setting(self.db, "ha_role_entity", (value or "").strip())
 
-    def get_ha_emotion_entity(self) -> str:
-        return get_setting(self.db, "ha_emotion_entity") or ""
-
-    def set_ha_emotion_entity(self, value: str) -> None:
-        set_setting(self.db, "ha_emotion_entity", (value or "").strip())
-
     async def apply_ha_settings(self) -> None:
         """Push current HA settings into the live client."""
         await self.ha.reconfigure(
@@ -867,7 +847,6 @@ class AppContext:
             distance_entity=self.get_ha_distance_entity() or None,
             nearest_entity=self.get_ha_nearest_entity() or None,
             role_entity=self.get_ha_role_entity() or None,
-            emotion_entity=self.get_ha_emotion_entity() or None,
         )
         _LOGGER.info(
             "HA client reconfigured: url=%s configured=%s",
@@ -987,11 +966,10 @@ class AppContext:
         uncertain: bool = False,
         reason: Optional[str] = None,
         role: Optional[str] = None,
-        emotion: Optional[str] = None,
-        emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
         whisper_score: Optional[float] = None,
+        voice_style: Optional[str] = None,
         speakers: Optional[list] = None,
     ) -> None:
         """Fire-and-forget a recognition result to every configured sink.
@@ -1016,11 +994,10 @@ class AppContext:
             uncertain=uncertain,
             reason=reason,
             role=role,
-            emotion=emotion,
-            emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
             whisper=whisper,
             whisper_score=whisper_score,
+            voice_style=voice_style,
             speakers=speakers,
         )
         if self.mqtt.connected:
@@ -1844,16 +1821,6 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
 
     recognition = RecognitionLog(conn=db)
 
-    # Emotion classifier: always constructed, never auto-loaded. The ONNX
-    # session is materialised on the first classify() call — if the model
-    # file is missing at that point we raise FileNotFoundError, which the
-    # handler catches and silently skips. Constructing it unconditionally
-    # keeps the wiring identical regardless of the feature flag.
-    emotion = EmotionClassifier(
-        settings.emotion_model_path,
-        min_duration_sec=settings.emotion_min_seconds,
-    )
-
     # HA client: check DB overrides first, fall back to env.
     _ha_url = get_setting(db, "ha_url")
     _ha_token = get_setting(db, "ha_token")
@@ -1868,7 +1835,6 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         distance_entity=get_setting(db, "ha_distance_entity") or None,
         nearest_entity=get_setting(db, "ha_nearest_entity") or None,
         role_entity=get_setting(db, "ha_role_entity") or None,
-        emotion_entity=get_setting(db, "ha_emotion_entity") or None,
     )
 
     # MQTT client: DB override first, env (addon-injected / compose) fallback.
@@ -1895,7 +1861,6 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
         ha=ha,
         mqtt=mqtt,
         recognition=recognition,
-        emotion=emotion,
     )
     # Apply the persisted threshold override, if any.
     _CONTEXT.speakers.threshold = _CONTEXT.get_verify_threshold()

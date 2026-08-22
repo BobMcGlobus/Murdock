@@ -1335,9 +1335,6 @@ async function loadSettings() {
             haForm.ha_distance_entity.value = s.ha_distance_entity || "";
             haForm.ha_nearest_entity.value = s.ha_nearest_entity || "";
             haForm.ha_role_entity.value = s.ha_role_entity || "";
-            if (haForm.ha_emotion_entity) {
-                haForm.ha_emotion_entity.value = s.ha_emotion_entity || "";
-            }
             updateHaTemplatePreview();
             const hint = $("#ha-token-hint");
             if (hint) {
@@ -1452,33 +1449,12 @@ async function loadSettings() {
             }
             updateSttFieldVisibility();
         }
-        // Emotion detection (experimental)
         const whisperForm = $("#whisper-form");
         if (whisperForm && whisperForm.enable_whisper_detection) {
             whisperForm.enable_whisper_detection.checked =
                 !!s.enable_whisper_detection;
             whisperForm.whisper_threshold.value =
                 (s.whisper_threshold ?? 0.62).toFixed(2);
-        }
-        const emotionForm = $("#emotion-form");
-        if (emotionForm) {
-            emotionForm.enable_emotion.checked = !!s.enable_emotion;
-            const status = $("#emotion-status");
-            if (status) {
-                let msg;
-                let cls = "meta";
-                if (!s.enable_emotion) {
-                    msg = t("emotion.model_disabled");
-                } else if (s.emotion_model_available) {
-                    msg = t("emotion.model_ready");
-                    cls = "feedback ok";
-                } else {
-                    msg = t("emotion.model_missing");
-                    cls = "feedback warn";
-                }
-                status.className = cls;
-                status.textContent = msg;
-            }
         }
         // Populate quality weights form
         const qForm = $("#quality-form");
@@ -1894,41 +1870,6 @@ if (sttForm) {
     });
 }
 
-// --- Emotion detection toggle ---------------------------------------------
-
-const emotionForm = $("#emotion-form");
-if (emotionForm) {
-    emotionForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const fb = $("#emotion-feedback");
-        try {
-            await api("/api/settings", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    enable_emotion: emotionForm.enable_emotion.checked,
-                }),
-            });
-            if (fb) {
-                fb.className = "feedback ok";
-                fb.textContent = t("emotion.saved");
-                setTimeout(() => {
-                    if (fb.textContent === t("emotion.saved")) {
-                        fb.textContent = "";
-                        fb.className = "feedback";
-                    }
-                }, 2500);
-            }
-            // Refresh status banner to reflect the new enabled-vs-model state.
-            loadSettings();
-        } catch (err) {
-            if (fb) {
-                fb.className = "feedback err";
-                fb.textContent = err.message;
-            }
-        }
-    });
-}
 
 function parseLanguages(raw) {
     if (!raw) return [];
@@ -2445,7 +2386,6 @@ $("#ha-settings-form").addEventListener("submit", async (e) => {
         ha_distance_entity: form.ha_distance_entity.value.trim(),
         ha_nearest_entity: form.ha_nearest_entity.value.trim(),
         ha_role_entity: form.ha_role_entity.value.trim(),
-        ha_emotion_entity: form.ha_emotion_entity.value.trim(),
     };
     // Only send token if the user actually typed something.
     const tokenVal = form.ha_token.value;
@@ -2503,7 +2443,6 @@ function buildHaTemplate() {
     const dist = form.ha_distance_entity.value.trim();
     const nearest = form.ha_nearest_entity.value.trim();
     const role = form.ha_role_entity.value.trim();
-    const emotion = form.ha_emotion_entity ? form.ha_emotion_entity.value.trim() : "";
 
     const isDE = I18N.locale() === "de";
     const lines = [];
@@ -2527,15 +2466,6 @@ function buildHaTemplate() {
         lines.push(isDE
             ? `Rolle: {{ role }}.`
             : `Role: {{ role }}.`);
-        lines.push(`{% endif %}`);
-    }
-
-    if (emotion) {
-        lines.push(`{% set emotion = states('${emotion}') %}`);
-        lines.push(`{% if emotion and emotion not in ['unknown', 'unavailable', ''] %}`);
-        lines.push(isDE
-            ? `Stimmungslage: {{ emotion }}.`
-            : `Emotional tone: {{ emotion }}.`);
         lines.push(`{% endif %}`);
     }
 
@@ -2841,13 +2771,6 @@ function renderRecognitionEvent(e) {
         const cls = e.whisper ? "badge whisper" : "badge whisper below";
         return `<span class="${cls}">${escapeHtml(label)}</span>`;
     })();
-    const emotionChip = e.emotion
-        ? `<span class="badge emotion">${escapeHtml(e.emotion)}${
-              e.emotion_confidence != null
-                  ? ` ${Math.round(e.emotion_confidence * 100)}%`
-                  : ""
-          }</span>`
-        : "";
     // Blocked/unknown entries whose audio was captured can be turned into
     // training data directly from the log.
     const assignBtn = e.unknown_sample_id
@@ -2860,7 +2783,6 @@ function renderRecognitionEvent(e) {
                 <span class="${badgeCls}">${escapeHtml(meta.label)}</span>
                 <strong>${who}</strong>
                 ${whisperChip}
-                ${emotionChip}
                 <span class="meta">${ts} · ${e.duration_sec.toFixed(2)}s${sat}</span>
             </div>
             ${transcript}

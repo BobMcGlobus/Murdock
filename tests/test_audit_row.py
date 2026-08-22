@@ -32,6 +32,7 @@ def _handler(tmp_path):
         _transcript_timing={"ttfb_ms": 401.2, "body_ms": 2.8,
                             "total_ms": 404.0, "sent_bytes": 105600},
         _rescued_by=None,
+        _voice_style="normal",
         _gate_ms=310.0,
         _answer_ms=6950.0,
         _whisper=True,
@@ -76,7 +77,7 @@ def test_every_handler_kwarg_is_accepted_by_the_log(tmp_path):
     forwarded = {
         "session_id", "satellite_id", "duration_sec", "outcome",
         "matched_speaker", "distance", "threshold", "verify_ms",
-        "transcript", "emotion", "emotion_confidence", "weight", "margin",
+        "transcript", "weight", "margin",
         "transcript_ms", "whisper", "whisper_score", "speakers",
     }
     missing = forwarded - accepted

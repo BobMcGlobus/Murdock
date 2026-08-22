@@ -56,8 +56,6 @@ class RecognitionEvent:
     threshold: Optional[float]
     verify_ms: Optional[float]
     transcript: Optional[str]
-    emotion: Optional[str] = None
-    emotion_confidence: Optional[float] = None
     # A/B shadow: a second STT engine's transcript of the same audio,
     # filled in asynchronously after the event was recorded.
     shadow_transcript: Optional[str] = None
@@ -134,8 +132,6 @@ class RecognitionLog:
         threshold: Optional[float] = None,
         verify_ms: Optional[float] = None,
         transcript: Optional[str] = None,
-        emotion: Optional[str] = None,
-        emotion_confidence: Optional[float] = None,
         weight: Optional[float] = None,
         margin: Optional[float] = None,
         transcript_ms: Optional[float] = None,
@@ -157,10 +153,10 @@ class RecognitionLog:
                     "INSERT INTO recognition_events("
                     "created_at, session_id, satellite_id, duration_sec, "
                     "outcome, matched_speaker, distance, threshold, "
-                    "verify_ms, transcript, emotion, emotion_confidence, "
+                    "verify_ms, transcript, "
                     "weight, margin, transcript_ms, whisper, "
                     "whisper_score, speakers, transcript_timing) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         now,
                         session_id,
@@ -172,8 +168,6 @@ class RecognitionLog:
                         threshold,
                         verify_ms,
                         safe_transcript,
-                        emotion,
-                        emotion_confidence,
                         weight,
                         margin,
                         transcript_ms,
@@ -188,9 +182,9 @@ class RecognitionLog:
                 self.conn.commit()
                 _LOGGER.info(
                     "Recorded event #%d [%s] outcome=%s speaker=%s "
-                    "duration=%.2fs emotion=%s transcript=%r",
+                    "duration=%.2fs transcript=%r",
                     row_id, session_id, outcome, matched_speaker or "-",
-                    duration_sec, emotion or "-", (safe_transcript or "")[:60],
+                    duration_sec, (safe_transcript or "")[:60],
                 )
                 return row_id
             except Exception:
@@ -232,8 +226,7 @@ class RecognitionLog:
             rows = self.conn.execute(
                 "SELECT id, created_at, session_id, satellite_id, duration_sec, "
                 "outcome, matched_speaker, distance, threshold, verify_ms, "
-                "transcript, emotion, emotion_confidence, "
-                "shadow_transcript, shadow_engine, weight, margin, "
+                "transcript, shadow_transcript, shadow_engine, weight, margin, "
                 "transcript_ms, shadow_ms, whisper, whisper_score, speakers, "
                 "transcript_timing "
                 f"FROM recognition_events {where} "
@@ -253,8 +246,6 @@ class RecognitionLog:
                 threshold=row["threshold"],
                 verify_ms=row["verify_ms"],
                 transcript=row["transcript"],
-                emotion=row["emotion"] if "emotion" in row.keys() else None,
-                emotion_confidence=row["emotion_confidence"] if "emotion_confidence" in row.keys() else None,
                 shadow_transcript=row["shadow_transcript"] if "shadow_transcript" in row.keys() else None,
                 shadow_engine=row["shadow_engine"] if "shadow_engine" in row.keys() else None,
                 weight=row["weight"] if "weight" in row.keys() else None,

@@ -29,17 +29,6 @@ CAMPP_URLS=(
     "https://hf-mirror.com/gpustack/CosyVoice-300M-Instruct/resolve/main/campplus.onnx"
 )
 
-# Emotion (emotion2vec+ base) — OPT-IN, ~356 MB, only fetched when
-# DOWNLOAD_EMOTION_MODEL=1. Two files: the ONNX is the feature extractor
-# and emits frame-level 768-dim features; the tiny .bin is the 9-class
-# linear head. Without both there is no classifier, only features.
-EMOTION_URLS=(
-    "https://huggingface.co/ykevinc/emotion2vec-plus-base-onnx/resolve/main/model.onnx"
-)
-EMOTION_HEAD_URLS=(
-    "https://huggingface.co/ykevinc/emotion2vec-plus-base-onnx/resolve/main/classifier.bin"
-)
-
 # Silero VAD v5 — ~2 MB, hosted directly in the upstream GitHub repo.
 SILERO_URLS=(
     "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
@@ -142,30 +131,6 @@ download_with_fallback "$MODEL_DIR/campplus.onnx" 10000000 "${CAMPP_URLS[@]}" \
     || missing=1
 download_with_fallback "$MODEL_DIR/silero_vad.onnx" 500000 "${SILERO_URLS[@]}" \
     || missing=1
-
-# Emotion detection is opt-in and large, so it is never part of the
-# required set — a failure here must not block startup.
-if [ "${DOWNLOAD_EMOTION_MODEL:-0}" = "1" ]; then
-    echo
-    echo "Emotion model requested (~356 MB) — this takes a while."
-    if download_with_fallback "$MODEL_DIR/emotion.onnx" 100000000 "${EMOTION_URLS[@]}"; then
-        # The head is ~27 KB, far below the ONNX size floor, so validate
-        # it by exact size: 8-byte header + 9x768 float32 weights + 9 bias.
-        if curl -fsSL --retry 3 -o "$MODEL_DIR/emotion_head.bin" "${EMOTION_HEAD_URLS[0]}"; then
-            head_size=$(stat -c %s "$MODEL_DIR/emotion_head.bin" 2>/dev/null                 || stat -f %z "$MODEL_DIR/emotion_head.bin")
-            if [ "$head_size" -ne 27692 ]; then
-                echo "  emotion head has $head_size bytes, expected 27692 — discarding" >&2
-                rm -f "$MODEL_DIR/emotion_head.bin" "$MODEL_DIR/emotion.onnx"
-            else
-                echo "  emotion classifier head OK ($head_size bytes)"
-            fi
-        else
-            echo "  could not fetch the emotion head — removing the ONNX too," >&2
-            echo "  since the extractor alone cannot classify anything." >&2
-            rm -f "$MODEL_DIR/emotion.onnx"
-        fi
-    fi
-fi
 
 echo
 echo "Models in $MODEL_DIR:"

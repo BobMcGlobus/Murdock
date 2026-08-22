@@ -132,7 +132,7 @@ cluster, and tag the sample later.
 - **MQTT auto-discovery (recommended)** — publishes recognition results
   over MQTT; entities (`sensor.murdock_current_speaker`,
   `binary_sensor.murdock_speaker_recognized`, confidence, distance,
-  nearest speaker, role, emotion, satellite) appear automatically. **No
+  nearest speaker, role, satellite) appear automatically. **No
   token, no manual helpers.** In the add-on the broker is auto-wired from
   the Mosquitto service — zero config.
 - **Context push (token-free)** — HA publishes TV state / presence onto

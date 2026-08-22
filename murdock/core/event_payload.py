@@ -36,11 +36,10 @@ def build_recognition_payload(
     uncertain: bool = False,
     reason: Optional[str] = None,
     role: Optional[str] = None,
-    emotion: Optional[str] = None,
-    emotion_confidence: Optional[float] = None,
     ambiguities: Optional[List[Dict[str, str]]] = None,
     whisper: bool = False,
     whisper_score: Optional[float] = None,
+    voice_style: Optional[str] = None,
     speakers: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build the event payload dict.
@@ -75,10 +74,6 @@ def build_recognition_payload(
         payload["uncertain"] = True
     if role is not None:
         payload["role"] = role
-    if emotion is not None:
-        payload["emotion"] = emotion
-    if emotion_confidence is not None:
-        payload["emotion_confidence"] = round(emotion_confidence, 4)
     if ambiguities:
         payload["ambiguities"] = ambiguities
     if whisper:
@@ -87,6 +82,8 @@ def build_recognition_payload(
     # consumer may want its own threshold.
     if whisper_score is not None:
         payload["whisper_score"] = round(whisper_score, 4)
+    if voice_style:
+        payload["voice_style"] = voice_style
     # More than one enrolled voice in the clip — the gate followed the
     # dominant one, but "who else was there" is useful on its own.
     if speakers and len(speakers) > 1:

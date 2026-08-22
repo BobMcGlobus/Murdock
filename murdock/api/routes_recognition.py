@@ -26,8 +26,6 @@ class RecognitionEventOut(BaseModel):
     threshold: Optional[float]
     verify_ms: Optional[float]
     transcript: Optional[str]
-    emotion: Optional[str] = None
-    emotion_confidence: Optional[float] = None
     # Set when a captured (untagged) unknown sample exists for this
     # session, so the UI can offer "assign to speaker" on blocked entries.
     unknown_sample_id: Optional[int] = None
@@ -89,8 +87,6 @@ async def list_events(
                 threshold=e.threshold,
                 verify_ms=e.verify_ms,
                 transcript=e.transcript,
-                emotion=e.emotion,
-                emotion_confidence=e.emotion_confidence,
                 unknown_sample_id=session_map.get(e.session_id),
                 shadow_transcript=e.shadow_transcript,
                 shadow_engine=e.shadow_engine,

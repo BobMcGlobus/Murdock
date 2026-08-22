@@ -205,8 +205,10 @@ def test_legacy_tv_still_boolean():
 def test_discovery_config_count_and_topics():
     c = _client()
     configs = c._discovery_configs()
-    # 8 sensors + 2 binary_sensors.
+    # 8 sensors + 2 binary_sensors: emotion was removed in 0.9.5 and
+    # voice style took its place.
     assert len(configs) == 10
+    assert "voice_style" in {o for _, o, _ in configs}
     object_ids = {object_id for _, object_id, _ in configs}
     assert "current_speaker" in object_ids
     assert "speaker_recognized" in object_ids

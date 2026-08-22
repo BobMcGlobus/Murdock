@@ -285,26 +285,6 @@
                 <div id="whisper-feedback" class="feedback"></div>
             </div>
 
-            <div class="card">
-                <h2 data-i18n="emotion.title">Emotion detection (experimental)</h2>
-                <p class="meta" data-i18n="emotion.description">
-                    Classifies the emotional tone of verified speech (happy,
-                    sad, angry, …) and pushes it to Home Assistant. This is
-                    plumbing only — no compatible ONNX model ships with
-                    Murdock yet. The toggle can be pre-flipped safely.
-                </p>
-                <form id="emotion-form">
-                    <label class="inline">
-                        <input type="checkbox" name="enable_emotion">
-                        <span data-i18n="emotion.enable">Enable emotion detection</span>
-                    </label>
-                    <div id="emotion-status" class="meta"></div>
-                    <div class="row" style="margin-top:0.5rem">
-                        <button type="submit" data-i18n="generic.save">Save</button>
-                    </div>
-                </form>
-                <div id="emotion-feedback" class="feedback"></div>
-            </div>
         </section>
 
         <section id="tab-settings" class="tab">
@@ -891,10 +871,6 @@
                     <label>
                         <span data-i18n="ha.role_entity">Role (input_text)</span>
                         <input type="text" name="ha_role_entity" data-i18n-ph="ha.ph_role" placeholder="input_text.speaker_role">
-                    </label>
-                    <label>
-                        <span data-i18n="ha.emotion_entity">Emotion (input_text)</span>
-                        <input type="text" name="ha_emotion_entity" data-i18n-ph="ha.ph_emotion" placeholder="input_text.current_speaker_emotion">
                     </label>
                     <div class="row">
                         <button type="submit" data-i18n="ha.save">Save</button>

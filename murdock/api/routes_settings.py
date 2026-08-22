@@ -82,7 +82,6 @@ class SettingsOut(BaseModel):
     ha_distance_entity: str = ""
     ha_nearest_entity: str = ""
     ha_role_entity: str = ""
-    ha_emotion_entity: str = ""
     stt_backend: str = "upstream"  # "upstream" | "voxtral" | "openai"
     mistral_api_key_set: bool = False
     mistral_model: str = "voxtral-mini-latest"
@@ -119,13 +118,9 @@ class SettingsOut(BaseModel):
     advertised_languages_source: str = "auto"  # "auto" | "override"
     quality_weights: dict = Field(default_factory=dict)
     quality_weights_source: str = "default"  # "default" | "override"
-    # Emotion detection status — plumbing-only in this release. `enabled`
     # reflects the user's opt-in; `model_available` reflects whether a
     # usable ONNX file is on disk. The UI shows "no model yet" when the
     # flag is on but the model is missing, preventing confusion about
-    # why recognition events lack emotion data.
-    enable_emotion: bool = False
-    emotion_model_available: bool = False
 
 
 class SettingsPatch(BaseModel):
@@ -181,11 +176,8 @@ class SettingsPatch(BaseModel):
     ha_distance_entity: Optional[str] = None
     ha_nearest_entity: Optional[str] = None
     ha_role_entity: Optional[str] = None
-    ha_emotion_entity: Optional[str] = None
-    # Emotion detection (experimental). Setting enable_emotion to True while
     # no model is on disk is harmless — the handler gates on both flag AND
     # model availability before attempting inference.
-    enable_emotion: Optional[bool] = None
     quality_weights: Optional[dict] = None  # {"speech_ratio":0.25,...} — pass {} to reset
     # STT backend selection
     stt_backend: Optional[str] = None  # "upstream" | "voxtral" | "openai"
@@ -314,13 +306,10 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         ha_distance_entity=ctx.get_ha_distance_entity(),
         ha_nearest_entity=ctx.get_ha_nearest_entity(),
         ha_role_entity=ctx.get_ha_role_entity(),
-        ha_emotion_entity=ctx.get_ha_emotion_entity(),
         advertised_languages=languages,
         advertised_languages_source=source,
         quality_weights=ctx.get_quality_weights(),
         quality_weights_source=ctx.get_quality_weights_source(),
-        enable_emotion=ctx.get_enable_emotion(),
-        emotion_model_available=ctx.emotion_model_available(),
     )
 
 
@@ -439,13 +428,9 @@ async def patch_settings(
     if body.ha_role_entity is not None:
         ctx.set_ha_role_entity(body.ha_role_entity)
         ha_changed = True
-    if body.ha_emotion_entity is not None:
-        ctx.set_ha_emotion_entity(body.ha_emotion_entity)
         ha_changed = True
     if ha_changed:
         await ctx.apply_ha_settings()
-    if body.enable_emotion is not None:
-        ctx.set_enable_emotion(body.enable_emotion)
     if body.quality_weights is not None:
         # Empty dict resets to defaults.
         if body.quality_weights == {}:

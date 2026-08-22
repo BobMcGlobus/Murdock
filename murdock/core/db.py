@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS recognition_events (
     threshold REAL,
     verify_ms REAL,
     transcript TEXT,
+    -- Emotion detection was removed in 0.9.5. The columns stay: dropping
+    -- one in SQLite means rebuilding the table, and an old database is
+    -- still readable with them present. Nothing writes them any more.
     emotion TEXT,
     emotion_confidence REAL,
     shadow_transcript TEXT,

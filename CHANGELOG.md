@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.9.5
+
+**A polish release: false wakes, and the parts of the UI that made you
+work to read them.**
+
+*Rejecting what wasn't a person*
+
+- **The liveness bar now rises with the room.** Media tightening
+  existed, but it only ever moved the *verify* threshold — which decides
+  who spoke, not whether anyone did. That was backwards: a playing TV is
+  exactly the moment a marginal liveness score is most likely to *be*
+  the TV. The media context is also computed once per utterance now
+  instead of twice.
+- **Cancel phrases** drop a turn the wake word should never have
+  started — a phone call, the television. Matching is deliberately
+  narrow: the phrase must *lead* the utterance, so "kein Abbruch nötig"
+  stays a normal request, and phonetic comparison catches a mangled
+  "Abruch". Where the upstream sends interim results it is caught
+  mid-sentence, before the command it was never meant to carry gets
+  acted on. Off until configured.
+
+*Reading the interface*
+
+- **Satellites can be named.** The existing active-satellite automation
+  may send a `name`; it is persisted, so a room stays named across
+  restarts and before it next speaks.
+- **The 2-D map is cached.** It re-embedded every stored sample on every
+  view, which is why opening it felt like running a fresh enrolment. The
+  cache is keyed on a fingerprint of the enrolment data rather than a
+  manual invalidation hook, so no future code path can forget to clear
+  it.
+- **Speakers show their whisper profile** — whether they have a whisper
+  voiceprint, or how many whispered samples are still missing.
+
+*Swapped out*
+
+- **Emotion detection is gone.** It cost 706 ms per utterance against a
+  total answer time of ~340 ms, needed a 356 MB opt-in model, and
+  classified a mood rather than anything an automation could act on.
+- **Voice style takes its place**, and costs nothing: the whisper
+  detector already measures the level, so quiet / normal / animated /
+  whispered comes free. It is judged against a running median of *that
+  satellite's own* recent utterances, because "loud" has no absolute
+  meaning across microphones and rooms — a satellite calibrates itself
+  within a handful of turns and needs no configuration. Published as
+  `sensor.murdock_voice_style` and in the recognition event.
+
+The `emotion` columns stay in the database: dropping one in SQLite means
+rebuilding the table, and an old database is still readable with them
+present. Nothing writes them any more.
+
 ## 0.9.4
 
 **A streaming upstream had its transcripts cut off mid-word.**

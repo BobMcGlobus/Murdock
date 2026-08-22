@@ -204,6 +204,7 @@ class MurdockHandler(AsyncEventHandler):
         # Whisper detection result for this utterance (experimental).
         self._whisper: bool = False
         self._whisper_score: Optional[float] = None
+        self._voice_style: Optional[str] = None
 
         # Every enrolled speaker heard in this utterance (from extraction).
         self._speakers: list = []
@@ -725,6 +726,7 @@ class MurdockHandler(AsyncEventHandler):
                 reason="early-reject",
                 whisper=self._whisper,
                 whisper_score=self._whisper_score,
+            voice_style=self._voice_style,
                 speakers=self._speakers or None,
             )
         except asyncio.CancelledError:
@@ -1297,6 +1299,11 @@ class MurdockHandler(AsyncEventHandler):
             # Keep the score even below the bar: "0.55, just under" is the
             # information you need to tune the threshold.
             self._whisper_score = round(whisper_features.score, 4)
+            # The level was measured anyway, so the style costs nothing.
+            self._voice_style = self.context.classify_voice_style(
+                self._satellite_id, whisper_features.rms,
+                whispered=whisper_features.is_whisper,
+            )
         if whisper_features is not None and whisper_features.is_whisper:
             self._whisper = True
             _LOGGER.info(
@@ -1456,13 +1463,6 @@ class MurdockHandler(AsyncEventHandler):
             self._responded = True
             await self._close_upstream(send_stop=False)
             self._log_total_latency("match(early)")
-            # Emotion classification runs AFTER the transcript has been
-            # handed back to the satellite, so its latency never shows up
-            # to the user. The helper is a no-op when the feature is off
-            # or the model file is missing.
-            emotion, emotion_conf = await self._classify_emotion(
-                verify_audio, duration,
-            )
             early_threshold = self.context.get_verify_threshold(self._satellite_id)
             event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
@@ -1472,8 +1472,6 @@ class MurdockHandler(AsyncEventHandler):
                 threshold=early_threshold,
                 verify_ms=0.0,
                 transcript=transcript,
-                emotion=emotion,
-                emotion_confidence=emotion_conf,
                 weight=self.context.compute_speaker_weight(
                     self._early_distance, early_threshold
                 ),
@@ -1576,6 +1574,7 @@ class MurdockHandler(AsyncEventHandler):
                 ambiguities=self._transcript_hints or None,
                 whisper=self._whisper,
                 whisper_score=self._whisper_score,
+            voice_style=self._voice_style,
                 speakers=self._speakers or None,
             )
             await self._send_transcript_to_satellite(
@@ -1589,30 +1588,6 @@ class MurdockHandler(AsyncEventHandler):
             self._responded = True
             await self._close_upstream(send_stop=False)
             self._log_total_latency("match")
-            # Emotion classification runs AFTER the transcript has been
-            # returned to the satellite, so its latency never shows up to
-            # the user. The speaker itself already went out above; only
-            # when there is an emotion to add does a second event follow.
-            emotion, emotion_conf = await self._classify_emotion(
-                verify_audio, duration,
-            )
-            if emotion:
-                self.context.publish_recognition(
-                    speaker=result.matched_speaker,
-                    confidence=self.context.confidence_for(result.distance),
-                    satellite_id=self._satellite_id,
-                    is_known=True,
-                    distance=result.distance,
-                    threshold=result.threshold,
-                    nearest_speaker=nearest,
-                    nearest_distance=nearest_d,
-                    margin=margin,
-                    weight=weight,
-                    role=spk.role if spk else None,
-                    emotion=emotion,
-                    emotion_confidence=emotion_conf,
-                    ambiguities=self._transcript_hints or None,
-                )
             event_id = self._record_event(
                 outcome=OUTCOME_MATCH,
                 duration_sec=duration,
@@ -1621,8 +1596,6 @@ class MurdockHandler(AsyncEventHandler):
                 threshold=result.threshold,
                 verify_ms=verify_ms,
                 transcript=transcript,
-                emotion=emotion,
-                emotion_confidence=emotion_conf,
                 weight=weight,
                 margin=margin,
             )
@@ -1678,6 +1651,7 @@ class MurdockHandler(AsyncEventHandler):
             ambiguities=self._transcript_hints or None,
             whisper=self._whisper,
             whisper_score=self._whisper_score,
+            voice_style=self._voice_style,
             speakers=self._speakers or None,
         )
 
@@ -1910,54 +1884,6 @@ class MurdockHandler(AsyncEventHandler):
                 exc_info=True,
             )
 
-    async def _classify_emotion(
-        self, audio_16k: bytes, duration: float,
-    ) -> tuple[Optional[str], Optional[float]]:
-        """Run the emotion classifier if ready. Never raises.
-
-        Returns ``(label, confidence)`` or ``(None, None)`` when the
-        feature is off, the model file is missing, the clip is too
-        short, or inference fails. Any failure is logged at debug level
-        and treated as "no emotion info" — we never want a classifier
-        hiccup to break the recognition path.
-        """
-        if not self.context.emotion_ready():
-            return None, None
-        classifier = self.context.emotion
-        if classifier is None:
-            return None, None
-        if duration < classifier.min_duration_sec:
-            return None, None
-        sid = self._session_id
-        try:
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None, classifier.classify_pcm, audio_16k,
-            )
-        except FileNotFoundError:
-            # Model file disappeared mid-session (user deleted it, or
-            # the flag was flipped before the model landed). Quiet log,
-            # no panic.
-            _LOGGER.debug("[%s] Emotion model not available", sid)
-            return None, None
-        except Exception:
-            _LOGGER.debug(
-                "[%s] Emotion classification failed", sid, exc_info=True,
-            )
-            return None, None
-        # Filter out the model's garbage classes before they reach HA /
-        # the audit log. Surfacing "unknown" as an emotion in HA is worse
-        # than surfacing nothing.
-        if not result.is_meaningful:
-            _LOGGER.debug(
-                "[%s] Emotion classifier returned non-meaningful label %r (conf=%.3f)",
-                sid, result.label, result.confidence,
-            )
-            return None, None
-        _LOGGER.info(
-            "[%s] Emotion: %s (%.2f)", sid, result.label, result.confidence,
-        )
-        return result.label, float(result.confidence)
 
     def _record_event(
         self,
@@ -1969,8 +1895,6 @@ class MurdockHandler(AsyncEventHandler):
         threshold: Optional[float] = None,
         verify_ms: Optional[float] = None,
         transcript: Optional[str] = None,
-        emotion: Optional[str] = None,
-        emotion_confidence: Optional[float] = None,
         weight: Optional[float] = None,
         margin: Optional[float] = None,
     ) -> int:
@@ -1988,8 +1912,6 @@ class MurdockHandler(AsyncEventHandler):
                 threshold=threshold,
                 verify_ms=verify_ms,
                 transcript=transcript,
-                emotion=emotion,
-                emotion_confidence=emotion_confidence,
                 weight=weight,
                 margin=margin,
                 transcript_ms=self._transcript_ms,

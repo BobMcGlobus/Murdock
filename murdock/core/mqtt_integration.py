@@ -547,11 +547,11 @@ class MQTTClient:
                 "device": device,
                 **avail,
             }),
-            ("sensor", "emotion", {
-                "name": "Speaker Emotion",
-                "unique_id": f"{self.node_id}_emotion",
-                "state_topic": f"{prefix}/sensor/emotion/state",
-                "icon": "mdi:emoticon-outline",
+            ("sensor", "voice_style", {
+                "name": "Voice style",
+                "unique_id": f"{self.node_id}_voice_style",
+                "state_topic": f"{prefix}/sensor/voice_style/state",
+                "icon": "mdi:tune-vertical",
                 "device": device,
                 **avail,
             }),
@@ -641,11 +641,10 @@ class MQTTClient:
         uncertain: bool = False,
         reason: Optional[str] = None,
         role: Optional[str] = None,
-        emotion: Optional[str] = None,
-        emotion_confidence: Optional[float] = None,
         ambiguities: Optional[list] = None,
         whisper: bool = False,
         whisper_score: Optional[float] = None,
+        voice_style: Optional[str] = None,
         speakers: Optional[list] = None,
     ) -> None:
         """Push a recognition result to all state topics."""
@@ -674,7 +673,7 @@ class MQTTClient:
                 f"{prefix}/sensor/role/state", role or ""
             ),
             self._publish_state(
-                f"{prefix}/sensor/emotion/state", emotion or ""
+                f"{prefix}/sensor/voice_style/state", voice_style or "normal"
             ),
             self._publish_state(
                 f"{prefix}/sensor/satellite/state", satellite_id or ""
@@ -713,8 +712,6 @@ class MQTTClient:
             uncertain=uncertain,
             reason=reason,
             role=role,
-            emotion=emotion,
-            emotion_confidence=emotion_confidence,
             ambiguities=ambiguities,
             whisper=whisper,
             speakers=speakers,
