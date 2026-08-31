@@ -14,7 +14,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -60,7 +60,11 @@ class SpeakerSensor(MurdockEntity, SensorEntity):
             coordinator, satellite_id
         )
 
+    @callback
     def _handle_update(self, satellite_id: str | None) -> None:
+        # @callback keeps this on the event loop; see MurdockEntity.
+        if self.hass is None:
+            return
         if satellite_id in (None, self._satellite_id):
             self.async_write_ha_state()
 

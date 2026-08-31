@@ -520,6 +520,7 @@
                             <option value="upstream" data-i18n="stt.opt_upstream">Upstream (Wyoming proxy)</option>
                             <option value="voxtral" data-i18n="stt.opt_voxtral">Voxtral (Mistral Cloud)</option>
                             <option value="openai" data-i18n="stt.opt_openai">OpenAI-compatible (OpenAI / Groq / local)</option>
+                                                    <option value="ha" data-i18n="stt.backend_ha">Home Assistant STT entity (Cloud, …)</option>
                         </select>
                     </label>
                     <div id="stt-voxtral-fields" hidden>
@@ -548,6 +549,13 @@
                         <label>
                             <span data-i18n="stt.model">Model</span>
                             <input type="text" name="openai_model" placeholder="gpt-4o-transcribe">
+                        </label>
+                    </div>
+                    <div id="stt-ha-fields" hidden>
+                        <label>
+                            <span data-i18n="stt.ha_entity">Home Assistant STT entity</span>
+                            <input type="text" name="ha_stt_entity" placeholder="stt.home_assistant_cloud">
+                            <small class="meta" data-i18n="stt.ha_entity_hint">Any stt.* entity in Home Assistant, reached over its own /api/stt endpoint — which is the only way to use Home Assistant Cloud transcription, since it is not a Wyoming service. Needs the Home Assistant URL and token set under Home Assistant. Do not point this at Murdock's own entity: the request would come straight back here.</small>
                         </label>
                     </div>
                     <div id="stt-upstream-fields" hidden>

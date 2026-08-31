@@ -1164,7 +1164,7 @@ class AppContext:
     # STT backend selection (upstream Wyoming vs. Voxtral cloud)
     # ------------------------------------------------------------------
 
-    STT_BACKENDS = ("upstream", "voxtral", "openai")
+    STT_BACKENDS = ("upstream", "voxtral", "openai", "ha")
 
     def get_stt_backend(self) -> str:
         """Return the active STT backend: 'upstream', 'voxtral' or 'openai'."""
@@ -1589,6 +1589,42 @@ class AppContext:
             language=self.get_stt_language() or None,
         )
 
+    def get_ha_stt_entity(self) -> str:
+        override = get_setting(self.db, "ha_stt_entity")
+        if override is not None:
+            return override.strip()
+        return (self.settings.ha_stt_entity or "").strip()
+
+    def set_ha_stt_entity(self, value: str) -> None:
+        set_setting(self.db, "ha_stt_entity", (value or "").strip())
+
+    def get_ha_stt_backend(self):
+        """Transcription through a Home Assistant speech-to-text entity.
+
+        Refuses an entity whose name looks like Murdock's own: Murdock is
+        itself an STT provider in Home Assistant, and pointing this at it
+        would have Home Assistant call Murdock to answer Murdock.
+        """
+        from .stt_backend import HomeAssistantSTTBackend
+
+        entity = self.get_ha_stt_entity()
+        if not entity:
+            return None
+        if "murdock" in entity.lower():
+            _LOGGER.warning(
+                "Refusing HA STT entity %r — that is Murdock itself, and "
+                "the request would come straight back here", entity,
+            )
+            return None
+        backend = HomeAssistantSTTBackend(
+            base_url=self.ha.base_url or "",
+            token=self.ha.token or "",
+            entity_id=entity,
+            language=self.get_stt_language() or None,
+            timeout=self.get_stt_timeout(),
+        )
+        return backend if backend.configured else None
+
     def get_active_cloud_backend(self):
         """Return the backend for the active cloud stt_backend, or None."""
         backend = self.get_stt_backend()
@@ -1596,6 +1632,8 @@ class AppContext:
             return self.get_voxtral_backend()
         if backend == "openai":
             return self.get_openai_backend()
+        if backend == "ha":
+            return self.get_ha_stt_backend()
         return None
 
     # ------------------------------------------------------------------

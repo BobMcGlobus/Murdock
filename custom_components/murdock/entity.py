@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
@@ -26,7 +27,14 @@ class MurdockEntity(Entity):
             )
         )
 
+    @callback
     def _handle_update(self, _satellite_id: str | None) -> None:
+        # Without @callback the dispatcher classifies this as an executor
+        # job and runs it in a worker thread, where async_write_ha_state
+        # is not safe to call — Home Assistant logs that as a warning
+        # about corrupting data, and it is right to.
+        if self.hass is None:
+            return
         self.async_write_ha_state()
 
 

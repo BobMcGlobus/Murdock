@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.10.1
+
+**The integration was writing entity state from a worker thread.**
+Reported from a live install: Home Assistant logged ten warnings in a
+hundred minutes about a state write off the event loop — which it warns
+can crash it or corrupt data — plus twelve exceptions inside one second
+from the same dispatch.
+
+The cause was a missing decorator. Home Assistant classifies a
+dispatcher target through `HassJob`: a coroutine runs on the loop, a
+function marked `@callback` runs on the loop, and **anything else is
+treated as an executor job and run in a worker thread**. The three
+`_handle_update` handlers were plain functions, so every speaker update
+wrote state from the wrong thread, once per entity — which is exactly
+the twelve-in-a-second burst. They are now `@callback`, and they check
+the entity is still attached before writing, since a dispatch can land
+while one is being torn down.
+
+A test parses the integration and fails on any dispatch handler that is
+not a callback. It has to parse rather than import: the integration
+needs Home Assistant, which the test image deliberately does not carry.
+
+**Home Assistant Cloud transcription is now usable.** It is not a
+Wyoming service and has no API of its own, so it could not be reached
+the way the other backends are — but it is an ordinary `stt.*` entity,
+and Home Assistant exposes every such entity over `POST
+/api/stt/{entity_id}`, the endpoint its own frontend uses. A new **Home
+Assistant STT entity** backend speaks it, which also opens up every
+other STT entity in the instance. Pointing it at Murdock's own entity is
+refused: the request would come straight back here.
+
 ## 0.10.0
 
 **The interface, rearranged around what you came to do.**

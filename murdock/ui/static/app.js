@@ -1501,6 +1501,9 @@ async function loadSettings() {
             if (sttForm.stt_language) {
                 sttForm.stt_language.value = s.stt_language ?? "";
             }
+            if (sttForm.ha_stt_entity) {
+                sttForm.ha_stt_entity.value = s.ha_stt_entity ?? "";
+            }
             if (sttForm.upstream_uri) {
                 sttForm.upstream_uri.value =
                     s.upstream_uri_source === "override"
@@ -1830,6 +1833,8 @@ function updateSttFieldVisibility() {
     if (vox) vox.hidden = backend !== "voxtral";
     const oa = $("#stt-openai-fields");
     if (oa) oa.hidden = backend !== "openai";
+    const hf = $("#stt-ha-fields");
+    if (hf) hf.hidden = backend !== "ha";
     // Local fallback only makes sense for buffering cloud backends.
     const fb = $("#stt-fallback-row");
     if (fb) fb.hidden = backend === "upstream";
@@ -1895,6 +1900,9 @@ if (sttForm) {
         }
         if (sttForm.stt_language) {
             body.stt_language = sttForm.stt_language.value.trim();
+        }
+        if (sttForm.ha_stt_entity) {
+            body.ha_stt_entity = sttForm.ha_stt_entity.value.trim();
         }
         if (sttForm.upstream_uri) {
             body.upstream_uri = sttForm.upstream_uri.value.trim();

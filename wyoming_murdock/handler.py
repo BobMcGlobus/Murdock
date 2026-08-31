@@ -226,7 +226,7 @@ class MurdockHandler(AsyncEventHandler):
         streaming Wyoming upstream. Name kept for the many call sites;
         semantics are "is a buffering cloud backend".
         """
-        return self.context.get_stt_backend() in ("voxtral", "openai")
+        return self.context.get_stt_backend() in ("voxtral", "openai", "ha")
 
     # ------------------------------------------------------------------
     # Wyoming event dispatch

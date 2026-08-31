@@ -353,3 +353,130 @@ async def transcribe_via_wyoming(
         raise STTBackendError(f"wyoming {uri}: timeout") from exc
     except Exception as exc:
         raise STTBackendError(f"wyoming {uri}: {exc}") from exc
+
+
+class HomeAssistantSTTBackend:
+    """Transcribe through a speech-to-text *entity* inside Home Assistant.
+
+    Home Assistant Cloud's transcription is not a Wyoming service and has
+    no public API of its own, so it cannot be reached the way the other
+    backends are. It is, however, an ordinary ``stt.*`` entity, and Home
+    Assistant exposes every such entity over ``POST /api/stt/{entity_id}``
+    — the same endpoint its own web frontend uses.
+
+    That makes any STT entity available to Murdock: Cloud, a Whisper
+    add-on, anything an integration provides. The body is the raw PCM
+    stream, not a WAV container; the format is declared in the header
+    instead.
+    """
+
+    name = "ha"
+    supports_prompt = False
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        entity_id: str,
+        language: Optional[str] = None,
+        timeout: float = 30.0,
+    ) -> None:
+        self.base_url = (base_url or "").rstrip("/")
+        self.token = token or ""
+        self.entity_id = (entity_id or "").strip()
+        self.language = language
+        self.timeout = timeout
+        self.last_timing: dict = {}
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.base_url and self.token and self.entity_id)
+
+    @property
+    def label(self) -> str:
+        return f"ha:{self.entity_id}"
+
+    def _headers(self, lang: Optional[str], rate: int, width: int,
+                 channels: int) -> dict:
+        # Home Assistant wants a full locale here and is strict about the
+        # field set — every one of them must be present or it answers 400.
+        language = lang or "en-US"
+        if "-" not in language and "_" not in language:
+            language = f"{language}-{language.upper()}"
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "X-Speech-Content": (
+                f"format=wav; codec=pcm; sample_rate={rate}; "
+                f"bit_rate={width * 8}; channel={channels}; "
+                f"language={language}"
+            ),
+        }
+
+    async def transcribe(
+        self,
+        pcm_audio: bytes,
+        *,
+        rate: int = 16000,
+        width: int = 2,
+        channels: int = 1,
+        language: Optional[str] = None,
+    ) -> str:
+        lang = language or self.language
+        self.last_timing = {
+            "engine": self.label,
+            "sent_bytes": len(pcm_audio),
+            "audio_ms": round(len(pcm_audio) / (rate * width * channels) * 1000, 1),
+        }
+        t0 = time.monotonic()
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, timeout=self.timeout
+            ) as client:
+                request = client.build_request(
+                    "POST",
+                    f"/api/stt/{self.entity_id}",
+                    headers=self._headers(lang, rate, width, channels),
+                    content=pcm_audio,
+                )
+                resp = await client.send(request, stream=True)
+                ttfb_ms = (time.monotonic() - t0) * 1000
+                try:
+                    await resp.aread()
+                finally:
+                    await resp.aclose()
+                elapsed_ms = (time.monotonic() - t0) * 1000
+                self.last_timing.update(
+                    ttfb_ms=round(ttfb_ms, 1),
+                    body_ms=round(elapsed_ms - ttfb_ms, 1),
+                    total_ms=round(elapsed_ms, 1),
+                )
+                if resp.status_code != 200:
+                    _LOGGER.warning(
+                        "%s API error: HTTP %d — %s (%.0fms)",
+                        self.label, resp.status_code, resp.text[:200], elapsed_ms,
+                    )
+                    raise STTBackendError(
+                        f"{self.label}: HTTP {resp.status_code}"
+                    )
+                data = resp.json()
+                # A refusal comes back as 200 with result="error", which
+                # is not the same thing as hearing silence.
+                if str(data.get("result", "success")).lower() != "success":
+                    raise STTBackendError(f"{self.label}: {data.get('result')}")
+                text = data.get("text") or ""
+                _LOGGER.info(
+                    "%s transcript (%.0fms): %r", self.label, elapsed_ms, text[:100]
+                )
+                return text
+        except STTBackendError:
+            raise
+        except httpx.TimeoutException as exc:
+            self.last_timing.update(
+                total_ms=round((time.monotonic() - t0) * 1000, 1), failed="timeout"
+            )
+            raise STTBackendError(f"{self.label}: timeout") from exc
+        except Exception as exc:
+            self.last_timing.update(
+                total_ms=round((time.monotonic() - t0) * 1000, 1), failed="error"
+            )
+            raise STTBackendError(f"{self.label}: {exc}") from exc

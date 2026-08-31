@@ -51,6 +51,7 @@ class SettingsOut(BaseModel):
     silence_abort_sec: float = 3.0
     stt_timeout_sec: float = 8.0
     stt_language: str = "de"
+    ha_stt_entity: str = ""
     shadow_rescues_empty: bool = True
     extraction_threshold: float = 0.25
     extraction_min_region_sec: float = 0.6
@@ -149,6 +150,7 @@ class SettingsPatch(BaseModel):
     silence_abort_sec: Optional[float] = Field(default=None, ge=0.0, le=30.0)
     stt_timeout_sec: Optional[float] = Field(default=None, ge=1.0, le=120.0)
     stt_language: Optional[str] = None
+    ha_stt_entity: Optional[str] = None
     shadow_rescues_empty: Optional[bool] = None
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
@@ -251,6 +253,7 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         silence_abort_sec=ctx.get_silence_abort_sec(),
         stt_timeout_sec=ctx.get_stt_timeout(),
         stt_language=ctx.get_stt_language(),
+        ha_stt_entity=ctx.get_ha_stt_entity(),
         shadow_rescues_empty=ctx.get_shadow_rescues_empty(),
         extraction_threshold=ctx.get_extraction_threshold(),
         extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
@@ -371,6 +374,8 @@ async def patch_settings(
         ctx.set_stt_timeout(body.stt_timeout_sec)
     if body.stt_language is not None:
         ctx.set_stt_language(body.stt_language)
+    if body.ha_stt_entity is not None:
+        ctx.set_ha_stt_entity(body.ha_stt_entity)
     if body.shadow_rescues_empty is not None:
         ctx.set_shadow_rescues_empty(body.shadow_rescues_empty)
     if body.extraction_threshold is not None:

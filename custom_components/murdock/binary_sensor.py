@@ -7,7 +7,7 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -62,7 +62,11 @@ class WhisperSensor(MurdockEntity, BinarySensorEntity):
         self._attr_unique_id = f"{coordinator.api.base_url}:{satellite_id}:whisper"
         self._attr_device_info = satellite_device_info(coordinator, satellite_id)
 
+    @callback
     def _handle_update(self, satellite_id: str | None) -> None:
+        # @callback keeps this on the event loop; see MurdockEntity.
+        if self.hass is None:
+            return
         if satellite_id in (None, self._satellite_id):
             self.async_write_ha_state()
 

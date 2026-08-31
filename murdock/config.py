@@ -121,6 +121,11 @@ class Settings(BaseSettings):
     # most of them — a German sentence then comes back as confident
     # English nonsense rather than an error.
     stt_language: str = Field(default="de")
+    # Speech-to-text entity inside Home Assistant, e.g.
+    # stt.home_assistant_cloud. Reached over HA's own /api/stt endpoint,
+    # which is the only way to use Cloud transcription: it is not a
+    # Wyoming service and has no API of its own.
+    ha_stt_entity: str = Field(default="")
     # When the primary engine returns an empty transcript, ask the
     # configured A/B shadow instead of handing Home Assistant nothing.
     # Costs latency only in that case — where the alternative is a
