@@ -480,3 +480,37 @@ class HomeAssistantSTTBackend:
                 total_ms=round((time.monotonic() - t0) * 1000, 1), failed="error"
             )
             raise STTBackendError(f"{self.label}: {exc}") from exc
+
+    async def capabilities(self) -> dict:
+        """What this entity accepts, straight from Home Assistant.
+
+        ``GET /api/stt/{entity}`` answers with the supported languages,
+        formats, codecs and rates. Comparing them against what Murdock
+        would send turns "it doesn't work" into a specific mismatch —
+        Home Assistant otherwise answers an unsupported combination with
+        a bare 415 and no explanation.
+        """
+        if not self.configured:
+            raise STTBackendError("Home Assistant URL, token or entity missing")
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, timeout=self.timeout
+            ) as client:
+                resp = await client.get(
+                    f"/api/stt/{self.entity_id}",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                )
+                if resp.status_code == 404:
+                    raise STTBackendError(
+                        f"no speech-to-text entity {self.entity_id!r} in "
+                        "Home Assistant"
+                    )
+                if resp.status_code != 200:
+                    raise STTBackendError(
+                        f"{self.label}: HTTP {resp.status_code}"
+                    )
+                return resp.json()
+        except STTBackendError:
+            raise
+        except Exception as exc:
+            raise STTBackendError(f"{self.label}: {exc}") from exc

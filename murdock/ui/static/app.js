@@ -2111,6 +2111,57 @@ if (pingBtn2) {
                      '#stt-form [name="upstream_uri"]'));
 }
 
+// --- Home Assistant STT entity test ----------------------------------------
+
+const haSttBtn = $("#ha-stt-test-btn");
+if (haSttBtn) {
+    haSttBtn.addEventListener("click", async () => {
+        const out = $("#ha-stt-result");
+        const field = $('#stt-form [name="ha_stt_entity"]');
+        // Test what is typed, falling back to what is stored — same rule
+        // as the upstream ping.
+        const typed = field ? (field.value || "").trim() : "";
+        haSttBtn.disabled = true;
+        out.innerHTML = "";
+        try {
+            const res = await api("/api/settings/test-ha-stt", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(typed ? { entity_id: typed } : {}),
+            });
+            if (!res.ok) {
+                out.innerHTML =
+                    `<span class="feedback err">${escapeHtml(t("stt.ha_test_fail"))}</span><br>` +
+                    escapeHtml(res.error || "");
+            } else {
+                const langs = res.languages.length
+                    ? res.languages.slice(0, 12).join(", ") +
+                      (res.languages.length > 12 ? " …" : "")
+                    : "—";
+                let verdict = "";
+                if (res.language_ok === false) {
+                    verdict = `<br><span class="feedback warn">${escapeHtml(
+                        t("stt.ha_lang_missing", { lang: res.configured_language })
+                    )}</span>`;
+                } else if (res.language_ok === true) {
+                    verdict = `<br>${escapeHtml(
+                        t("stt.ha_lang_ok", { lang: res.configured_language })
+                    )}`;
+                }
+                out.innerHTML =
+                    `<span class="feedback ok">${escapeHtml(t("stt.ha_test_ok"))}</span> ` +
+                    `<code>${escapeHtml(res.entity_id)}</code><br>` +
+                    escapeHtml(t("stt.ha_languages", { langs })) + verdict +
+                    (typed ? `<br><small class="meta">${escapeHtml(t("ping.unsaved_note"))}</small>` : "");
+            }
+        } catch (err) {
+            out.innerHTML = `<span class="feedback err">${escapeHtml(err.message)}</span>`;
+        } finally {
+            haSttBtn.disabled = false;
+        }
+    });
+}
+
 // --- Threshold recommendation ----------------------------------------------
 
 const thresholdSuggestBtn = $("#threshold-suggest-btn");

@@ -555,6 +555,10 @@
                         <label>
                             <span data-i18n="stt.ha_entity">Home Assistant STT entity</span>
                             <input type="text" name="ha_stt_entity" placeholder="stt.home_assistant_cloud">
+                            <div class="row" style="margin-top:0.35rem">
+                                <button type="button" id="ha-stt-test-btn" class="secondary small" data-i18n="stt.ha_test">Test entity</button>
+                            </div>
+                            <div id="ha-stt-result" class="meta"></div>
                             <small class="meta" data-i18n="stt.ha_entity_hint">Any stt.* entity in Home Assistant, reached over its own /api/stt endpoint — which is the only way to use Home Assistant Cloud transcription, since it is not a Wyoming service. Needs the Home Assistant URL and token set under Home Assistant. Do not point this at Murdock's own entity: the request would come straight back here.</small>
                         </label>
                     </div>

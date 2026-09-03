@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.2
+
+**Telling you why the Home Assistant STT entity did not work.**
+
+Three things have to line up — the entity id, Home Assistant's URL and
+token, and a language the entity actually supports — and Home Assistant
+answers a wrong combination with a bare 415 or 404 and no explanation.
+A **Test entity** button now asks Home Assistant directly (`GET
+/api/stt/{entity}`) and reports which part is missing, plus the
+entity's own supported languages and whether the configured one is
+among them. Like the upstream ping, it tests the address in the field
+rather than the saved one.
+
 ## 0.10.1
 
 **The integration was writing entity state from a worker thread.**

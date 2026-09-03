@@ -129,3 +129,40 @@ def test_a_refusal_is_not_mistaken_for_silence(monkeypatch):
     monkeypatch.setattr(mod.httpx, "AsyncClient", _Client)
     with pytest.raises(STTBackendError):
         asyncio.run(_backend().transcribe(b"\x00" * 3200))
+
+
+def test_the_probe_says_which_part_is_missing(tmp_path):
+    """'It doesn't work' has three causes; the test must name one."""
+    import asyncio
+
+    from murdock.api.routes_settings import test_ha_stt
+
+    out = asyncio.run(test_ha_stt(None, _ctx(tmp_path, "")))
+    assert out.ok is False and "entity" in (out.error or "")
+
+
+def test_a_language_mismatch_is_named_rather_than_a_bare_415(monkeypatch, tmp_path):
+    """Home Assistant answers an unsupported language with 415 and no reason."""
+    import asyncio
+
+    import murdock.core.stt_backend as mod
+    from murdock.api.routes_settings import test_ha_stt
+
+    async def _caps(self):
+        return {"languages": ["en-US", "en-GB"], "formats": ["wav"]}
+
+    monkeypatch.setattr(mod.HomeAssistantSTTBackend, "capabilities", _caps)
+    ctx = _ctx(tmp_path, "stt.home_assistant_cloud")
+    ctx.set_stt_language("de")
+    out = asyncio.run(test_ha_stt(None, ctx))
+    assert out.ok is True
+    assert out.language_ok is False
+    assert "en-US" in out.languages
+
+    # A supported language compares on the primary subtag: HA lists
+    # locales, Murdock stores a bare code.
+    async def _caps_de(self):
+        return {"languages": ["de-DE", "en-US"], "formats": ["wav"]}
+
+    monkeypatch.setattr(mod.HomeAssistantSTTBackend, "capabilities", _caps_de)
+    assert asyncio.run(test_ha_stt(None, ctx)).language_ok is True

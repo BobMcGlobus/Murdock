@@ -737,6 +737,79 @@ class HATestOut(BaseModel):
     error: Optional[str] = None
 
 
+class HASTTTestIn(BaseModel):
+    # Test an entity that has not been saved yet, the way the upstream
+    # ping does — otherwise the button reports on the old value while
+    # the user looks at an edited field.
+    entity_id: Optional[str] = None
+
+
+class HASTTTestOut(BaseModel):
+    ok: bool
+    entity_id: str = ""
+    languages: List[str] = Field(default_factory=list)
+    language_ok: Optional[bool] = None
+    configured_language: str = ""
+    formats: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+@router.post("/test-ha-stt", response_model=HASTTTestOut)
+async def test_ha_stt(
+    body: Optional[HASTTTestIn] = None,
+    ctx: AppContext = Depends(get_context),
+):
+    """Ask Home Assistant what a speech-to-text entity accepts.
+
+    Home Assistant answers an unsupported combination with a bare 415 and
+    no explanation, so "it doesn't work" is otherwise unfalsifiable. This
+    reports the entity's own supported languages and whether the
+    configured one is among them.
+    """
+    from murdock.core.stt_backend import (
+        HomeAssistantSTTBackend,
+        STTBackendError,
+        _normalize_language,
+    )
+
+    entity = ((body.entity_id if body else None) or ctx.get_ha_stt_entity()).strip()
+    lang = ctx.get_stt_language() or ""
+    if not entity:
+        return HASTTTestOut(
+            ok=False, configured_language=lang,
+            error="no entity configured",
+        )
+    backend = HomeAssistantSTTBackend(
+        base_url=ctx.ha.base_url or "",
+        token=ctx.ha.token or "",
+        entity_id=entity,
+        timeout=ctx.get_stt_timeout(),
+    )
+    try:
+        caps = await backend.capabilities()
+    except STTBackendError as exc:
+        return HASTTTestOut(
+            ok=False, entity_id=entity, configured_language=lang, error=str(exc)
+        )
+
+    languages = [str(x) for x in (caps.get("languages") or [])]
+    formats = [str(x) for x in (caps.get("formats") or [])]
+    # Home Assistant lists full locales; Murdock stores a bare code and
+    # grows it at send time, so compare on the primary subtag.
+    want = _normalize_language(lang)
+    language_ok = None
+    if want and languages:
+        language_ok = any(_normalize_language(x) == want for x in languages)
+    return HASTTTestOut(
+        ok=True,
+        entity_id=entity,
+        languages=languages,
+        language_ok=language_ok,
+        configured_language=lang,
+        formats=formats,
+    )
+
+
 @router.post("/test-ha", response_model=HATestOut)
 async def test_ha(ctx: AppContext = Depends(get_context)):
     """Quick connectivity check against the configured HA instance."""
