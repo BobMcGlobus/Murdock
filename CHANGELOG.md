@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.3
+
+**The A/B shadow was cutting Wyoming transcripts short.**
+
+0.9.4 fixed this for the streaming reader in the handler. The same
+defect lived in the *other* place a Wyoming server is spoken to: the
+one-shot helper behind the A/B shadow and the local fallback, which
+returned the first Transcript it saw. A streaming recogniser sends one
+per firmed-up word, so the shadow column read "wann Avengers Doomsday
+rauskomm" where the cloud had "rauskommt?".
+
+The protocol has no final flag to wait for, so the newest transcript is
+kept and the end of the stream inferred from a short silence — long
+enough not to cut a server off mid-sentence, short enough to stay
+invisible on the fallback path. `transcript-stop` ends it immediately
+where a server sends one, and `transcript-chunk` is ignored outright,
+being partial by definition.
+
+Only the shadow and the local fallback were affected. The primary
+upstream path has been correct since 0.9.4.
+
 ## 0.10.2
 
 **Telling you why the Home Assistant STT entity did not work.**

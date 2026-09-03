@@ -43,6 +43,17 @@ _LOGGER = logging.getLogger("murdock.stt_backend")
 #: latency is worth more than the retry.
 _TEMPERATURE = 0
 
+#: How long to keep listening after a Wyoming server's first transcript.
+#:
+#: A streaming recogniser sends a Transcript every time it firms up
+#: another word, each longer than the last, and the one-shot helper used
+#: to return the first one it saw — truncating the end of every
+#: utterance. There is no "final" flag in the protocol to wait for, so
+#: the end of the stream is inferred from a short silence. Long enough
+#: that a server mid-sentence is not cut off, short enough to be
+#: invisible on the local-fallback path.
+_WYOMING_FINAL_GRACE = 0.35
+
 
 class STTBackendError(RuntimeError):
     """A cloud transcription attempt failed (network, HTTP, timeout)."""
@@ -310,7 +321,12 @@ async def transcribe_via_wyoming(
     Transcribe + AudioStart + chunks + AudioStop, wait for the
     Transcript. Raises :class:`STTBackendError` on failure.
     """
-    from wyoming.asr import Transcribe, Transcript
+    from wyoming.asr import (
+        Transcribe,
+        Transcript,
+        TranscriptChunk,
+        TranscriptStop,
+    )
     from wyoming.audio import AudioChunk, AudioStart, AudioStop
     from wyoming.client import AsyncClient
 
@@ -331,14 +347,43 @@ async def transcribe_via_wyoming(
                     ).event()
                 )
             await client.write_event(AudioStop().event())
+            # Keep the newest transcript rather than the first. A
+            # streaming server sends one per firmed-up word, so returning
+            # on the first cut every utterance short — "wann Avengers
+            # Doomsday rauskomm" instead of "rauskommt?".
+            best = ""
             while True:
-                event = await client.read_event()
-                if event is None:
-                    raise STTBackendError(
-                        f"wyoming {uri}: closed without transcript"
+                try:
+                    # Before anything has arrived, wait as long as the
+                    # caller allows; afterwards only briefly, for a
+                    # longer version of what we already have.
+                    event = await (
+                        asyncio.wait_for(
+                            client.read_event(), timeout=_WYOMING_FINAL_GRACE
+                        )
+                        if best
+                        else client.read_event()
                     )
+                except asyncio.TimeoutError:
+                    break
+                if event is None:
+                    break
+                if TranscriptStop.is_type(event.type):
+                    # An explicit end of stream — no need to wait out the
+                    # grace period.
+                    break
+                if TranscriptChunk.is_type(event.type):
+                    # Partial by definition in the streaming protocol.
+                    continue
                 if Transcript.is_type(event.type):
-                    return Transcript.from_event(event).text or ""
+                    text = Transcript.from_event(event).text or ""
+                    if text:
+                        best = text
+            if not best:
+                raise STTBackendError(
+                    f"wyoming {uri}: closed without transcript"
+                )
+            return best
 
     try:
         text = await asyncio.wait_for(_run(), timeout=timeout)
