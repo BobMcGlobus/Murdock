@@ -81,6 +81,20 @@ _EARLY_REJECT_MEDIA_FACTOR = 0.5
 # generous without ever hanging the pipeline on a dead second provider.
 _DUAL_SHADOW_TIMEOUT = 6.0
 
+#: How long to keep listening after the first transcript that follows
+#: AudioStop.
+#:
+#: "Final = the first one after AudioStop" was not enough: a streaming
+#: recogniser still has the tail of the utterance in its buffer when the
+#: audio stops, and carries on emitting progressively longer transcripts
+#: afterwards. Taking the first of those cut the end off — "Fahre alle
+#: Rollladen der gesam".
+#:
+#: Only spent on a server that has already shown itself to be streaming,
+#: by sending interim results while the audio was still flowing. A
+#: one-shot engine never pays it.
+_UPSTREAM_FINAL_GRACE = 0.35
+
 
 _TEMPLATE_VAR = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
@@ -162,6 +176,9 @@ class MurdockHandler(AsyncEventHandler):
         # best partial instead of to nothing.
         self._upstream_interim: str = ""
         self._audio_stop_sent: bool = False
+        # Set when the upstream sends a transcript while audio is
+        # still flowing — the one reliable sign that it streams.
+        self._streaming_upstream: bool = False
         # Set as soon as a cancel phrase is heard — from an interim
         # transcript if possible, so the session dies before the
         # command it was never meant to carry gets acted on.
@@ -465,7 +482,31 @@ class MurdockHandler(AsyncEventHandler):
         event_count = 0
         try:
             while True:
-                event = await self._upstream_client.read_event()
+                # Once a streaming server has been fed everything, wait
+                # only briefly for a longer transcript; a silence means
+                # the one in hand was the last.
+                waiting_for_better = (
+                    self._audio_stop_sent
+                    and self._streaming_upstream
+                    and bool(self._upstream_interim)
+                )
+                try:
+                    event = await (
+                        asyncio.wait_for(
+                            self._upstream_client.read_event(),
+                            timeout=_UPSTREAM_FINAL_GRACE,
+                        )
+                        if waiting_for_better
+                        else self._upstream_client.read_event()
+                    )
+                except asyncio.TimeoutError:
+                    _LOGGER.info(
+                        "[%s] Upstream settled on: %r",
+                        sid, self._upstream_interim,
+                    )
+                    if fut is not None and not fut.done():
+                        fut.set_result(self._upstream_interim)
+                    return
                 event_count += 1
                 if event is None:
                     _LOGGER.warning(
@@ -488,6 +529,9 @@ class MurdockHandler(AsyncEventHandler):
                         # and keep listening for a longer one.
                         if text:
                             self._upstream_interim = text
+                            # Sending anything before AudioStop is what
+                            # marks this server as streaming.
+                            self._streaming_upstream = True
                             if not self._cancelled and                                     self.context.is_cancel_phrase(text):
                                 self._cancelled = True
                                 _LOGGER.info(
@@ -496,6 +540,18 @@ class MurdockHandler(AsyncEventHandler):
                                 )
                         _LOGGER.debug(
                             "[%s] Upstream interim transcript: %r", sid, text
+                        )
+                        continue
+                    if text:
+                        self._upstream_interim = text
+                    if self._streaming_upstream:
+                        # This server streams, so a transcript arriving
+                        # right after AudioStop is very likely still
+                        # growing. Keep the newest and wait briefly for
+                        # a longer one.
+                        _LOGGER.debug(
+                            "[%s] Post-stop transcript (may still grow): %r",
+                            sid, text,
                         )
                         continue
                     _LOGGER.info(

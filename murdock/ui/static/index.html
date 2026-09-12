@@ -714,6 +714,7 @@
                         <span data-i18n="stt.dual_enable">Dual transcript (merge primary + shadow)</span>
                         <small class="meta" data-i18n="stt.dual_hint">Runs the shadow engine blocking in parallel and merges both readings — disagreements appear inline as "primary [oder: shadow]", so the LLM picks the plausible one. Engines fail on different words, so the union beats either alone. Costs the slower engine's latency (shadow capped at 6 s, then primary goes out alone) and breaks rigid intent matching — for LLM agents. Requires a configured shadow engine.</small>
                     </label>
+                    </details>
                     <div class="row" style="margin-top:0.5rem">
                         <button type="submit" data-i18n="generic.save">Save</button>
                     </div>
@@ -804,7 +805,6 @@
                         <input type="password" name="mqtt_password" autocomplete="off" data-i18n-ph="mqtt.ph_password" placeholder="paste password here">
                         <small id="mqtt-password-hint" class="meta"></small>
                     </label>
-                                        </details>
                     <h3 data-i18n="mqtt.advanced">Advanced</h3>
                     <label>
                         <span data-i18n="mqtt.topic_prefix">Topic prefix</span>

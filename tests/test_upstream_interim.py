@@ -21,10 +21,14 @@ from wyoming_murdock.handler import MurdockHandler
 class _Upstream:
     """Replays a scripted event sequence, then closes."""
 
-    def __init__(self, events, handler=None, stop_after=None):
+    def __init__(self, events, handler=None, stop_after=None, hang=False):
         self._events = list(events)
         self._handler = handler
         self._stop_after = stop_after
+        # A real server usually keeps the socket open after its last
+        # word, so the reader has to decide by silence rather than by
+        # the connection ending.
+        self._hang = hang
         self._read = 0
 
     async def read_event(self):
@@ -32,12 +36,14 @@ class _Upstream:
             # Home Assistant stopped sending audio at this point.
             self._handler._audio_stop_sent = True
         if not self._events:
+            if self._hang:
+                await asyncio.sleep(10)
             return None
         self._read += 1
         return self._events.pop(0)
 
 
-def _run(events, *, stop_after=None):
+def _run(events, *, stop_after=None, hang=False):
     """Build the stand-in and drive the reader on one event loop.
 
     The future has to be created inside the loop that later resolves it,
@@ -49,13 +55,14 @@ def _run(events, *, stop_after=None):
             _session_id="s1",
             _upstream_interim="",
             _audio_stop_sent=False,
+            _streaming_upstream=False,
             _cancelled=False,
             # Cancel phrases are checked against interims; off by default
             # here so these tests stay about the interim handling itself.
             context=SimpleNamespace(is_cancel_phrase=lambda text: False),
             _upstream_transcript=asyncio.get_running_loop().create_future(),
         )
-        fake._upstream_client = _Upstream(events, fake, stop_after)
+        fake._upstream_client = _Upstream(events, fake, stop_after, hang)
         await MurdockHandler._read_upstream_transcript(fake)
         return fake._upstream_transcript.result()
 
@@ -107,6 +114,7 @@ def test_a_cancel_phrase_in_an_interim_marks_the_session():
             _session_id="s1",
             _upstream_interim="",
             _audio_stop_sent=False,
+            _streaming_upstream=False,
             _cancelled=False,
             context=SimpleNamespace(
                 is_cancel_phrase=lambda text: text.lower().startswith("abbruch")
@@ -120,3 +128,54 @@ def test_a_cancel_phrase_in_an_interim_marks_the_session():
         return fake._cancelled
 
     assert asyncio.run(_go()) is True
+
+
+def test_a_streaming_server_is_not_cut_off_after_audiostop():
+    """The tail of the utterance is still in the server's buffer.
+
+    "Final = the first transcript after AudioStop" was not enough: a
+    streaming recogniser keeps emitting longer ones afterwards, and
+    taking the first cut the end off — "Fahre alle Rollladen der gesam".
+    """
+    assert _run(
+        [
+            _t("Fahre alle"),                      # interim — marks it streaming
+            _t("Fahre alle Rollladen der gesam"),  # after AudioStop, still growing
+            _t("Fahre alle Rollladen der gesamten Wohnung runter."),
+        ],
+        stop_after=1,
+    ) == "Fahre alle Rollladen der gesamten Wohnung runter."
+
+
+def test_a_one_shot_server_never_pays_the_grace():
+    """It sends nothing before AudioStop, so its first is final."""
+    import time
+
+    t0 = time.monotonic()
+    assert _run([_t("Licht an")], stop_after=0) == "Licht an"
+    # No waiting: the grace is only spent on a server that showed itself
+    # to be streaming.
+    assert (time.monotonic() - t0) < 0.2
+
+
+def test_silence_decides_when_the_server_keeps_the_socket_open():
+    """The realistic shape: nothing closes, so the end is inferred."""
+    import time
+
+    import wyoming_murdock.handler as h
+
+    original = h._UPSTREAM_FINAL_GRACE
+    h._UPSTREAM_FINAL_GRACE = 0.1
+    try:
+        t0 = time.monotonic()
+        result = _run(
+            [_t("Fahre alle"), _t("Fahre alle Rollladen der gesamten Wohnung runter.")],
+            stop_after=1, hang=True,
+        )
+        waited = time.monotonic() - t0
+    finally:
+        h._UPSTREAM_FINAL_GRACE = original
+
+    assert result == "Fahre alle Rollladen der gesamten Wohnung runter."
+    # It waited out the grace rather than hanging on the open socket.
+    assert 0.05 < waited < 2.0

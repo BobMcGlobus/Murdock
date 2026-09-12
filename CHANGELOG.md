@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.10.4
+
+**The transcription form had no Save button**, so the speech-to-text
+backend could not be changed at all.
+
+Folding the A/B shadow section away in 0.10.0 wrote its `</details>` at
+the wrong nesting level: instead of closing at the end of that section
+it closed thousands of characters later, inside the MQTT card. The
+opening tag therefore swallowed the rest of the transcription form, an
+entire other form, and part of the next card — taking the only submit
+button with it. The tag *counts* balanced, which is why nothing
+complained.
+
+Two tests now cover this: one fails on a submit button inside a
+collapsed `<details>`, and one on any `<details>` still open where a
+form ends, which is the shape a mis-nested closing tag actually takes.
+
+**The primary transcript was still being cut short.** 0.9.4 treated the
+first transcript after AudioStop as final; 0.10.3 found the same
+assumption in the one-shot helper. Both were still too generous: a
+streaming recogniser has the tail of the utterance in its buffer when
+the audio stops, and carries on emitting longer transcripts *after*
+AudioStop. Taking the first of those produced "Fahre alle Rollladen der
+gesam".
+
+The newest transcript now wins, with the end of the stream inferred from
+a short silence. The wait is only spent on a server that has already
+shown itself to be streaming, by sending interim results while audio was
+still flowing — a one-shot engine such as faster-whisper never pays it.
+
 ## 0.10.3
 
 **The A/B shadow was cutting Wyoming transcripts short.**
