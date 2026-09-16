@@ -80,6 +80,7 @@ class AppContext:
     # re-embeds every stored sample, which is far too expensive to redo
     # each time somebody opens the view.
     _embedding_map_cache: "Optional[tuple]" = None
+    _stt_service_store: "Optional[object]" = None
     # Running per-satellite speech-level baseline, so "quiet" means
     # quiet *for this room* rather than below some fixed number.
     _voice_style: "Optional[object]" = None
@@ -391,17 +392,6 @@ class AppContext:
         if override is not None:
             return override.strip()
         return (self.settings.stt_language or "").strip()
-
-    def get_shadow_rescues_empty(self) -> bool:
-        override = get_setting(self.db, "shadow_rescues_empty")
-        if override is not None:
-            return override.lower() in ("1", "true", "yes", "on")
-        return self.settings.shadow_rescues_empty
-
-    def set_shadow_rescues_empty(self, enabled: bool) -> None:
-        set_setting(
-            self.db, "shadow_rescues_empty", "true" if enabled else "false"
-        )
 
     def set_stt_language(self, value: str) -> None:
         set_setting(self.db, "stt_language", (value or "").strip())
@@ -1161,59 +1151,144 @@ class AppContext:
         return max(deltas)
 
     # ------------------------------------------------------------------
-    # STT backend selection (upstream Wyoming vs. Voxtral cloud)
+    # Speech-to-text services
     # ------------------------------------------------------------------
 
-    STT_BACKENDS = ("upstream", "voxtral", "openai", "ha")
+    @property
+    def stt_services(self):
+        """The service store, created on first use."""
+        store = self._stt_service_store
+        if store is None:
+            from .stt_services import SttServiceStore
 
-    def get_stt_backend(self) -> str:
-        """Return the active STT backend: 'upstream', 'voxtral' or 'openai'."""
-        override = get_setting(self.db, "stt_backend")
-        if override and override in self.STT_BACKENDS:
-            return override
-        return self.settings.stt_backend
+            store = SttServiceStore(self.db)
+            self._stt_service_store = store
+        return store
 
-    def set_stt_backend(self, value: str) -> None:
-        if value not in self.STT_BACKENDS:
-            raise ValueError(f"Invalid stt_backend: {value!r}")
-        set_setting(self.db, "stt_backend", value)
+    def get_main_service(self):
+        return self.stt_services.get(self.stt_services.roles().main)
 
-    def get_mistral_api_key(self) -> str:
-        override = get_setting(self.db, "mistral_api_key")
-        if override is not None:
-            return override
-        return self.settings.mistral_api_key or ""
+    def get_fallback_services(self) -> list:
+        store = self.stt_services
+        return [s for s in (store.get(i) for i in store.roles().fallbacks) if s]
 
-    def has_mistral_api_key(self) -> bool:
-        return bool(self.get_mistral_api_key())
+    def get_shadow_services(self) -> list:
+        store = self.stt_services
+        return [s for s in (store.get(i) for i in store.roles().shadows) if s]
 
-    def set_mistral_api_key(self, value: str) -> None:
-        set_setting(self.db, "mistral_api_key", value or "")
+    def get_fallback_on_empty(self) -> bool:
+        return self.stt_services.roles().fallback_on_empty
 
-    def get_mistral_model(self) -> str:
-        override = get_setting(self.db, "mistral_model")
-        if override:
-            return override
-        return self.settings.mistral_model
+    def service_timeout(self, service) -> float:
+        """The service's own timeout, or the global default."""
+        value = (service.config or {}).get("timeout_sec") if service else None
+        return float(value) if value else self.get_stt_timeout()
 
-    def set_mistral_model(self, value: str) -> None:
-        set_setting(self.db, "mistral_model", (value or "").strip())
+    def is_service_remote(self, service) -> bool:
+        return service.is_remote(ha_base_url=getattr(self.ha, "base_url", None))
 
-    def get_voxtral_backend(self):
-        """Return a configured VoxtralBackend instance, or None if not ready."""
-        from .stt_backend import VoxtralBackend
-        api_key = self.get_mistral_api_key()
-        if not api_key:
+    def build_stt_backend(self, service):
+        """A ready-to-call backend for a service, or None if incomplete.
+
+        Every backend is labelled with the service's own name, which is
+        what the recognition log shows — "Kroko" reads better than
+        ``wyoming:tcp://192.168.2.25:10303``.
+        """
+        if service is None:
             return None
-        return VoxtralBackend(
-            api_key=api_key,
-            model=self.get_mistral_model(),
-            timeout=self.get_stt_timeout(),
-            language=self.get_stt_language() or None,
+        from .stt_backend import (
+            HomeAssistantSTTBackend,
+            OpenAICompatibleBackend,
+            VoxtralBackend,
+            WyomingBackend,
+        )
+        from .stt_services import (
+            KIND_HA,
+            KIND_OPENAI,
+            KIND_VOXTRAL,
+            KIND_WYOMING,
         )
 
+        cfg = service.config or {}
+        language = self.get_stt_language() or None
+        timeout = self.service_timeout(service)
+        if service.kind == KIND_WYOMING:
+            uri = cfg.get("uri") or ""
+            if not uri:
+                return None
+            return WyomingBackend(uri, language=language, timeout=timeout, name=service.name)
+        if service.kind == KIND_OPENAI:
+            if not cfg.get("model"):
+                return None
+            return OpenAICompatibleBackend(
+                api_key=cfg.get("api_key") or "",
+                model=cfg["model"],
+                base_url=cfg.get("base_url") or "https://api.openai.com",
+                prompt=self.get_effective_vocabulary() or None,
+                timeout=timeout,
+                language=language,
+                name=service.name,
+            )
+        if service.kind == KIND_VOXTRAL:
+            if not cfg.get("api_key"):
+                return None
+            return VoxtralBackend(
+                api_key=cfg["api_key"],
+                model=cfg.get("model") or "voxtral-mini-latest",
+                timeout=timeout,
+                language=language,
+                name=service.name,
+            )
+        if service.kind == KIND_HA:
+            entity = (cfg.get("entity_id") or "").strip()
+            if not entity:
+                return None
+            if "murdock" in entity.lower():
+                _LOGGER.warning(
+                    "Refusing HA STT entity %r — that is Murdock itself, and "
+                    "the request would come straight back here", entity,
+                )
+                return None
+            backend = HomeAssistantSTTBackend(
+                base_url=self.ha.base_url or "",
+                token=self.ha.token or "",
+                entity_id=entity,
+                language=language,
+                timeout=timeout,
+            )
+            backend.name = service.name
+            return backend if backend.configured else None
+        return None
+
+    def sync_upstream_from_services(self) -> None:
+        """Point Describe and the language refresh at the main service.
+
+        Only a Wyoming main has languages to report; otherwise the
+        configured advertised languages speak for themselves.
+        """
+        if self.info_cache is None:
+            return
+        try:
+            self.info_cache.upstream_uri = self.get_upstream_uri()
+            self.info_cache.invalidate()
+        except Exception:
+            _LOGGER.debug("info_cache sync failed", exc_info=True)
+
+    def get_stt_backend(self) -> str:
+        """The main service's kind, in the vocabulary the handler uses.
+
+        ``upstream`` means "stream to a Wyoming server while the user
+        speaks"; anything else is a buffered request after AudioStop.
+        """
+        from .stt_services import KIND_WYOMING
+
+        main = self.get_main_service()
+        if main is None or main.kind == KIND_WYOMING:
+            return "upstream"
+        return main.kind
+
     # ------------------------------------------------------------------
-    # Transcript quality tiers: vocabulary, dictionary, dual transcript
+    # Transcript quality tiers: vocabulary, dictionary
     # ------------------------------------------------------------------
 
     def get_enable_stt_vocabulary(self) -> bool:
@@ -1324,15 +1399,13 @@ class AppContext:
         those the vocabulary is stored but never sent. Surfacing that
         beats showing a prompt that goes nowhere.
         """
-        kind = self.get_stt_backend()
-        if kind == "openai":
-            base = (self.get_openai_base_url() or "").lower()
-            return "openrouter.ai" not in base
-        return False
+        from .stt_services import KIND_OPENAI
 
-    # ------------------------------------------------------------------
-    # Canonicalization: map the transcript onto real entity names
-    # ------------------------------------------------------------------
+        main = self.get_main_service()
+        if main is None or main.kind != KIND_OPENAI:
+            return False
+        base = (main.config.get("base_url") or "https://api.openai.com").lower()
+        return "openrouter.ai" not in base
 
     # ------------------------------------------------------------------
     # Whisper detection (experimental)
@@ -1517,250 +1590,18 @@ class AppContext:
         from .transcript_tools import parse_correction_dictionary
         return parse_correction_dictionary(self.get_stt_dictionary())
 
-    def get_enable_dual_transcript(self) -> bool:
-        override = get_setting(self.db, "enable_dual_transcript")
-        if override is not None:
-            return override.lower() in ("1", "true", "yes", "on")
-        return self.settings.enable_dual_transcript
-
-    def set_enable_dual_transcript(self, enabled: bool) -> None:
-        set_setting(
-            self.db, "enable_dual_transcript", "true" if enabled else "false"
-        )
-
-    def dual_transcript_active(self) -> bool:
-        """Dual mode requires the toggle AND a configured shadow engine."""
-        return (
-            self.get_enable_dual_transcript()
-            and self.get_shadow_stt_backend() != "none"
-        )
-
     # ------------------------------------------------------------------
-    # OpenAI-compatible STT backend (OpenAI, Groq, local speaches, …)
+    # The main service, as the handler asks for it
     # ------------------------------------------------------------------
-
-    def get_openai_base_url(self) -> str:
-        override = get_setting(self.db, "openai_base_url")
-        if override:
-            return override
-        return self.settings.openai_base_url
-
-    def set_openai_base_url(self, value: str) -> None:
-        set_setting(self.db, "openai_base_url", (value or "").strip())
-
-    def get_openai_api_key(self) -> str:
-        override = get_setting(self.db, "openai_api_key")
-        if override is not None:
-            return override
-        return self.settings.openai_api_key or ""
-
-    def has_openai_api_key(self) -> bool:
-        return bool(self.get_openai_api_key())
-
-    def set_openai_api_key(self, value: str) -> None:
-        set_setting(self.db, "openai_api_key", value or "")
-
-    def get_openai_model(self) -> str:
-        override = get_setting(self.db, "openai_model")
-        if override:
-            return override
-        return self.settings.openai_model
-
-    def set_openai_model(self, value: str) -> None:
-        set_setting(self.db, "openai_model", (value or "").strip())
-
-    def get_openai_backend(self):
-        """Return a configured OpenAI-compatible backend, or None.
-
-        Unlike Voxtral, an empty API key is allowed — self-hosted
-        OpenAI-compatible servers (speaches, LocalAI) usually run without
-        auth. A model name is required.
-        """
-        from .stt_backend import OpenAICompatibleBackend
-        model = self.get_openai_model()
-        if not model:
-            return None
-        return OpenAICompatibleBackend(
-            api_key=self.get_openai_api_key(),
-            model=model,
-            base_url=self.get_openai_base_url(),
-            prompt=self.get_effective_vocabulary() or None,
-            timeout=self.get_stt_timeout(),
-            language=self.get_stt_language() or None,
-        )
-
-    def get_ha_stt_entity(self) -> str:
-        override = get_setting(self.db, "ha_stt_entity")
-        if override is not None:
-            return override.strip()
-        return (self.settings.ha_stt_entity or "").strip()
-
-    def set_ha_stt_entity(self, value: str) -> None:
-        set_setting(self.db, "ha_stt_entity", (value or "").strip())
-
-    def get_ha_stt_backend(self):
-        """Transcription through a Home Assistant speech-to-text entity.
-
-        Refuses an entity whose name looks like Murdock's own: Murdock is
-        itself an STT provider in Home Assistant, and pointing this at it
-        would have Home Assistant call Murdock to answer Murdock.
-        """
-        from .stt_backend import HomeAssistantSTTBackend
-
-        entity = self.get_ha_stt_entity()
-        if not entity:
-            return None
-        if "murdock" in entity.lower():
-            _LOGGER.warning(
-                "Refusing HA STT entity %r — that is Murdock itself, and "
-                "the request would come straight back here", entity,
-            )
-            return None
-        backend = HomeAssistantSTTBackend(
-            base_url=self.ha.base_url or "",
-            token=self.ha.token or "",
-            entity_id=entity,
-            language=self.get_stt_language() or None,
-            timeout=self.get_stt_timeout(),
-        )
-        return backend if backend.configured else None
 
     def get_active_cloud_backend(self):
-        """Return the backend for the active cloud stt_backend, or None."""
-        backend = self.get_stt_backend()
-        if backend == "voxtral":
-            return self.get_voxtral_backend()
-        if backend == "openai":
-            return self.get_openai_backend()
-        if backend == "ha":
-            return self.get_ha_stt_backend()
-        return None
+        """The main service's backend when it is not a streaming one."""
+        from .stt_services import KIND_WYOMING
 
-    # ------------------------------------------------------------------
-    # Local fallback + A/B shadow engine
-    # ------------------------------------------------------------------
-
-    def get_stt_local_fallback(self) -> bool:
-        override = get_setting(self.db, "stt_local_fallback")
-        if override is not None:
-            return override.lower() in ("1", "true", "yes", "on")
-        return self.settings.stt_local_fallback
-
-    def set_stt_local_fallback(self, enabled: bool) -> None:
-        set_setting(
-            self.db, "stt_local_fallback", "true" if enabled else "false"
-        )
-
-    SHADOW_BACKENDS = ("none", "upstream", "voxtral", "openai")
-
-    def get_shadow_stt_backend(self) -> str:
-        override = get_setting(self.db, "shadow_stt_backend")
-        if override in self.SHADOW_BACKENDS:
-            return override
-        if self.settings.shadow_stt_backend in self.SHADOW_BACKENDS:
-            return self.settings.shadow_stt_backend
-        return "none"
-
-    def set_shadow_stt_backend(self, value: str) -> None:
-        if value not in self.SHADOW_BACKENDS:
-            raise ValueError(f"Invalid shadow_stt_backend: {value!r}")
-        set_setting(self.db, "shadow_stt_backend", value)
-
-    def get_shadow_upstream_uri(self) -> str:
-        override = get_setting(self.db, "shadow_upstream_uri")
-        if override:
-            return _normalize_wyoming_uri(override)
-        return _normalize_wyoming_uri(self.settings.shadow_upstream_uri or "")
-
-    def set_shadow_upstream_uri(self, value: str) -> None:
-        set_setting(self.db, "shadow_upstream_uri", (value or "").strip())
-
-    def get_shadow_mistral_model(self) -> str:
-        override = get_setting(self.db, "shadow_mistral_model")
-        if override:
-            return override
-        return self.settings.shadow_mistral_model
-
-    def set_shadow_mistral_model(self, value: str) -> None:
-        set_setting(self.db, "shadow_mistral_model", (value or "").strip())
-
-    def get_shadow_mistral_api_key(self) -> str:
-        """Shadow Voxtral key; empty falls back to the primary mistral key."""
-        override = get_setting(self.db, "shadow_mistral_api_key")
-        if override:
-            return override
-        return self.settings.shadow_mistral_api_key or self.get_mistral_api_key()
-
-    def has_shadow_mistral_api_key(self) -> bool:
-        return bool(get_setting(self.db, "shadow_mistral_api_key"))
-
-    def set_shadow_mistral_api_key(self, value: str) -> None:
-        set_setting(self.db, "shadow_mistral_api_key", value or "")
-
-    def get_shadow_openai_base_url(self) -> str:
-        override = get_setting(self.db, "shadow_openai_base_url")
-        if override:
-            return override
-        return self.settings.shadow_openai_base_url or self.get_openai_base_url()
-
-    def set_shadow_openai_base_url(self, value: str) -> None:
-        set_setting(self.db, "shadow_openai_base_url", (value or "").strip())
-
-    def get_shadow_openai_api_key(self) -> str:
-        """Shadow key; empty falls back to the primary OpenAI key."""
-        override = get_setting(self.db, "shadow_openai_api_key")
-        if override:
-            return override
-        return self.settings.shadow_openai_api_key or self.get_openai_api_key()
-
-    def has_shadow_openai_api_key(self) -> bool:
-        return bool(get_setting(self.db, "shadow_openai_api_key"))
-
-    def set_shadow_openai_api_key(self, value: str) -> None:
-        set_setting(self.db, "shadow_openai_api_key", value or "")
-
-    def get_shadow_openai_model(self) -> str:
-        override = get_setting(self.db, "shadow_openai_model")
-        if override:
-            return override
-        return self.settings.shadow_openai_model
-
-    def set_shadow_openai_model(self, value: str) -> None:
-        set_setting(self.db, "shadow_openai_model", (value or "").strip())
-
-    def get_shadow_backend(self):
-        """Return the HTTP backend for a cloud shadow kind, or None.
-
-        The "upstream" shadow kind is handled by the caller via
-        :func:`murdock.core.stt_backend.transcribe_via_wyoming` with
-        :meth:`get_shadow_upstream_uri`.
-        """
-        from .stt_backend import OpenAICompatibleBackend, VoxtralBackend
-
-        kind = self.get_shadow_stt_backend()
-        if kind == "voxtral":
-            api_key = self.get_shadow_mistral_api_key()
-            if not api_key:
-                return None
-            return VoxtralBackend(
-                api_key=api_key, model=self.get_shadow_mistral_model(),
-                timeout=self.get_stt_timeout(),
-                language=self.get_stt_language() or None,
-            )
-        if kind == "openai":
-            model = self.get_shadow_openai_model()
-            if not model:
-                return None
-            return OpenAICompatibleBackend(
-                api_key=self.get_shadow_openai_api_key(),
-                model=model,
-                base_url=self.get_shadow_openai_base_url(),
-                name="shadow-openai",
-                prompt=self.get_effective_vocabulary() or None,
-                timeout=self.get_stt_timeout(),
-                language=self.get_stt_language() or None,
-            )
-        return None
+        main = self.get_main_service()
+        if main is None or main.kind == KIND_WYOMING:
+            return None
+        return self.build_stt_backend(main)
 
     # ------------------------------------------------------------------
     # Advertised languages (Wyoming Info)
@@ -1778,48 +1619,28 @@ class AppContext:
         return parts or None
 
     # ------------------------------------------------------------------
-    # Upstream URI (live-editable so users don't have to redeploy the
-    # container just to swap STT backends)
+    # Upstream URI — derived from the Wyoming services
     # ------------------------------------------------------------------
 
     def get_upstream_uri(self) -> str:
+        """The Wyoming server to stream to and to ask for languages.
+
+        The main service when it is a Wyoming one; otherwise the first
+        Wyoming service anywhere, so Describe still has something to ask;
+        and only before any service exists, the legacy setting.
+        """
+        from .stt_services import KIND_WYOMING
+
+        main = self.get_main_service()
+        if main is not None and main.kind == KIND_WYOMING and main.config.get("uri"):
+            return main.config["uri"]
+        for service in self.stt_services.list():
+            if service.kind == KIND_WYOMING and service.config.get("uri"):
+                return service.config["uri"]
         override = get_setting(self.db, "upstream_uri")
         if override:
             return _normalize_wyoming_uri(override)
         return self.settings.upstream_uri
-
-    def get_upstream_uri_source(self) -> str:
-        """Return ``"override"`` if the live setting overrides the env,
-        or ``"env"`` if we're using the compose-time default."""
-        override = get_setting(self.db, "upstream_uri")
-        return "override" if override else "env"
-
-    def set_upstream_uri(self, value: Optional[str]) -> str:
-        """Persist a new upstream URI override and propagate it live.
-
-        Returns the normalised value actually stored. Passing an empty
-        string clears the override and falls back to the env default.
-        """
-        if value is None or not value.strip():
-            set_setting(self.db, "upstream_uri", "")
-            effective = self.settings.upstream_uri
-        else:
-            normalized = _normalize_wyoming_uri(value)
-            set_setting(self.db, "upstream_uri", normalized)
-            effective = normalized
-        # Propagate into the shared info_cache so Describe responses,
-        # ping-upstream and Upstream-refresh all see the new value
-        # without waiting for a restart. The handler reads the URI
-        # directly from context on each session open, so no further
-        # plumbing is required for the STT forwarding path.
-        if self.info_cache is not None:
-            try:
-                self.info_cache.upstream_uri = effective
-                self.info_cache.invalidate()
-                _LOGGER.info("Upstream URI updated live: %s", effective)
-            except Exception:
-                _LOGGER.exception("Failed to propagate upstream URI to info_cache")
-        return effective
 
     def set_advertised_languages(self, langs: Optional[List[str]]) -> None:
         if langs:
@@ -1933,6 +1754,15 @@ def build_context(settings: Optional[Settings] = None) -> AppContext:
     # Names announced over MQTT are persisted, so a satellite keeps its
     # label across restarts and shows up named even before it next speaks.
     mqtt.on_satellite_name = _CONTEXT.remember_satellite_name
+    # Pre-0.11 installs configured speech-to-text as flat settings. Turn
+    # them into services once, so nobody has to re-enter a key.
+    try:
+        from .stt_services import migrate_legacy_settings
+
+        if migrate_legacy_settings(_CONTEXT.stt_services, db, settings):
+            _CONTEXT.sync_upstream_from_services()
+    except Exception:
+        _LOGGER.exception("Migrating STT settings into services failed")
     return _CONTEXT
 
 

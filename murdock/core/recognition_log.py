@@ -75,6 +75,10 @@ class RecognitionEvent:
     # plus what was actually uploaded. One number can't distinguish
     # "the model thought hard" from "the upload crawled".
     transcript_timing: Optional[dict] = None
+    # Every shadow service's reading of this utterance. Events logged
+    # before multiple shadows existed carry their single legacy shadow
+    # here too, so the UI has one shape to render.
+    shadows: List[dict] = field(default_factory=list)
     # Whether the utterance was whispered, and how strongly — the score
     # is what makes the threshold tunable against real recordings.
     whisper: bool = False
@@ -204,6 +208,10 @@ class RecognitionLog:
             ")",
             (self.max_rows,),
         )
+        self.conn.execute(
+            "DELETE FROM shadow_results WHERE event_id NOT IN "
+            "(SELECT id FROM recognition_events)"
+        )
 
     def list_events(
         self,
@@ -235,7 +243,7 @@ class RecognitionLog:
                 "ORDER BY created_at DESC LIMIT ?",
                 params,
             ).fetchall()
-        return [
+        events = [
             RecognitionEvent(
                 id=row["id"],
                 created_at=row["created_at"],
@@ -264,34 +272,83 @@ class RecognitionLog:
             )
             for row in rows
         ]
+        by_event = self.shadows_for([e.id for e in events])
+        for event in events:
+            found = by_event.get(event.id)
+            if found:
+                event.shadows = found
+            elif event.shadow_engine:
+                # Logged before multiple shadows existed: present the one
+                # legacy shadow in the same shape as the new ones.
+                event.shadows = [{
+                    "service_id": None,
+                    "engine": event.shadow_engine,
+                    "transcript": event.shadow_transcript or "",
+                    "ms": event.shadow_ms,
+                    "error": None,
+                }]
+        return events
 
-    def set_shadow(
+    def add_shadow_result(
         self,
         event_id: int,
-        transcript: str,
+        *,
+        service_id: Optional[int],
         engine: str,
-        shadow_ms: Optional[float] = None,
+        transcript: str,
+        ms: Optional[float],
+        error: Optional[str] = None,
     ) -> bool:
-        """Attach the A/B shadow transcript to an already-recorded event.
+        """Store one shadow service's reading of an already-logged event.
 
-        The shadow engine runs after the main response went out, so this
-        is always a late UPDATE by id. Returns False when the row has
-        already been trimmed away.
+        Returns False when the event has already been trimmed away.
         """
         if not event_id:
             return False
         with self._lock:
             try:
-                cur = self.conn.execute(
-                    "UPDATE recognition_events SET shadow_transcript = ?, "
-                    "shadow_engine = ?, shadow_ms = ? WHERE id = ?",
-                    ((transcript or "")[:1024], engine, shadow_ms, event_id),
+                exists = self.conn.execute(
+                    "SELECT 1 FROM recognition_events WHERE id = ?", (int(event_id),)
+                ).fetchone()
+                if not exists:
+                    return False
+                self.conn.execute(
+                    "INSERT INTO shadow_results (event_id, service_id, engine, "
+                    "transcript, ms, error, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        int(event_id), service_id, engine,
+                        (transcript or "")[:1024], ms, error, time.time(),
+                    ),
                 )
                 self.conn.commit()
-                return cur.rowcount > 0
+                return True
             except Exception:
-                _LOGGER.exception("Failed to store shadow transcript")
+                _LOGGER.exception("Failed to store shadow result")
                 return False
+
+    def shadows_for(self, event_ids: List[int]) -> dict:
+        """``{event_id: [shadow, ...]}`` for a page of events, in one query."""
+        ids = [int(i) for i in event_ids if i]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT event_id, service_id, engine, transcript, ms, error "
+                f"FROM shadow_results WHERE event_id IN ({placeholders}) "
+                "ORDER BY id",
+                ids,
+            ).fetchall()
+        out: dict = {}
+        for row in rows:
+            out.setdefault(int(row["event_id"]), []).append({
+                "service_id": row["service_id"],
+                "engine": row["engine"],
+                "transcript": row["transcript"] or "",
+                "ms": row["ms"],
+                "error": row["error"],
+            })
+        return out
 
     def stats(self, *, since_seconds: float = 24 * 3600) -> dict:
         """Return counts per outcome and per speaker for the last window."""
@@ -318,5 +375,6 @@ class RecognitionLog:
     def clear(self) -> int:
         with self._lock:
             cur = self.conn.execute("DELETE FROM recognition_events")
+            self.conn.execute("DELETE FROM shadow_results")
             self.conn.commit()
             return cur.rowcount

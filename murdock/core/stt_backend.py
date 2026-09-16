@@ -59,6 +59,17 @@ class STTBackendError(RuntimeError):
     """A cloud transcription attempt failed (network, HTTP, timeout)."""
 
 
+class STTNetworkError(STTBackendError):
+    """The service could not be reached at all: DNS, refused, no route.
+
+    Distinguished from an HTTP error or a slow reply because it is the
+    one failure that says something about the network rather than the
+    service. When a remote service fails this way the internet is
+    probably down, and the fallback chain skips the other remote
+    services instead of letting each one burn its own timeout.
+    """
+
+
 def _normalize_language(tag: Optional[str]) -> Optional[str]:
     """Reduce a BCP-47 tag to the ISO-639-1 code these endpoints expect.
 
@@ -268,6 +279,14 @@ class OpenAICompatibleBackend:
 
         except STTBackendError:
             raise
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            # Checked before TimeoutException: ConnectTimeout is one, but
+            # never reaching the host says something different from a
+            # host that is slow to answer.
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            self.last_timing.update(total_ms=round(elapsed_ms, 1), failed="unreachable")
+            _LOGGER.warning("%s unreachable after %.0fms: %s", self.label, elapsed_ms, exc)
+            raise STTNetworkError(f"{self.label}: unreachable") from exc
         except httpx.TimeoutException as exc:
             elapsed_ms = (time.monotonic() - t0) * 1000
             self.last_timing.update(total_ms=round(elapsed_ms, 1), failed="timeout")
@@ -294,6 +313,7 @@ class VoxtralBackend(OpenAICompatibleBackend):
         model: str = "voxtral-mini-latest",
         language: Optional[str] = None,
         timeout: float = 30.0,
+        name: Optional[str] = None,
     ) -> None:
         super().__init__(
             api_key=api_key,
@@ -301,6 +321,7 @@ class VoxtralBackend(OpenAICompatibleBackend):
             base_url="https://api.mistral.ai",
             language=language,
             timeout=timeout,
+            name=name,
         )
 
 
@@ -396,6 +417,9 @@ async def transcribe_via_wyoming(
         raise
     except asyncio.TimeoutError as exc:
         raise STTBackendError(f"wyoming {uri}: timeout") from exc
+    except OSError as exc:
+        # Refused, name not resolved, no route to host.
+        raise STTNetworkError(f"wyoming {uri}: unreachable ({exc})") from exc
     except Exception as exc:
         raise STTBackendError(f"wyoming {uri}: {exc}") from exc
 
@@ -439,7 +463,10 @@ class HomeAssistantSTTBackend:
 
     @property
     def label(self) -> str:
-        return f"ha:{self.entity_id}"
+        # The service name when one was given, which is what the log and
+        # the user recognise; the entity id otherwise.
+        custom = self.__dict__.get("name")
+        return custom if custom else f"ha:{self.entity_id}"
 
     def _headers(self, lang: Optional[str], rate: int, width: int,
                  channels: int) -> dict:
@@ -515,6 +542,11 @@ class HomeAssistantSTTBackend:
                 return text
         except STTBackendError:
             raise
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            self.last_timing.update(
+                total_ms=round((time.monotonic() - t0) * 1000, 1), failed="unreachable"
+            )
+            raise STTNetworkError(f"{self.label}: unreachable") from exc
         except httpx.TimeoutException as exc:
             self.last_timing.update(
                 total_ms=round((time.monotonic() - t0) * 1000, 1), failed="timeout"
@@ -559,3 +591,57 @@ class HomeAssistantSTTBackend:
             raise
         except Exception as exc:
             raise STTBackendError(f"{self.label}: {exc}") from exc
+
+
+class WyomingBackend:
+    """A Wyoming server used one-shot, with the same face as the others.
+
+    The streaming path in the handler talks to the *main* service's
+    Wyoming server directly while the user is still speaking. Fallbacks
+    and shadows only ever get the finished buffer, and this wraps
+    :func:`transcribe_via_wyoming` so they can treat every kind of
+    service alike.
+    """
+
+    name = "wyoming"
+    supports_prompt = False
+
+    def __init__(
+        self,
+        uri: str,
+        language: Optional[str] = None,
+        timeout: float = 20.0,
+        name: Optional[str] = None,
+    ) -> None:
+        self.uri = uri
+        self.language = language
+        self.timeout = timeout
+        if name:
+            self.name = name
+        self.last_timing: dict = {}
+
+    @property
+    def label(self) -> str:
+        return self.name
+
+    async def transcribe(
+        self,
+        pcm_audio: bytes,
+        *,
+        rate: int = 16000,
+        width: int = 2,
+        channels: int = 1,
+        language: Optional[str] = None,
+    ) -> str:
+        t0 = time.monotonic()
+        self.last_timing = {
+            "engine": self.label,
+            "audio_ms": round(len(pcm_audio) / (rate * width * channels) * 1000, 1),
+        }
+        try:
+            return await transcribe_via_wyoming(
+                self.uri, pcm_audio, rate=rate, width=width, channels=channels,
+                language=language or self.language, timeout=self.timeout,
+            )
+        finally:
+            self.last_timing["total_ms"] = round((time.monotonic() - t0) * 1000, 1)

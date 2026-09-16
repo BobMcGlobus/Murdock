@@ -128,8 +128,14 @@ def test_the_setup_checklist_reports_what_is_missing(tmp_path):
     out = asyncio.run(status(ctx))
     assert out.setup_complete is False
     open_steps = [s.key for s in out.setup if not s.done]
-    # Everything except picking a backend, which has a default.
-    assert open_steps == ["speakers", "samples", "delivery", "first_recognition"]
+    assert open_steps == ["stt", "speakers", "samples", "delivery", "first_recognition"]
+
+    # The main service is named the way the user named it.
+    ctx.stt_services.create("Kroko", "wyoming", {"uri": "kroko:10300"})
+    out = asyncio.run(status(ctx))
+    stt = next(s for s in out.setup if s.key == "stt")
+    assert stt.done is True and stt.detail == "Kroko"
+    assert out.stt_backend == "Kroko"
 
     # A speaker with too few samples is called out by name rather than
     # leaving the user to guess which profile is thin.

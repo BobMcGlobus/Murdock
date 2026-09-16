@@ -79,7 +79,55 @@ _EARLY_REJECT_MEDIA_FACTOR = 0.5
 # before answering with the primary transcript alone. Short commands
 # transcribe in ~1 s on the supported cloud backends, so this budget is
 # generous without ever hanging the pipeline on a dead second provider.
-_DUAL_SHADOW_TIMEOUT = 6.0
+class _ShadowGate:
+    """Keeps benchmark shadows out of the way of real requests.
+
+    A shadow may only start while no main request is in flight anywhere
+    in the process, and shadows run one at a time. Both are about the
+    same resource: a local engine and a second local engine on the same
+    machine slow each other down, which would both delay the answer
+    somebody is waiting for and falsify the very timings the shadow
+    exists to measure.
+
+    The asyncio primitives are recreated when the running loop changes,
+    which only happens under tests — a server process has one loop.
+    """
+
+    def __init__(self) -> None:
+        self._loop = None
+        self._active = 0
+        self._idle: "Optional[asyncio.Event]" = None
+        self._lock: "Optional[asyncio.Lock]" = None
+
+    def _ensure(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._loop is not loop:
+            self._loop = loop
+            self._active = 0
+            self._idle = asyncio.Event()
+            self._idle.set()
+            self._lock = asyncio.Lock()
+
+    def acquire_main(self) -> None:
+        self._ensure()
+        self._active += 1
+        self._idle.clear()
+
+    def release_main(self) -> None:
+        self._ensure()
+        self._active = max(0, self._active - 1)
+        if self._active == 0:
+            self._idle.set()
+
+    async def run(self, factory):
+        """Wait until no main is in flight, then run one shadow."""
+        self._ensure()
+        async with self._lock:
+            await self._idle.wait()
+            return await factory()
+
+
+_SHADOW_GATE = _ShadowGate()
 
 #: How long to keep listening after the first transcript that follows
 #: AudioStop.
@@ -203,9 +251,16 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_bar: Optional[float] = None
         self._reject_nearest: Optional[str] = None
 
-        # Dual-transcript mode: cached (text, engine) of the blocking
-        # shadow run, so the audit logging doesn't transcribe twice.
-        self._dual_shadow: Optional[tuple[str, str]] = None
+        # Main-service outcome, read by the fallback chain.
+        self._main_failed: bool = False
+        # A remote service failed to connect at all: the internet is
+        # probably down, so the chain skips the other remote services.
+        self._remote_down: bool = False
+        # Conditioned upload audio, prepared once and reused by every
+        # fallback that needs it.
+        self._prepared_audio: Optional[bytes] = None
+        # Whether this session is counted as a main request in flight.
+        self._main_slot_held: bool = False
 
         # Sidecar hint mode: ambiguities pulled out of the transcript,
         # travelling in the recognition event instead (plan §13).
@@ -217,7 +272,6 @@ class MurdockHandler(AsyncEventHandler):
         self._transcript_timing: Optional[dict] = None
         self._rescued_by: Optional[str] = None
         self._stt_prep: Optional[dict] = None
-        self._shadow_ms: Optional[float] = None
 
         # Canonicalizations applied to this transcript, for the log.
         self._canonicalizations: list = []
@@ -300,6 +354,9 @@ class MurdockHandler(AsyncEventHandler):
             self._audio_width = chunk.width
             self._audio_channels = chunk.channels
             self._audio_buffer.extend(chunk.audio)
+            if not self._main_slot_held:
+                _SHADOW_GATE.acquire_main()
+                self._main_slot_held = True
 
             # Lazily open upstream on the first chunk so we know the format.
             # When using Voxtral cloud backend, skip the upstream connection
@@ -405,13 +462,19 @@ class MurdockHandler(AsyncEventHandler):
         self._reject_distance = None
         self._reject_bar = None
         self._reject_nearest = None
-        self._dual_shadow = None
+        self._main_failed = False
+        self._remote_down = False
+        self._prepared_audio = None
+        if self._main_slot_held:
+            # A session that never answered must not keep shadows
+            # waiting for ever.
+            _SHADOW_GATE.release_main()
+            self._main_slot_held = False
         self._transcript_hints = []
         self._transcript_ms = None
         self._transcript_timing = None
         self._stt_prep = None
         self._rescued_by = None
-        self._shadow_ms = None
         self._canonicalizations = []
         self._whisper = False
         self._whisper_score = None
@@ -452,6 +515,10 @@ class MurdockHandler(AsyncEventHandler):
             )
             self._upstream_failed = True
             self._upstream_open = False
+            if isinstance(exc, OSError):
+                main = self.context.get_main_service()
+                if main is not None and self.context.is_service_remote(main):
+                    self._remote_down = True
             if (
                 self._upstream_transcript is not None
                 and not self._upstream_transcript.done()
@@ -932,82 +999,146 @@ class MurdockHandler(AsyncEventHandler):
             )
             return self._upstream_interim
 
-    async def _transcribe_cloud(self, audio_16k: bytes) -> str:
-        """Transcribe buffered audio via the active cloud backend.
+    async def _prepared_upload(self, audio_16k: bytes) -> bytes:
+        """The upload copy of the audio, conditioned once per session.
 
-        On backend failure (network down, provider outage) and with the
-        local fallback enabled, the same audio is transcribed one-shot
-        over the Wyoming upstream instead of silently returning "".
+        The speaker embedding was already computed from the untouched
+        audio — fbank does its own mean normalisation, and changing the
+        level under it would shift every distance.
         """
-        from murdock.core.stt_backend import (
-            STTBackendError,
-            transcribe_via_wyoming,
-        )
+        if self._prepared_audio is not None:
+            return self._prepared_audio
+        upload = audio_16k
+        if self.context.get_enable_stt_prep():
+            from murdock.core.stt_prep import prepare_for_upload
+
+            upload, info = await asyncio.to_thread(
+                prepare_for_upload, audio_16k, self.context.vad
+            )
+            self._stt_prep = info
+            if info:
+                _LOGGER.info(
+                    "[%s] Upload prep: trimmed %.0fms, level %.1f → %.1f dBFS",
+                    self._session_id, info["trimmed_ms"],
+                    info["level_before_dbfs"], info["level_after_dbfs"],
+                )
+        self._prepared_audio = upload
+        return upload
+
+    async def _transcribe_cloud(self, audio_16k: bytes) -> str:
+        """Transcribe buffered audio with the main service.
+
+        A failure is recorded rather than handled: what happens next is
+        the fallback chain's decision, made in one place for every kind
+        of main.
+        """
+        from murdock.core.stt_backend import STTBackendError, STTNetworkError
 
         sid = self._session_id
-        backend = self.context.get_active_cloud_backend()
-        failed = False
+        main = self.context.get_main_service()
+        backend = self.context.build_stt_backend(main)
         if backend is None:
             _LOGGER.warning(
-                "[%s] Cloud backend %r selected but not configured "
-                "(missing API key / model)",
-                sid, self.context.get_stt_backend(),
+                "[%s] Main STT service %r is not fully configured",
+                sid, main.name if main else None,
             )
-            failed = True
-        else:
-            # Condition a *copy* for the upload. The embedding was already
-            # computed from the untouched audio — fbank does its own mean
-            # normalisation, and changing the level under it would shift
-            # every distance.
-            upload_audio = audio_16k
-            if self.context.get_enable_stt_prep():
-                from murdock.core.stt_prep import prepare_for_upload
+            self._main_failed = True
+            return ""
+        upload_audio = await self._prepared_upload(audio_16k)
+        _LOGGER.info("[%s] Transcribing via %s…", sid, backend.label)
+        try:
+            return await backend.transcribe(
+                upload_audio, rate=16000, width=2, channels=1,
+                language=self._language,
+            )
+        except STTBackendError as exc:
+            _LOGGER.warning("[%s] Main STT failed: %s", sid, exc)
+            self._main_failed = True
+            if isinstance(exc, STTNetworkError) and self.context.is_service_remote(main):
+                self._remote_down = True
+            return ""
+        finally:
+            # Kept on the failure path too: a timeout's breakdown is
+            # exactly what tells a stalled upload from a slow model.
+            timing = dict(getattr(backend, "last_timing", None) or {})
+            if timing and self._stt_prep:
+                timing.update(self._stt_prep)
+            self._transcript_timing = timing or None
 
-                upload_audio, prep_info = await asyncio.to_thread(
-                    prepare_for_upload, audio_16k, self.context.vad
-                )
-                self._stt_prep = prep_info
-                if prep_info:
-                    _LOGGER.info(
-                        "[%s] Upload prep: trimmed %.0fms, level %.1f → %.1f dBFS",
-                        sid, prep_info["trimmed_ms"],
-                        prep_info["level_before_dbfs"],
-                        prep_info["level_after_dbfs"],
-                    )
-            _LOGGER.info("[%s] Transcribing via %s…", sid, backend.label)
-            try:
-                return await backend.transcribe(
-                    upload_audio,
-                    rate=16000,
-                    width=2,
-                    channels=1,
-                    language=self._language,
-                )
-            except STTBackendError as exc:
-                _LOGGER.warning("[%s] Cloud STT failed: %s", sid, exc)
-                failed = True
-            finally:
-                # Kept on the failure path too: a timeout's breakdown is
-                # exactly what tells a stalled upload from a slow model.
-                timing = dict(getattr(backend, "last_timing", None) or {})
-                if timing and self._stt_prep:
-                    timing.update(self._stt_prep)
-                self._transcript_timing = timing or None
+    async def _run_fallback_chain(self, audio_16k: bytes, *, reason: str) -> str:
+        """Try the fallback services in order until one answers.
 
-        if failed and self.context.get_stt_local_fallback():
-            uri = self.context.get_upstream_uri()
-            if uri:
+        ``reason`` is ``"error"`` when the main failed and ``"empty"``
+        when it heard nothing.
+
+        Once a remote service has failed to connect at all, the internet
+        is probably down and the remaining remote services are skipped —
+        otherwise each of them would burn its own timeout before the
+        chain reached the local service at the end, which is the offline
+        fallback by virtue of being last.
+
+        Never raises; returns ``""`` when nothing answered.
+        """
+        from murdock.core.stt_backend import STTBackendError, STTNetworkError
+        from murdock.core.stt_services import KIND_WYOMING
+
+        sid = self._session_id
+        for service in self.context.get_fallback_services():
+            remote = self.context.is_service_remote(service)
+            if remote and self._remote_down:
                 _LOGGER.info(
-                    "[%s] Falling back to local Wyoming STT at %s", sid, uri
+                    "[%s] Skipping remote fallback %s — the internet looks down",
+                    sid, service.name,
                 )
-                try:
-                    return await transcribe_via_wyoming(
-                        uri, audio_16k, language=self._language
-                    )
-                except STTBackendError as exc:
-                    _LOGGER.warning(
-                        "[%s] Local fallback also failed: %s", sid, exc
-                    )
+                continue
+            backend = self.context.build_stt_backend(service)
+            if backend is None:
+                _LOGGER.info(
+                    "[%s] Fallback %s is not fully configured — skipped",
+                    sid, service.name,
+                )
+                continue
+            # Each engine gets its audio the way it would as the main.
+            audio = (
+                audio_16k if service.kind == KIND_WYOMING
+                else await self._prepared_upload(audio_16k)
+            )
+            _LOGGER.info(
+                "[%s] Main %s — trying fallback %s", sid,
+                "failed" if reason == "error" else "heard nothing", service.name,
+            )
+            try:
+                text = await asyncio.wait_for(
+                    backend.transcribe(
+                        audio, rate=16000, width=2, channels=1,
+                        language=self._language,
+                    ),
+                    timeout=self.context.service_timeout(service) + 2.0,
+                )
+            except STTNetworkError as exc:
+                if remote:
+                    self._remote_down = True
+                _LOGGER.warning("[%s] Fallback %s unreachable: %s", sid, service.name, exc)
+                continue
+            except (STTBackendError, asyncio.TimeoutError) as exc:
+                _LOGGER.warning("[%s] Fallback %s failed: %s", sid, service.name, exc)
+                continue
+            except Exception:
+                _LOGGER.exception("[%s] Fallback %s crashed", sid, service.name)
+                continue
+            text = (text or "").strip()
+            if text:
+                self._rescued_by = service.name
+                _LOGGER.info(
+                    "[%s] Answered by fallback %s: %r", sid, service.name, text[:80]
+                )
+                return text
+            if reason == "error":
+                # A working service that heard nothing *is* the answer:
+                # nobody said anything. Asking further down the chain
+                # would only add latency.
+                self._rescued_by = service.name
+                return ""
         return ""
 
     async def _primary_transcript(self, audio_16k: bytes) -> str:
@@ -1022,7 +1153,10 @@ class MurdockHandler(AsyncEventHandler):
         try:
             if self._is_voxtral:
                 return await self._transcribe_cloud(audio_16k)
-            return await self._wait_for_upstream_transcript()
+            text = await self._wait_for_upstream_transcript()
+            if self._upstream_failed:
+                self._main_failed = True
+            return text
         finally:
             self._transcript_ms = (time.monotonic() - started) * 1000
 
@@ -1106,81 +1240,31 @@ class MurdockHandler(AsyncEventHandler):
         return corrected
 
     async def _transcribe_and_correct(self, audio_16k: bytes) -> str:
-        """Primary transcript, refined by the enabled quality tiers.
+        """Main transcript, backed by the fallback chain, then corrected.
 
-        * **Dual transcript**: run the shadow engine blocking in
-          parallel and merge both readings, marking disagreements as
-          ``primary [oder: shadow]``. The shadow result is cached so the
-          post-response audit logging doesn't transcribe twice. A slow
-          or failing shadow never blocks: after ``_DUAL_SHADOW_TIMEOUT``
-          the primary goes out alone.
-        * **Correction dictionary**: applied to each transcript *before*
-          the merge, so a term both engines got wrong (or one engine's
-          known quirk) is corrected first and produces no false
-          disagreement.
+        * **Fallback chain**: tried when the main failed, and — unless
+          switched off — when it heard nothing.
+        * **Correction dictionary**: applied afterwards, so a user's
+          explicit rule always wins over whatever engine answered.
 
         Where the resulting ambiguity markers end up is decided by
         :meth:`_deliver_hints`.
         """
-        sid = self._session_id
         dictionary = self.context.get_dictionary_entries()
 
-        if self.context.dual_transcript_active() and audio_16k:
-            from murdock.core.transcript_tools import merge_transcripts_ex
-
-            shadow_task = asyncio.create_task(
-                self._shadow_transcribe(audio_16k)
-            )
-            primary = await self._primary_transcript(audio_16k)
-            shadow_text: Optional[str] = None
-            try:
-                shadow_text, shadow_engine = await asyncio.wait_for(
-                    shadow_task, timeout=_DUAL_SHADOW_TIMEOUT
-                )
-                self._dual_shadow = (shadow_text, shadow_engine)
-            except asyncio.TimeoutError:
-                shadow_task.cancel()
-                _LOGGER.warning(
-                    "[%s] Dual: shadow timed out after %.0fs — primary only",
-                    sid, _DUAL_SHADOW_TIMEOUT,
-                )
-                self._dual_shadow = ("⚠ timeout", "dual (timed out)")
-            except Exception as exc:
-                _LOGGER.info("[%s] Dual: shadow failed: %s — primary only", sid, exc)
-                self._dual_shadow = (f"⚠ {exc}", "dual (failed)")
-
-            dict_hints = []
-            if dictionary:
-                from murdock.core.transcript_tools import (
-                    apply_correction_dictionary,
-                    apply_correction_dictionary_ex,
-                )
-                primary_res = apply_correction_dictionary_ex(primary, dictionary)
-                primary = primary_res.clean
-                dict_hints = primary_res.hints
-                if shadow_text:
-                    shadow_text = apply_correction_dictionary_ex(
-                        shadow_text, dictionary
-                    ).clean
-            if shadow_text:
-                merged = merge_transcripts_ex(primary, shadow_text)
-                if dict_hints:
-                    # Dictionary hints ride along with the merge's own.
-                    merged.hints[:0] = dict_hints
-                    merged.annotated = apply_correction_dictionary(
-                        merged.annotated, dictionary
-                    )
-                return self._deliver_hints(merged, "Dual merge")
-            if dict_hints:
-                return self._deliver_hints(
-                    apply_correction_dictionary_ex(primary, dictionary),
-                    "Dictionary applied",
-                )
-            return primary
-
         transcript = await self._primary_transcript(audio_16k)
-        if not (transcript or "").strip() and audio_16k:
-            transcript = await self._rescue_empty_transcript(audio_16k)
+        if audio_16k and self._main_failed:
+            transcript = await self._run_fallback_chain(
+                audio_16k, reason="error"
+            ) or transcript
+        elif (
+            audio_16k
+            and not (transcript or "").strip()
+            and self.context.get_fallback_on_empty()
+        ):
+            transcript = await self._run_fallback_chain(
+                audio_16k, reason="empty"
+            ) or transcript
         # Second chance at catching a cancellation: a cloud backend or a
         # one-shot engine produces no interim results, so the only place
         # to see the phrase is the finished transcript.
@@ -1896,6 +1980,10 @@ class MurdockHandler(AsyncEventHandler):
         sid = self._session_id
         if self._stop_at is not None and self._answer_ms is None:
             self._answer_ms = (time.monotonic() - self._stop_at) * 1000
+        if self._main_slot_held:
+            # The answer is on its way; shadows may use the machine now.
+            _SHADOW_GATE.release_main()
+            self._main_slot_held = False
         try:
             await self.write_event(Transcript(text=text).event())
             _LOGGER.info(
@@ -2054,27 +2142,87 @@ class MurdockHandler(AsyncEventHandler):
             return 0
 
     def _spawn_shadow(self, event_id: int, audio_16k: bytes) -> None:
-        """Attach the A/B shadow transcription to an audit event.
+        """Queue every shadow service for this utterance.
 
-        In dual mode the shadow already ran (blocking, before the
-        response) — its cached result is attached directly. Otherwise
-        the shadow is fired after the primary transcript already went
-        back to the satellite, so it never adds latency.
+        Called once the answer has gone back. Everything the run needs is
+        captured here, because by the time a queued shadow starts this
+        handler may already be serving the next utterance — reading
+        session state then would mix two conversations.
         """
-        if not event_id:
+        if not event_id or not audio_16k:
             return
-        if self._dual_shadow is not None:
-            text, engine = self._dual_shadow
-            self._dual_shadow = None
-            self.context.recognition.set_shadow(
-                event_id, text, engine, self._shadow_ms
+        shadows = self.context.get_shadow_services()
+        if not shadows:
+            return
+        asyncio.create_task(self._run_shadows(
+            event_id, audio_16k, self._prepared_audio, self._language,
+            self._session_id, shadows,
+        ))
+
+    async def _run_shadows(
+        self, event_id: int, audio_16k: bytes, prepared: Optional[bytes],
+        language: Optional[str], sid: str, shadows: list,
+    ) -> None:
+        """Transcribe with each shadow in turn and log every result.
+
+        Uses only the arguments and the shared context, never the
+        handler's per-session attributes. Each service's time is measured
+        around its own request, not around its wait at the gate.
+        """
+        from murdock.core.stt_backend import STTBackendError
+        from murdock.core.stt_services import KIND_WYOMING
+
+        for service in shadows:
+            backend = self.context.build_stt_backend(service)
+            if backend is None:
+                self.context.recognition.add_shadow_result(
+                    event_id, service_id=service.id, engine=service.name,
+                    transcript="", ms=None, error="not configured",
+                )
+                continue
+            if service.kind == KIND_WYOMING:
+                audio = audio_16k
+            else:
+                if prepared is None and self.context.get_enable_stt_prep():
+                    from murdock.core.stt_prep import prepare_for_upload
+
+                    prepared, _ = await asyncio.to_thread(
+                        prepare_for_upload, audio_16k, self.context.vad
+                    )
+                audio = prepared if prepared is not None else audio_16k
+
+            async def _one(backend=backend, audio=audio, service=service):
+                started = time.monotonic()
+                try:
+                    text = await asyncio.wait_for(
+                        backend.transcribe(
+                            audio, rate=16000, width=2, channels=1,
+                            language=language,
+                        ),
+                        timeout=self.context.service_timeout(service) + 2.0,
+                    )
+                    return text or "", None, (time.monotonic() - started) * 1000
+                except asyncio.TimeoutError:
+                    return "", "timeout", (time.monotonic() - started) * 1000
+                except STTBackendError as exc:
+                    return "", str(exc), (time.monotonic() - started) * 1000
+                except Exception as exc:
+                    _LOGGER.debug("[%s] Shadow %s crashed", sid, service.name, exc_info=True)
+                    return "", f"crashed: {exc}", (time.monotonic() - started) * 1000
+
+            try:
+                text, error, ms = await _SHADOW_GATE.run(_one)
+            except Exception:
+                _LOGGER.debug("[%s] Shadow gate failed", sid, exc_info=True)
+                continue
+            _LOGGER.info(
+                "[%s] Shadow %s (%.0fms): %r", sid, service.name, ms,
+                (error and f"⚠ {error}") or text[:80],
             )
-            return
-        if not audio_16k:
-            return
-        if self.context.get_shadow_stt_backend() == "none":
-            return
-        asyncio.create_task(self._run_shadow(event_id, audio_16k))
+            self.context.recognition.add_shadow_result(
+                event_id, service_id=service.id, engine=service.name,
+                transcript=text, ms=ms, error=error,
+            )
 
     def _timing_with_rescue(self) -> Optional[dict]:
         """The request breakdown, plus what happened around it.
@@ -2092,93 +2240,6 @@ class MurdockHandler(AsyncEventHandler):
         if self._answer_ms is not None:
             timing["answer_ms"] = round(self._answer_ms, 1)
         return timing or None
-
-    async def _rescue_empty_transcript(self, audio_16k: bytes) -> str:
-        """Ask the shadow engine when the primary heard nothing.
-
-        A transducer that is unsure returns nothing rather than guessing
-        — honest, and useless to the person waiting. Where a second
-        engine is already configured for the A/B comparison, it can
-        answer instead. The cost is paid only on an empty result, which
-        is precisely the case where there is nothing left to lose: the
-        alternative is a failed interaction.
-
-        Never raises; on any failure the empty transcript stands.
-        """
-        if not self.context.get_shadow_rescues_empty():
-            return ""
-        if self.context.get_shadow_stt_backend() == "none":
-            return ""
-        sid = self._session_id
-        try:
-            text, engine = await asyncio.wait_for(
-                self._shadow_transcribe(audio_16k),
-                timeout=self.context.get_stt_timeout(),
-            )
-        except Exception as exc:
-            _LOGGER.info("[%s] Empty-transcript rescue failed: %s", sid, exc)
-            return ""
-        text = (text or "").strip()
-        if not text:
-            return ""
-        self._rescued_by = engine
-        _LOGGER.info(
-            "[%s] Primary heard nothing — using %s: %r", sid, engine, text[:80],
-        )
-        return text
-
-    async def _shadow_transcribe(self, audio_16k: bytes) -> tuple[str, str]:
-        """Transcribe with the configured shadow engine → (text, engine).
-
-        Raises on failure/misconfiguration so callers (dual mode, the
-        post-response audit run) can handle it their own way.
-        """
-        from murdock.core.stt_backend import (
-            STTBackendError,
-            transcribe_via_wyoming,
-        )
-
-        started = time.monotonic()
-        try:
-            kind = self.context.get_shadow_stt_backend()
-            if kind == "upstream":
-                uri = self.context.get_shadow_upstream_uri()
-                if not uri:
-                    raise STTBackendError("shadow upstream URI not configured")
-                text = await transcribe_via_wyoming(
-                    uri, audio_16k, language=self._language
-                )
-                return text, f"wyoming:{uri}"
-            backend = self.context.get_shadow_backend()
-            if backend is None:
-                raise STTBackendError(f"shadow backend {kind!r} not configured")
-            text = await backend.transcribe(audio_16k, language=self._language)
-            return text, backend.label
-        finally:
-            self._shadow_ms = (time.monotonic() - started) * 1000
-
-    async def _run_shadow(self, event_id: int, audio_16k: bytes) -> None:
-        from murdock.core.stt_backend import STTBackendError
-
-        sid = self._session_id
-        kind = self.context.get_shadow_stt_backend()
-        try:
-            text, engine = await self._shadow_transcribe(audio_16k)
-        except STTBackendError as exc:
-            _LOGGER.info("[%s] Shadow STT failed: %s", sid, exc)
-            self.context.recognition.set_shadow(
-                event_id, f"⚠ {exc}", f"{kind} (failed)", self._shadow_ms
-            )
-            return
-        except Exception:
-            _LOGGER.debug("[%s] Shadow STT crashed", sid, exc_info=True)
-            return
-        _LOGGER.info(
-            "[%s] Shadow transcript (%s): %r", sid, engine, text[:80]
-        )
-        self.context.recognition.set_shadow(
-            event_id, text, engine, self._shadow_ms
-        )
 
     async def _capture_for_training(self, audio_16k: bytes, duration: float) -> None:
         """Log an utterance to the unknown postbox so it can be assigned to
@@ -2257,6 +2318,9 @@ class MurdockHandler(AsyncEventHandler):
 
     async def disconnect(self) -> None:
         """Wyoming server hook — clean up upstream connection on client close."""
+        if self._main_slot_held:
+            _SHADOW_GATE.release_main()
+            self._main_slot_held = False
         try:
             await self._close_upstream(send_stop=False)
         except Exception:

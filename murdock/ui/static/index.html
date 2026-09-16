@@ -415,11 +415,9 @@
                     <div class="row">
                         <button type="submit" data-i18n="settings.save">Save</button>
                         <button type="button" id="refresh-langs-btn" data-i18n="settings.refresh_langs">Refresh from upstream</button>
-                        <button type="button" id="ping-upstream-btn" class="secondary" data-i18n="settings.ping">Ping upstream</button>
                     </div>
                 </form>
                 <div id="settings-info"></div>
-                <div id="ping-result" class="meta"></div>
             </div>
             <div class="card">
                 <h2 data-i18n="sat_threshold.title">Per-satellite thresholds</h2>
@@ -506,94 +504,100 @@
             </div>
             </div>
             <div class="settings-group" data-settings-group="transcription">
-            <div class="card">
-                <h2 data-i18n="stt.title">STT Backend</h2>
-                <p class="meta" data-i18n="stt.description">
-                    Choose how Murdock obtains transcripts: proxy to an
-                    upstream Wyoming STT service, or transcribe directly
-                    via the Mistral Cloud API (Voxtral).
-                </p>
-                <form id="stt-form">
+            <div class="card" id="stt-services-card">
+                <h2 data-i18n="svc.title">Speech-to-text services</h2>
+                <p class="meta" data-i18n="svc.description">Every transcription engine Murdock can use, set up once. Pick one as main; the others can stand in as fallbacks or run afterwards as shadows for comparison — switching needs no retyping.</p>
+                <div id="stt-services-list" class="list"></div>
+                <p class="meta" data-i18n="svc.roles_hint">Fallbacks are tried in order when the main fails. Shadows transcribe the same recording after the answer has gone out.</p>
+                <div class="row" style="margin-top:0.5rem">
+                    <button type="button" id="svc-add-btn" class="secondary" data-i18n="svc.add">Add service</button>
+                </div>
+                <form id="stt-service-form" class="svc-form" hidden>
+                    <h3 id="svc-form-title" data-i18n="svc.add">Add service</h3>
+                    <input type="hidden" name="id">
                     <label>
-                        <span data-i18n="stt.backend">Backend</span>
-                        <select name="stt_backend">
-                            <option value="upstream" data-i18n="stt.opt_upstream">Upstream (Wyoming proxy)</option>
-                            <option value="voxtral" data-i18n="stt.opt_voxtral">Voxtral (Mistral Cloud)</option>
-                            <option value="openai" data-i18n="stt.opt_openai">OpenAI-compatible (OpenAI / Groq / local)</option>
-                                                    <option value="ha" data-i18n="stt.backend_ha">Home Assistant STT entity (Cloud, …)</option>
+                        <span data-i18n="svc.kind">Type</span>
+                        <select name="kind">
+                            <option value="wyoming" data-i18n="svc.kind_wyoming">Wyoming server (Kroko, Parakeet, faster-whisper …)</option>
+                            <option value="openai" data-i18n="svc.kind_openai">OpenAI-compatible API (OpenAI, Groq, OpenRouter, local)</option>
+                            <option value="voxtral" data-i18n="svc.kind_voxtral">Voxtral (Mistral)</option>
+                            <option value="ha" data-i18n="svc.kind_ha">Home Assistant STT entity (Cloud, …)</option>
                         </select>
                     </label>
-                    <div id="stt-voxtral-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.api_key">Mistral API key</span>
-                            <input type="password" name="mistral_api_key" data-i18n-ph="stt.ph_api_key" placeholder="paste key here" autocomplete="off">
-                            <small id="stt-key-hint" class="meta"></small>
-                        </label>
-                        <label>
-                            <span data-i18n="stt.model">Model</span>
-                            <input type="text" name="mistral_model" data-i18n-ph="stt.ph_model" placeholder="voxtral-mini-latest">
-                            <small class="meta" data-i18n="stt.model_hint">e.g. voxtral-mini-latest (fast) or voxtral-small-latest (more accurate).</small>
-                        </label>
+                    <label>
+                        <span data-i18n="svc.name">Name</span>
+                        <input type="text" name="name" maxlength="60" data-i18n-ph="svc.ph_name" placeholder="e.g. Kroko living room">
+                    </label>
+                    <label data-kinds="wyoming">
+                        <span data-i18n="svc.uri">Address</span>
+                        <input type="text" name="uri" placeholder="192.168.2.25:10303">
+                        <small class="meta" data-i18n="svc.uri_hint">host:port of the Wyoming server — tcp:// is added automatically. The main Wyoming service streams while you speak; as fallback or shadow it gets the finished recording.</small>
+                    </label>
+                    <label data-kinds="openai">
+                        <span data-i18n="stt.openai_base_url">Base URL</span>
+                        <input type="text" name="base_url" placeholder="https://api.openai.com">
+                        <small class="meta" data-i18n="stt.openai_hint">OpenAI: https://api.openai.com + gpt-4o-transcribe · Groq: https://api.groq.com/openai + whisper-large-v3-turbo · local: http://host:8000.</small>
+                    </label>
+                    <label data-kinds="openai voxtral">
+                        <span data-i18n="stt.openai_api_key">API key</span>
+                        <input type="password" name="api_key" data-i18n-ph="stt.ph_api_key" placeholder="paste key here" autocomplete="off">
+                        <small class="meta" id="svc-key-hint"></small>
+                    </label>
+                    <label data-kinds="openai voxtral">
+                        <span data-i18n="stt.model">Model</span>
+                        <input type="text" name="model" placeholder="gpt-4o-transcribe">
+                        <small class="meta" data-kinds="voxtral" data-i18n="stt.model_hint">e.g. voxtral-mini-latest (fast) or voxtral-small-latest (more accurate).</small>
+                    </label>
+                    <label data-kinds="ha">
+                        <span data-i18n="stt.ha_entity">Home Assistant STT entity</span>
+                        <input type="text" name="entity_id" placeholder="stt.home_assistant_cloud">
+                        <small class="meta" data-i18n="stt.ha_entity_hint">Any stt.* entity in Home Assistant.</small>
+                    </label>
+                    <label>
+                        <span data-i18n="svc.timeout">Timeout for this service (seconds)</span>
+                        <input type="number" step="0.5" min="1" max="120" name="timeout_sec" data-i18n-ph="svc.ph_timeout" placeholder="default">
+                        <small class="meta" data-i18n="svc.timeout_hint">Empty = the default timeout below. A slow cloud model may need more; a fallback that should answer quickly, less.</small>
+                    </label>
+                    <div class="row">
+                        <button type="submit" data-i18n="generic.save">Save</button>
+                        <button type="button" id="svc-form-test" class="secondary" data-i18n="svc.test">Test</button>
+                        <button type="button" id="svc-form-cancel" class="secondary" data-i18n="svc.cancel">Cancel</button>
                     </div>
-                    <div id="stt-openai-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.openai_base_url">Base URL</span>
-                            <input type="text" name="openai_base_url" placeholder="https://api.openai.com">
-                            <small class="meta" data-i18n="stt.openai_hint">OpenAI: https://api.openai.com + gpt-4o-transcribe · Groq: https://api.groq.com/openai + whisper-large-v3-turbo · local (speaches etc.): http://host:8000, key can stay empty.</small>
-                        </label>
-                        <label>
-                            <span data-i18n="stt.openai_api_key">API key</span>
-                            <input type="password" name="openai_api_key" data-i18n-ph="stt.ph_api_key" placeholder="paste key here" autocomplete="off">
-                            <small id="stt-openai-key-hint" class="meta"></small>
-                        </label>
-                        <label>
-                            <span data-i18n="stt.model">Model</span>
-                            <input type="text" name="openai_model" placeholder="gpt-4o-transcribe">
-                        </label>
-                    </div>
-                    <div id="stt-ha-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.ha_entity">Home Assistant STT entity</span>
-                            <input type="text" name="ha_stt_entity" placeholder="stt.home_assistant_cloud">
-                            <div class="row" style="margin-top:0.35rem">
-                                <button type="button" id="ha-stt-test-btn" class="secondary small" data-i18n="stt.ha_test">Test entity</button>
-                            </div>
-                            <div id="ha-stt-result" class="meta"></div>
-                            <small class="meta" data-i18n="stt.ha_entity_hint">Any stt.* entity in Home Assistant, reached over its own /api/stt endpoint — which is the only way to use Home Assistant Cloud transcription, since it is not a Wyoming service. Needs the Home Assistant URL and token set under Home Assistant. Do not point this at Murdock's own entity: the request would come straight back here.</small>
-                        </label>
-                    </div>
-                    <div id="stt-upstream-fields" hidden>
-                        <label>
-                            <span data-i18n="settings.upstream_uri">Upstream STT (Wyoming) URI</span>
-                            <input type="text" name="upstream_uri" data-i18n-ph="settings.ph_upstream" placeholder="e.g. 192.168.2.107:10300">
-                            <small id="upstream-hint" class="meta"></small>
-                        </label>
-                        <div class="row">
-                            <button type="button" id="ping-upstream-btn2" class="secondary small" data-i18n="settings.ping">Ping upstream</button>
-                        </div>
-                        <div id="ping-result2" class="meta"></div>
-                    </div>
-                    <label id="stt-language-row" hidden>
+                    <small class="meta" data-i18n="svc.test_hint">Wyoming and Home Assistant are asked what they support. HTTP APIs get one second of silence, which is billed like any short request.</small>
+                    <div id="svc-form-result" class="meta"></div>
+                </form>
+                <div id="stt-services-feedback" class="feedback"></div>
+                <form id="stt-globals-form">
+                    <h3 data-i18n="svc.globals_title">For all services</h3>
+                    <label class="switch">
+                        <input type="checkbox" name="fallback_on_empty">
+                        <span data-i18n="svc.fallback_on_empty">Ask the fallbacks when the main heard nothing</span>
+                        <small class="meta" data-i18n="svc.fallback_on_empty_hint">An unsure engine returns nothing rather than guessing — honest, and useless to the person waiting. With this on, an empty answer goes down the fallback chain like an error does. Costs latency only in that case.</small>
+                    </label>
+                    <label>
                         <span data-i18n="stt.language">Language hint (ISO 639-1)</span>
                         <input type="text" name="stt_language" placeholder="de" maxlength="8">
-                        <small class="meta" data-i18n="stt.language_hint">Used when Home Assistant sends no language. Leave empty to let the endpoint decide — most default to English, which turns a German sentence into confident English nonsense rather than an error. Full tags like de-DE are reduced to de automatically.</small>
+                        <small class="meta" data-i18n="stt.language_hint">Used when Home Assistant sends no language.</small>
                     </label>
-                    <label id="stt-timeout-row" hidden>
+                    <label>
                         <span data-i18n="stt.timeout">Request timeout (seconds)</span>
                         <input type="number" step="0.5" min="1" max="120" name="stt_timeout_sec">
-                        <small class="meta" data-i18n="stt.timeout_hint">Hard ceiling on one cloud transcription. On expiry the local fallback takes over if it is enabled, otherwise the utterance comes back empty. "I didn't catch that" after a few seconds beats half a minute of silence. Default: 8 s.</small>
+                        <small class="meta" data-i18n="stt.timeout_hint">Hard ceiling on one transcription request.</small>
                     </label>
-                    <label class="switch" id="stt-fallback-row" hidden>
-                        <input type="checkbox" name="stt_local_fallback">
-                        <span data-i18n="stt.local_fallback">Local fallback via Wyoming upstream</span>
-                        <small class="meta" data-i18n="stt.local_fallback_hint">If the cloud backend fails (internet down, provider outage), the buffered audio is transcribed by the Wyoming upstream instead of returning an empty transcript. Needs a reachable upstream URI.</small>
-                    </label>
-                    <label class="switch" id="stt-prep-row" hidden>
+                    <label class="switch">
                         <input type="checkbox" name="enable_stt_prep">
                         <span data-i18n="stt.prep">Condition audio before upload</span>
-                        <small class="meta" data-i18n="stt.prep_hint">Trims the silence before and after the utterance and normalises the level. Transcription models hallucinate in silence, and that invented text is what pushes Whisper into re-decoding the clip. The speaker embedding is computed from the untouched audio and is not affected.</small>
+                        <small class="meta" data-i18n="stt.prep_hint">Trims silence and normalises the level.</small>
                     </label>
-                    <h3 data-i18n="stt.quality_title">Transcript quality</h3>
+                    <div class="row">
+                        <button type="submit" data-i18n="generic.save">Save</button>
+                    </div>
+                </form>
+                <div id="stt-globals-feedback" class="feedback"></div>
+            </div>
+            <div class="card">
+                <h2 data-i18n="stt.quality_title">Transcript quality</h2>
+                <form id="stt-form">
                     <label class="switch">
                         <input type="checkbox" name="enable_stt_vocabulary">
                         <span data-i18n="stt.vocab_enable">Custom vocabulary (bias the STT)</span>
@@ -660,61 +664,6 @@
                         <p class="meta" data-i18n="canon.learned_hint">A correction that keeps recurring is no longer a guess. Promote it to become an exact dictionary rule — faster, deterministic, and never re-decided by the fuzzy matcher.</p>
                         <div id="canon-learned-list" class="list"></div>
                     </div>
-                    <details class="advanced shadow-block">
-                        <summary data-i18n="stt.shadow_title">A/B shadow engine</summary>
-                    <p class="meta" data-i18n="stt.shadow_hint">Transcribe every utterance with a second engine in the background. The shadow result is never returned to Home Assistant — it appears next to the primary transcript in the recognition log, so you can compare two engines on your real commands before switching.</p>
-                    <label>
-                        <span data-i18n="stt.shadow_backend">Shadow engine</span>
-                        <select name="shadow_stt_backend" id="shadow-backend-select">
-                            <option value="none" data-i18n="stt.shadow_none">— off —</option>
-                            <option value="upstream" data-i18n="stt.shadow_upstream">Wyoming server</option>
-                            <option value="voxtral" data-i18n="stt.shadow_voxtral">Voxtral (other model)</option>
-                            <option value="openai" data-i18n="stt.shadow_openai">OpenAI-compatible</option>
-                        </select>
-                    </label>
-                    <label class="switch">
-                        <input type="checkbox" name="shadow_rescues_empty">
-                        <span data-i18n="stt.shadow_rescue">Let the shadow answer when the primary heard nothing</span>
-                        <small class="meta" data-i18n="stt.shadow_rescue_hint">A transducer that is unsure returns nothing rather than guessing — honest, and useless to the person waiting. Where the primary comes back empty, the shadow's transcript is used instead. Costs latency only in that case, where the alternative is a failed interaction. The recognition log marks which engine answered.</small>
-                    </label>
-                    <div id="shadow-upstream-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.shadow_uri">Shadow Wyoming URI</span>
-                            <input type="text" name="shadow_upstream_uri" placeholder="tcp://host:10300">
-                        </label>
-                    </div>
-                    <div id="shadow-voxtral-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.shadow_model">Shadow model</span>
-                            <input type="text" name="shadow_mistral_model" placeholder="voxtral-small-latest">
-                        </label>
-                        <label>
-                            <span data-i18n="stt.shadow_mistral_key">API key (empty = primary Mistral key)</span>
-                            <input type="password" name="shadow_mistral_api_key" autocomplete="off" data-i18n-ph="stt.ph_api_key" placeholder="paste key here">
-                            <small id="shadow-mistral-key-hint" class="meta"></small>
-                        </label>
-                    </div>
-                    <div id="shadow-openai-fields" hidden>
-                        <label>
-                            <span data-i18n="stt.openai_base_url">Base URL</span>
-                            <input type="text" name="shadow_openai_base_url" placeholder="https://api.groq.com/openai">
-                        </label>
-                        <label>
-                            <span data-i18n="stt.shadow_key">API key (empty = primary OpenAI key)</span>
-                            <input type="password" name="shadow_openai_api_key" autocomplete="off" data-i18n-ph="stt.ph_api_key" placeholder="paste key here">
-                            <small id="shadow-openai-key-hint" class="meta"></small>
-                        </label>
-                        <label>
-                            <span data-i18n="stt.shadow_model">Shadow model</span>
-                            <input type="text" name="shadow_openai_model" placeholder="whisper-large-v3-turbo">
-                        </label>
-                    </div>
-                    <label class="switch" id="dual-transcript-row">
-                        <input type="checkbox" name="enable_dual_transcript">
-                        <span data-i18n="stt.dual_enable">Dual transcript (merge primary + shadow)</span>
-                        <small class="meta" data-i18n="stt.dual_hint">Runs the shadow engine blocking in parallel and merges both readings — disagreements appear inline as "primary [oder: shadow]", so the LLM picks the plausible one. Engines fail on different words, so the union beats either alone. Costs the slower engine's latency (shadow capped at 6 s, then primary goes out alone) and breaks rigid intent matching — for LLM agents. Requires a configured shadow engine.</small>
-                    </label>
-                    </details>
                     <div class="row" style="margin-top:0.5rem">
                         <button type="submit" data-i18n="generic.save">Save</button>
                     </div>
@@ -759,7 +708,7 @@
                         <p class="meta" data-i18n="transcript_tpl.tip">Tip: explain in your agent's system prompt that bracketed lines are recognition metadata, not spoken by the user.</p>
                     </div>
                     <label>
-                        <span data-i18n="hint_mode.label">Ambiguity markers (correction dictionary / dual transcript)</span>
+                        <span data-i18n="hint_mode.label">Ambiguity markers (correction dictionary)</span>
                         <select name="transcript_hint_mode" id="transcript-hint-mode">
                             <option value="inline" data-i18n="hint_mode.inline">Inline in the transcript — `[oder: …]` stays in the text</option>
                             <option value="sidecar" data-i18n="hint_mode.sidecar">Sidecar — transcript stays clean, hints go in the recognition event</option>

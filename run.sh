@@ -114,7 +114,8 @@ export DATA_DIR="/data"
 export MODEL_DIR="/data/models"
 mkdir -p "$DATA_DIR" "$MODEL_DIR"
 
-log "STT backend:  $STT_BACKEND"
+# Only seeds the first STT service; afterwards the web UI owns them.
+log "STT seed:     $STT_BACKEND"
 log "Listen URI:   $LISTEN_URI"
 if [ "$STT_BACKEND" = "upstream" ]; then
     log "Upstream URI: $UPSTREAM_URI"

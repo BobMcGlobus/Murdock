@@ -1295,30 +1295,6 @@ if (clusterRefreshBtn) {
 
 // --- Settings -------------------------------------------------------------
 
-function renderUpstreamHint(s) {
-    const hint = $("#upstream-hint");
-    if (!hint) return;
-    if (s.upstream_uri_source === "override") {
-        hint.innerHTML = escapeHtml(t("hint.upstream_override", {
-            uri: s.upstream_uri || "",
-            default: s.upstream_uri_default || "",
-        })).replace(
-            escapeHtml(s.upstream_uri || ""),
-            `<code>${escapeHtml(s.upstream_uri || "")}</code>`
-        ).replace(
-            escapeHtml(s.upstream_uri_default || ""),
-            `<code>${escapeHtml(s.upstream_uri_default || "")}</code>`
-        );
-    } else {
-        hint.innerHTML = escapeHtml(t("hint.upstream_default", {
-            uri: s.upstream_uri || "",
-        })).replace(
-            escapeHtml(s.upstream_uri || ""),
-            `<code>${escapeHtml(s.upstream_uri || "")}</code>`
-        );
-    }
-}
-
 function renderLangHint(s) {
     const hint = $("#lang-hint");
     if (!hint) return;
@@ -1415,7 +1391,6 @@ async function loadSettings() {
             }
             updateSpeakerContextMode();
         }
-        renderUpstreamHint(s);
         if (s.advertised_languages_source === "override") {
             form.advertised_languages.value =
                 (s.advertised_languages || []).join(",");
@@ -1469,75 +1444,16 @@ async function loadSettings() {
         // Per-satellite thresholds + media restriction matrix
         loadSatelliteThresholds();
         loadMediaRestrictions();
-        // STT backend
+        // STT services and the settings shared by all of them
+        loadSttServices();
+        const sttGlobals = $("#stt-globals-form");
+        if (sttGlobals) {
+            sttGlobals.stt_language.value = s.stt_language ?? "";
+            sttGlobals.stt_timeout_sec.value = s.stt_timeout_sec ?? 8;
+            sttGlobals.enable_stt_prep.checked = !!s.enable_stt_prep;
+        }
         const sttForm = $("#stt-form");
         if (sttForm) {
-            sttForm.stt_backend.value = s.stt_backend || "upstream";
-            sttForm.mistral_api_key.value = "";
-            sttForm.mistral_model.value = s.mistral_model || "voxtral-mini-latest";
-            const keyHint = $("#stt-key-hint");
-            if (keyHint) {
-                keyHint.textContent = s.mistral_api_key_set
-                    ? t("stt.key_set")
-                    : t("stt.key_empty");
-            }
-            // OpenAI-compatible backend (new fields — backwards-compatible)
-            if (sttForm.openai_base_url) {
-                sttForm.openai_base_url.value = s.openai_base_url || "";
-                sttForm.openai_api_key.value = "";
-                sttForm.openai_model.value = s.openai_model || "";
-                const oaHint = $("#stt-openai-key-hint");
-                if (oaHint) {
-                    oaHint.textContent = s.openai_api_key_set
-                        ? t("stt.key_set") : t("stt.key_empty");
-                }
-            }
-            if (sttForm.enable_stt_prep) {
-                sttForm.enable_stt_prep.checked = !!s.enable_stt_prep;
-            }
-            if (sttForm.stt_timeout_sec) {
-                sttForm.stt_timeout_sec.value = s.stt_timeout_sec ?? 8;
-            }
-            if (sttForm.stt_language) {
-                sttForm.stt_language.value = s.stt_language ?? "";
-            }
-            if (sttForm.ha_stt_entity) {
-                sttForm.ha_stt_entity.value = s.ha_stt_entity ?? "";
-            }
-            if (sttForm.upstream_uri) {
-                sttForm.upstream_uri.value =
-                    s.upstream_uri_source === "override"
-                        ? (s.upstream_uri || "") : "";
-            }
-            if (sttForm.shadow_rescues_empty) {
-                sttForm.shadow_rescues_empty.checked = !!s.shadow_rescues_empty;
-            }
-            if (sttForm.stt_local_fallback) {
-                sttForm.stt_local_fallback.checked = !!s.stt_local_fallback;
-            }
-            // A/B shadow engine
-            if (sttForm.shadow_stt_backend) {
-                sttForm.shadow_stt_backend.value = s.shadow_stt_backend || "none";
-                sttForm.shadow_upstream_uri.value = s.shadow_upstream_uri || "";
-                sttForm.shadow_mistral_model.value = s.shadow_mistral_model || "";
-                if (sttForm.shadow_mistral_api_key) {
-                    sttForm.shadow_mistral_api_key.value = "";
-                }
-                sttForm.shadow_openai_base_url.value = s.shadow_openai_base_url || "";
-                sttForm.shadow_openai_api_key.value = "";
-                sttForm.shadow_openai_model.value = s.shadow_openai_model || "";
-                const shHint = $("#shadow-openai-key-hint");
-                if (shHint) {
-                    shHint.textContent = s.shadow_openai_api_key_set
-                        ? t("stt.key_set") : t("stt.key_empty");
-                }
-                const shMistralHint = $("#shadow-mistral-key-hint");
-                if (shMistralHint) {
-                    shMistralHint.textContent = s.shadow_mistral_api_key_set
-                        ? t("stt.key_set") : t("stt.shadow_mistral_key_empty");
-                }
-            }
-            // Transcript quality tiers
             if (sttForm.enable_stt_vocabulary) {
                 sttForm.enable_stt_vocabulary.checked = !!s.enable_stt_vocabulary;
                 sttForm.stt_vocabulary.value = s.stt_vocabulary || "";
@@ -1553,10 +1469,6 @@ async function loadSettings() {
             }
             loadVocabularyMirror();
             loadCanonicalizerHits();
-            if (sttForm.enable_dual_transcript) {
-                sttForm.enable_dual_transcript.checked = !!s.enable_dual_transcript;
-            }
-            updateSttFieldVisibility();
         }
         const whisperForm = $("#whisper-form");
         if (whisperForm && whisperForm.enable_whisper_detection) {
@@ -1823,109 +1735,360 @@ if (mediaRestrictRefresh) {
     mediaRestrictRefresh.addEventListener("click", loadMediaRestrictions);
 }
 
-// --- STT backend toggle ---------------------------------------------------
+// --- STT services ------------------------------------------------------------
 
-function updateSttFieldVisibility() {
-    const form = $("#stt-form");
-    if (!form) return;
-    const backend = form.stt_backend.value;
-    const vox = $("#stt-voxtral-fields");
-    if (vox) vox.hidden = backend !== "voxtral";
-    const oa = $("#stt-openai-fields");
-    if (oa) oa.hidden = backend !== "openai";
-    const hf = $("#stt-ha-fields");
-    if (hf) hf.hidden = backend !== "ha";
-    // Local fallback only makes sense for buffering cloud backends.
-    const fb = $("#stt-fallback-row");
-    if (fb) fb.hidden = backend === "upstream";
-    // Upload conditioning only applies where audio is uploaded — the
-    // upstream path streams while the user is still speaking.
-    const prep = $("#stt-prep-row");
-    if (prep) prep.hidden = backend === "upstream";
-    const to = $("#stt-timeout-row");
-    if (to) to.hidden = backend === "upstream";
-    const la = $("#stt-language-row");
-    if (la) la.hidden = backend === "upstream";
-    // The Wyoming URI is the one field the upstream backend needs, and it
-    // used to live in a collapsed advanced block on a different tab.
-    const up = $("#stt-upstream-fields");
-    if (up) up.hidden = backend !== "upstream";
-    // Shadow sub-fields per selected shadow engine.
-    const shadow = form.shadow_stt_backend ? form.shadow_stt_backend.value : "none";
-    const su = $("#shadow-upstream-fields");
-    if (su) su.hidden = shadow !== "upstream";
-    const sv = $("#shadow-voxtral-fields");
-    if (sv) sv.hidden = shadow !== "voxtral";
-    const so = $("#shadow-openai-fields");
-    if (so) so.hidden = shadow !== "openai";
-    // Dual transcript needs a configured shadow engine.
-    if (form.enable_dual_transcript) {
-        const noShadow = shadow === "none";
-        form.enable_dual_transcript.disabled = noShadow;
-        if (noShadow) form.enable_dual_transcript.checked = false;
+let sttServicesState = {
+    services: [],
+    roles: { main: null, fallbacks: [], shadows: [], fallback_on_empty: true },
+};
+
+async function loadSttServices() {
+    const list = $("#stt-services-list");
+    if (!list) return;
+    try {
+        sttServicesState = await api("/api/stt-services");
+        renderSttServices();
+    } catch (err) {
+        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
     }
 }
 
+function svcSummary(svc) {
+    const c = svc.config || {};
+    if (svc.kind === "wyoming") return c.uri || "";
+    if (svc.kind === "openai") {
+        return [c.base_url || "https://api.openai.com", c.model].filter(Boolean).join(" · ");
+    }
+    if (svc.kind === "voxtral") return c.model || "voxtral-mini-latest";
+    if (svc.kind === "ha") return c.entity_id || "";
+    return "";
+}
+
+function svcFeedback(text, cls) {
+    const fb = $("#stt-services-feedback");
+    if (!fb) return;
+    fb.className = "feedback" + (cls ? " " + cls : "");
+    fb.textContent = text || "";
+    if (cls === "ok") {
+        setTimeout(() => {
+            if (fb.textContent === text) {
+                fb.textContent = "";
+                fb.className = "feedback";
+            }
+        }, 2500);
+    }
+}
+
+function renderSttServices() {
+    const list = $("#stt-services-list");
+    if (!list) return;
+    const { services, roles } = sttServicesState;
+    const globals = $("#stt-globals-form");
+    if (globals) globals.fallback_on_empty.checked = !!roles.fallback_on_empty;
+    if (!services.length) {
+        list.innerHTML = `<p class="meta">${escapeHtml(t("svc.none"))}</p>`;
+        return;
+    }
+    // Main first, then the fallback chain in order, then everything else.
+    const rank = (svc) => {
+        if (svc.id === roles.main) return -1;
+        const i = roles.fallbacks.indexOf(svc.id);
+        return i >= 0 ? i : 1000 + svc.id;
+    };
+    const sorted = [...services].sort((a, b) => rank(a) - rank(b));
+    list.innerHTML = sorted.map((svc) => {
+        const isMain = svc.id === roles.main;
+        const fb = roles.fallbacks.indexOf(svc.id);
+        const isShadow = roles.shadows.includes(svc.id);
+        const badges = [];
+        if (isMain) badges.push(`<span class="badge ok">${escapeHtml(t("svc.role_main"))}</span>`);
+        if (fb >= 0) badges.push(`<span class="badge warn">${escapeHtml(t("svc.role_fallback", { n: fb + 1 }))}</span>`);
+        if (isShadow) badges.push(`<span class="badge role">${escapeHtml(t("svc.role_shadow"))}</span>`);
+        badges.push(`<span class="badge">${escapeHtml(t("svc.kind_short_" + svc.kind))}</span>`);
+        badges.push(`<span class="badge" title="${escapeHtml(t("svc.remote_hint"))}">${escapeHtml(t(svc.remote ? "svc.remote" : "svc.local"))}</span>`);
+        if (!svc.complete) badges.push(`<span class="badge err">${escapeHtml(t("svc.incomplete"))}</span>`);
+        const roleControls = isMain ? "" : `
+            <button type="button" class="secondary small" data-svc-action="main">${escapeHtml(t("svc.make_main"))}</button>
+            <label class="svc-toggle"><input type="checkbox" data-svc-action="fallback"${fb >= 0 ? " checked" : ""}> ${escapeHtml(t("svc.as_fallback"))}</label>
+            ${fb > 0 ? `<button type="button" class="secondary small" data-svc-action="up" title="${escapeHtml(t("svc.earlier"))}">↑</button>` : ""}
+            ${fb >= 0 && fb < roles.fallbacks.length - 1 ? `<button type="button" class="secondary small" data-svc-action="down" title="${escapeHtml(t("svc.later"))}">↓</button>` : ""}
+            <label class="svc-toggle"><input type="checkbox" data-svc-action="shadow"${isShadow ? " checked" : ""}> ${escapeHtml(t("svc.as_shadow"))}</label>`;
+        return `<div class="list-item svc-item" data-svc-id="${svc.id}">
+            <div class="row"><h3>${escapeHtml(svc.name)}</h3> ${badges.join(" ")}</div>
+            <div class="meta"><code>${escapeHtml(svcSummary(svc))}</code></div>
+            <div class="row svc-roles">${roleControls}</div>
+            <div class="row">
+                <button type="button" class="secondary small" data-svc-action="test">${escapeHtml(t("svc.test"))}</button>
+                <button type="button" class="secondary small" data-svc-action="edit">${escapeHtml(t("svc.edit"))}</button>
+                <button type="button" class="secondary small danger" data-svc-action="delete"${isMain ? ` disabled title="${escapeHtml(t("svc.delete_main"))}"` : ""}>${escapeHtml(t("svc.delete"))}</button>
+            </div>
+            <div class="meta svc-test-result"></div>
+        </div>`;
+    }).join("");
+}
+
+async function putSttRoles(mutate) {
+    const r = sttServicesState.roles;
+    const roles = {
+        main: r.main,
+        fallbacks: [...r.fallbacks],
+        shadows: [...r.shadows],
+        fallback_on_empty: r.fallback_on_empty,
+    };
+    mutate(roles);
+    try {
+        sttServicesState = await api("/api/stt-services/roles", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(roles),
+        });
+        renderSttServices();
+        svcFeedback(t("stt.saved"), "ok");
+    } catch (err) {
+        svcFeedback(err.message, "err");
+        renderSttServices();
+    }
+}
+
+function renderSvcTest(out, res, unsaved) {
+    if (!res.ok) {
+        out.innerHTML =
+            `<span class="feedback err">${escapeHtml(t("svc.test_fail"))}</span> ` +
+            escapeHtml(res.error || "");
+        return;
+    }
+    const parts = [
+        `<span class="feedback ok">${escapeHtml(t("svc.test_ok"))}</span>` +
+        (res.latency_ms != null ? ` · ${formatMs(res.latency_ms)}` : ""),
+    ];
+    if (res.languages && res.languages.length) {
+        const langs = res.languages.slice(0, 12).join(", ") +
+            (res.languages.length > 12 ? " …" : "");
+        parts.push(escapeHtml(t("svc.test_languages", { langs })));
+    }
+    if (res.language_ok === false) {
+        parts.push(`<span class="feedback warn">${escapeHtml(
+            t("svc.lang_missing", { lang: res.configured_language }))}</span>`);
+    } else if (res.language_ok === true) {
+        parts.push(escapeHtml(t("svc.lang_ok", { lang: res.configured_language })));
+    }
+    if (res.transcript !== null && res.transcript !== undefined) {
+        parts.push(escapeHtml(t("svc.test_request_ok")));
+    }
+    if (unsaved) {
+        parts.push(`<small class="meta">${escapeHtml(t("svc.test_unsaved"))}</small>`);
+    }
+    out.innerHTML = parts.join("<br>");
+}
+
+async function runSvcTest(body, out, unsaved) {
+    out.textContent = t("svc.testing");
+    try {
+        const res = await api("/api/stt-services/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        renderSvcTest(out, res, unsaved);
+    } catch (err) {
+        out.innerHTML = `<span class="feedback err">${escapeHtml(err.message)}</span>`;
+    }
+}
+
+const svcList = $("#stt-services-list");
+if (svcList) {
+    const handle = async (e) => {
+        const el = e.target.closest("[data-svc-action]");
+        if (!el) return;
+        const item = el.closest(".svc-item");
+        const id = parseInt(item.dataset.svcId, 10);
+        const action = el.dataset.svcAction;
+        // Checkboxes act on change, buttons on click — never both.
+        if ((el.type === "checkbox") !== (e.type === "change")) return;
+        const svc = sttServicesState.services.find((x) => x.id === id);
+        if (action === "main") {
+            await putSttRoles((r) => {
+                r.main = id;
+                r.fallbacks = r.fallbacks.filter((x) => x !== id);
+                r.shadows = r.shadows.filter((x) => x !== id);
+            });
+        } else if (action === "fallback") {
+            await putSttRoles((r) => {
+                r.fallbacks = el.checked
+                    ? [...r.fallbacks.filter((x) => x !== id), id]
+                    : r.fallbacks.filter((x) => x !== id);
+            });
+        } else if (action === "shadow") {
+            await putSttRoles((r) => {
+                r.shadows = el.checked
+                    ? [...r.shadows.filter((x) => x !== id), id]
+                    : r.shadows.filter((x) => x !== id);
+            });
+        } else if (action === "up" || action === "down") {
+            await putSttRoles((r) => {
+                const i = r.fallbacks.indexOf(id);
+                const j = action === "up" ? i - 1 : i + 1;
+                if (i < 0 || j < 0 || j >= r.fallbacks.length) return;
+                [r.fallbacks[i], r.fallbacks[j]] = [r.fallbacks[j], r.fallbacks[i]];
+            });
+        } else if (action === "test") {
+            el.disabled = true;
+            await runSvcTest({ id }, item.querySelector(".svc-test-result"), false);
+            el.disabled = false;
+        } else if (action === "edit") {
+            openSvcForm(svc);
+        } else if (action === "delete") {
+            if (!confirm(t("svc.delete_confirm", { name: svc ? svc.name : id }))) return;
+            try {
+                sttServicesState = await api(`/api/stt-services/${id}`, { method: "DELETE" });
+                renderSttServices();
+                svcFeedback(t("svc.deleted"), "ok");
+            } catch (err) {
+                svcFeedback(err.message, "err");
+            }
+        }
+    };
+    svcList.addEventListener("click", handle);
+    svcList.addEventListener("change", handle);
+}
+
+const SVC_MODEL_PLACEHOLDER = {
+    openai: "gpt-4o-transcribe",
+    voxtral: "voxtral-mini-latest",
+};
+
+function updateSvcFormKind() {
+    const form = $("#stt-service-form");
+    if (!form) return;
+    const kind = form.kind.value;
+    form.querySelectorAll("[data-kinds]").forEach((el) => {
+        el.hidden = !el.dataset.kinds.split(" ").includes(kind);
+    });
+    if (SVC_MODEL_PLACEHOLDER[kind]) form.model.placeholder = SVC_MODEL_PLACEHOLDER[kind];
+}
+
+function openSvcForm(svc) {
+    const form = $("#stt-service-form");
+    if (!form) return;
+    form.reset();
+    const c = (svc && svc.config) || {};
+    form.id.value = svc ? svc.id : "";
+    form.kind.value = svc ? svc.kind : "wyoming";
+    // A service keeps its type: the fields of one kind mean nothing to another.
+    form.kind.disabled = !!svc;
+    form.name.value = svc ? svc.name : "";
+    form.uri.value = c.uri || "";
+    form.base_url.value = c.base_url || "";
+    form.api_key.value = "";
+    form.model.value = c.model || "";
+    form.entity_id.value = c.entity_id || "";
+    form.timeout_sec.value = c.timeout_sec ?? "";
+    const hint = $("#svc-key-hint");
+    if (hint) {
+        hint.textContent = svc && (svc.secrets_set || []).includes("api_key")
+            ? t("stt.key_set") : "";
+    }
+    $("#svc-form-title").textContent = t(svc ? "svc.edit_title" : "svc.add");
+    $("#svc-form-result").innerHTML = "";
+    updateSvcFormKind();
+    form.hidden = false;
+    form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function svcFormPayload(form) {
+    const kind = form.kind.value;
+    const config = {};
+    form.querySelectorAll("[data-kinds] input").forEach((input) => {
+        const label = input.closest("[data-kinds]");
+        if (label.dataset.kinds.split(" ").includes(kind)) {
+            config[input.name] = input.value.trim();
+        }
+    });
+    config.timeout_sec = form.timeout_sec.value === "" ? "" : parseFloat(form.timeout_sec.value);
+    return { kind, name: form.name.value.trim(), config };
+}
+
+const svcForm = $("#stt-service-form");
+if (svcForm) {
+    svcForm.kind.addEventListener("change", updateSvcFormKind);
+    $("#svc-add-btn").addEventListener("click", () => openSvcForm(null));
+    $("#svc-form-cancel").addEventListener("click", () => { svcForm.hidden = true; });
+    $("#svc-form-test").addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const payload = svcFormPayload(svcForm);
+        const id = svcForm.id.value ? parseInt(svcForm.id.value, 10) : null;
+        btn.disabled = true;
+        await runSvcTest({ id, kind: payload.kind, config: payload.config },
+                         $("#svc-form-result"), true);
+        btn.disabled = false;
+    });
+    svcForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const payload = svcFormPayload(svcForm);
+        const id = svcForm.id.value;
+        try {
+            sttServicesState = id
+                ? await api(`/api/stt-services/${id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: payload.name, config: payload.config }),
+                })
+                : await api("/api/stt-services", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+            svcForm.hidden = true;
+            svcForm.api_key.value = "";
+            renderSttServices();
+            svcFeedback(t("stt.saved"), "ok");
+        } catch (err) {
+            $("#svc-form-result").innerHTML =
+                `<span class="feedback err">${escapeHtml(err.message)}</span>`;
+        }
+    });
+}
+
+const sttGlobalsForm = $("#stt-globals-form");
+if (sttGlobalsForm) {
+    sttGlobalsForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const f = sttGlobalsForm;
+        const fb = $("#stt-globals-feedback");
+        const body = {
+            stt_language: f.stt_language.value.trim(),
+            enable_stt_prep: f.enable_stt_prep.checked,
+        };
+        if (f.stt_timeout_sec.value !== "") {
+            body.stt_timeout_sec = parseFloat(f.stt_timeout_sec.value);
+        }
+        try {
+            await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+            });
+            const onEmpty = f.fallback_on_empty.checked;
+            if (onEmpty !== sttServicesState.roles.fallback_on_empty) {
+                await putSttRoles((r) => { r.fallback_on_empty = onEmpty; });
+            }
+            fb.className = "feedback ok";
+            fb.textContent = t("stt.saved");
+        } catch (err) {
+            fb.className = "feedback err";
+            fb.textContent = err.message;
+        }
+    });
+}
+
+// --- Transcript quality -----------------------------------------------------
+
 const sttForm = $("#stt-form");
 if (sttForm) {
-    const sttSelect = sttForm.stt_backend;
-    sttSelect.addEventListener("change", updateSttFieldVisibility);
-    if (sttForm.shadow_stt_backend) {
-        sttForm.shadow_stt_backend.addEventListener(
-            "change", updateSttFieldVisibility
-        );
-    }
-
     sttForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         const fb = $("#stt-feedback");
-        const body = { stt_backend: sttSelect.value };
-        if (sttSelect.value === "voxtral") {
-            const keyVal = sttForm.mistral_api_key.value;
-            if (keyVal) body.mistral_api_key = keyVal;
-            const modelVal = sttForm.mistral_model.value.trim();
-            if (modelVal) body.mistral_model = modelVal;
-        }
-        if (sttSelect.value === "openai" && sttForm.openai_base_url) {
-            body.openai_base_url = sttForm.openai_base_url.value.trim();
-            body.openai_model = sttForm.openai_model.value.trim();
-            const oaKey = sttForm.openai_api_key.value;
-            if (oaKey) body.openai_api_key = oaKey;
-        }
-        if (sttForm.enable_stt_prep) {
-            body.enable_stt_prep = sttForm.enable_stt_prep.checked;
-        }
-        if (sttForm.stt_timeout_sec && sttForm.stt_timeout_sec.value !== "") {
-            body.stt_timeout_sec = parseFloat(sttForm.stt_timeout_sec.value);
-        }
-        if (sttForm.stt_language) {
-            body.stt_language = sttForm.stt_language.value.trim();
-        }
-        if (sttForm.ha_stt_entity) {
-            body.ha_stt_entity = sttForm.ha_stt_entity.value.trim();
-        }
-        if (sttForm.upstream_uri) {
-            body.upstream_uri = sttForm.upstream_uri.value.trim();
-        }
-        if (sttForm.shadow_rescues_empty) {
-            body.shadow_rescues_empty = sttForm.shadow_rescues_empty.checked;
-        }
-        if (sttForm.stt_local_fallback) {
-            body.stt_local_fallback = sttForm.stt_local_fallback.checked;
-        }
-        if (sttForm.shadow_stt_backend) {
-            body.shadow_stt_backend = sttForm.shadow_stt_backend.value;
-            body.shadow_upstream_uri = sttForm.shadow_upstream_uri.value.trim();
-            body.shadow_mistral_model = sttForm.shadow_mistral_model.value.trim();
-            body.shadow_openai_base_url = sttForm.shadow_openai_base_url.value.trim();
-            body.shadow_openai_model = sttForm.shadow_openai_model.value.trim();
-            const shKey = sttForm.shadow_openai_api_key.value;
-            if (shKey) body.shadow_openai_api_key = shKey;
-            if (sttForm.shadow_mistral_api_key) {
-                const shMKey = sttForm.shadow_mistral_api_key.value;
-                if (shMKey) body.shadow_mistral_api_key = shMKey;
-            }
-        }
+        const body = {};
         if (sttForm.enable_canonicalizer) {
             body.enable_canonicalizer = sttForm.enable_canonicalizer.checked;
             if (sttForm.canonicalizer_min_score.value !== "") {
@@ -1943,23 +2106,12 @@ if (sttForm) {
             body.enable_stt_dictionary = sttForm.enable_stt_dictionary.checked;
             body.stt_dictionary = sttForm.stt_dictionary.value;
         }
-        if (sttForm.enable_dual_transcript) {
-            body.enable_dual_transcript = sttForm.enable_dual_transcript.checked;
-        }
         try {
-            const saved = await api("/api/settings", {
+            await api("/api/settings", {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             });
-            // The URI is normalised server-side (a bare host:port grows a
-            // tcp:// scheme), so show what was actually stored.
-            renderUpstreamHint(saved);
-            if (sttForm.upstream_uri) {
-                sttForm.upstream_uri.value =
-                    saved.upstream_uri_source === "override"
-                        ? (saved.upstream_uri || "") : "";
-            }
             if (fb) {
                 fb.className = "feedback ok";
                 fb.textContent = t("stt.saved");
@@ -1970,10 +2122,6 @@ if (sttForm) {
                     }
                 }, 2500);
             }
-            sttForm.mistral_api_key.value = "";
-            if (sttForm.openai_api_key) sttForm.openai_api_key.value = "";
-            if (sttForm.shadow_openai_api_key) sttForm.shadow_openai_api_key.value = "";
-            if (sttForm.shadow_mistral_api_key) sttForm.shadow_mistral_api_key.value = "";
             loadSettings();
         } catch (err) {
             if (fb) {
@@ -2047,120 +2195,12 @@ $("#settings-form").addEventListener("submit", async (e) => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
         });
-        renderUpstreamHint(s);
         renderLangHint(s);
         setStatus(t("settings.saved"), "ok");
     } catch (err) {
         setStatus(t("generic.error", { err: err.message }), "err");
     }
 });
-
-async function pingUpstream(btnSel, outSel, uriSel) {
-    const btn = $(btnSel);
-    const out = $(outSel);
-    // Test what is in the field, falling back to the stored value. A
-    // ping that silently uses the saved URI while the user looks at an
-    // edited one reads as "my input is being ignored".
-    const uriEl = uriSel ? $(uriSel) : null;
-    const typed = uriEl ? (uriEl.value || "").trim() : "";
-    btn.disabled = true;
-    btn.textContent = t("ping.pinging");
-    out.innerHTML = "";
-    try {
-        const res = await api("/api/settings/ping-upstream", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(typed ? { uri: typed } : {}),
-        });
-        if (res.ok) {
-            const langArr = res.languages || [];
-            const langs = langArr.join(", ") || "(none)";
-            out.innerHTML =
-                `<span class="feedback ok">${escapeHtml(t("ping.ok"))}</span><br>` +
-                `<code>${escapeHtml(res.upstream_uri)}</code> — ` +
-                `${res.latency_ms.toFixed(0)}ms<br>` +
-                `${escapeHtml(t("ping.upstream_supports", { n: langArr.length }))} ${escapeHtml(langs)}<br>` +
-                `<small class="meta">${escapeHtml(t("ping.advertise_note"))}</small>` +
-                (typed ? `<br><small class="meta">${escapeHtml(t("ping.unsaved_note"))}</small>` : "");
-            setStatus(t("ping.upstream_ok"), "ok");
-        } else {
-            out.innerHTML =
-                `<span class="feedback err">${escapeHtml(t("ping.fail"))}</span><br>` +
-                `<code>${escapeHtml(res.upstream_uri)}</code><br>` +
-                `${escapeHtml(t("generic.error", { err: res.error || "unknown" }))}`;
-            setStatus(t("ping.upstream_unreachable"), "err");
-        }
-    } catch (err) {
-        out.innerHTML =
-            `<span class="feedback err">${escapeHtml(t("ping.request_failed"))}</span> ${escapeHtml(err.message)}`;
-        setStatus(t("ping.failed", { err: err.message }), "err");
-    } finally {
-        btn.disabled = false;
-        btn.textContent = t("settings.ping");
-    }
-}
-
-// Both entry points: the one beside the backend selector, and the one
-// that has always sat in the recognition group.
-$("#ping-upstream-btn").addEventListener("click", () =>
-    pingUpstream("#ping-upstream-btn", "#ping-result"));
-const pingBtn2 = $("#ping-upstream-btn2");
-if (pingBtn2) {
-    pingBtn2.addEventListener("click", () =>
-        pingUpstream("#ping-upstream-btn2", "#ping-result2",
-                     '#stt-form [name="upstream_uri"]'));
-}
-
-// --- Home Assistant STT entity test ----------------------------------------
-
-const haSttBtn = $("#ha-stt-test-btn");
-if (haSttBtn) {
-    haSttBtn.addEventListener("click", async () => {
-        const out = $("#ha-stt-result");
-        const field = $('#stt-form [name="ha_stt_entity"]');
-        // Test what is typed, falling back to what is stored — same rule
-        // as the upstream ping.
-        const typed = field ? (field.value || "").trim() : "";
-        haSttBtn.disabled = true;
-        out.innerHTML = "";
-        try {
-            const res = await api("/api/settings/test-ha-stt", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(typed ? { entity_id: typed } : {}),
-            });
-            if (!res.ok) {
-                out.innerHTML =
-                    `<span class="feedback err">${escapeHtml(t("stt.ha_test_fail"))}</span><br>` +
-                    escapeHtml(res.error || "");
-            } else {
-                const langs = res.languages.length
-                    ? res.languages.slice(0, 12).join(", ") +
-                      (res.languages.length > 12 ? " …" : "")
-                    : "—";
-                let verdict = "";
-                if (res.language_ok === false) {
-                    verdict = `<br><span class="feedback warn">${escapeHtml(
-                        t("stt.ha_lang_missing", { lang: res.configured_language })
-                    )}</span>`;
-                } else if (res.language_ok === true) {
-                    verdict = `<br>${escapeHtml(
-                        t("stt.ha_lang_ok", { lang: res.configured_language })
-                    )}`;
-                }
-                out.innerHTML =
-                    `<span class="feedback ok">${escapeHtml(t("stt.ha_test_ok"))}</span> ` +
-                    `<code>${escapeHtml(res.entity_id)}</code><br>` +
-                    escapeHtml(t("stt.ha_languages", { langs })) + verdict +
-                    (typed ? `<br><small class="meta">${escapeHtml(t("ping.unsaved_note"))}</small>` : "");
-            }
-        } catch (err) {
-            out.innerHTML = `<span class="feedback err">${escapeHtml(err.message)}</span>`;
-        } finally {
-            haSttBtn.disabled = false;
-        }
-    });
-}
 
 // --- Threshold recommendation ----------------------------------------------
 
@@ -2893,36 +2933,41 @@ function renderRecognitionEvent(e) {
         ms === null || ms === undefined
             ? ""
             : `<span class="badge timing${extraCls || ""}">${formatMs(ms)}</span>`;
-    const hasBoth =
-        e.transcript_ms !== null && e.transcript_ms !== undefined &&
-        e.shadow_ms !== null && e.shadow_ms !== undefined;
-    // Mark the slower of the two when both are known.
-    const primarySlower = hasBoth && e.transcript_ms > e.shadow_ms;
+    const known = (ms) => ms !== null && ms !== undefined;
+    const shadows = e.shadows || [];
+    // The answer is marked slower when any shadow beat it.
+    const primarySlower = known(e.transcript_ms) && shadows.some(
+        (sh) => !sh.error && known(sh.ms) && sh.ms < e.transcript_ms);
     const transcript = e.transcript
-        ? `<div class="transcript">${msBadge(e.transcript_ms, primarySlower && hasBoth ? " slower" : "")}&ldquo;${escapeHtml(e.transcript)}&rdquo;</div>`
+        ? `<div class="transcript">${msBadge(e.transcript_ms, primarySlower ? " slower" : "")}&ldquo;${escapeHtml(e.transcript)}&rdquo;</div>`
         : `<div class="transcript muted">${escapeHtml(t("rec.no_transcript"))}</div>`;
-    // A/B shadow engine result (filled in asynchronously). Highlight when
-    // the two engines disagree — that's the signal the A/B test is for.
-    let shadow = "";
-    if (e.shadow_transcript != null && e.shadow_engine) {
+    // Shadow services, filled in after the answer went out. A differing
+    // reading is highlighted — that is what the comparison is for.
+    const shadow = shadows.map((sh) => {
+        const label = `<span class="badge">${escapeHtml(t("rec.shadow"))} ${escapeHtml(sh.engine || "")}</span>`;
+        if (sh.error) {
+            return `<div class="transcript shadow differs">${label}
+                <span class="meta">✗ ${escapeHtml(sh.error)}</span></div>`;
+        }
         const same = (e.transcript || "").trim().toLowerCase()
-            === (e.shadow_transcript || "").trim().toLowerCase();
+            === (sh.transcript || "").trim().toLowerCase();
+        const both = known(e.transcript_ms) && known(sh.ms);
         let delta = "";
-        if (hasBoth) {
-            const diff = e.shadow_ms - e.transcript_ms;
+        if (both) {
+            const diff = sh.ms - e.transcript_ms;
             const key = diff >= 0 ? "rec.slower_by" : "rec.faster_by";
             delta = `<span class="meta"> ${escapeHtml(
                 t(key, { ms: formatMs(Math.abs(diff)) })
             )}</span>`;
         }
-        shadow = `<div class="transcript shadow${same ? "" : " differs"}">
-            <span class="badge">${escapeHtml(t("rec.shadow"))} ${escapeHtml(e.shadow_engine)}</span>
-            ${msBadge(e.shadow_ms, hasBoth && !primarySlower ? " slower" : "")}
-            &ldquo;${escapeHtml(e.shadow_transcript)}&rdquo;
+        return `<div class="transcript shadow${same ? "" : " differs"}">
+            ${label}
+            ${msBadge(sh.ms, both && sh.ms > e.transcript_ms ? " slower" : "")}
+            &ldquo;${escapeHtml(sh.transcript || "")}&rdquo;
             ${delta}
             ${same ? "" : `<span class="meta"> ${escapeHtml(t("rec.shadow_differs"))}</span>`}
         </div>`;
-    }
+    }).join("");
     // The room, not the entity id — the id is still there on hover for
     // anyone who needs it.
     const sat = e.satellite_id

@@ -975,3 +975,13 @@ button.chip:hover {
 button.secondary.active {
     border-color: var(--accent, #29b6f6);
 }
+
+/* A display rule on label/div must not defeat the hidden attribute —
+   the service form hides whole labels per kind. */
+[hidden] { display: none !important; }
+
+.svc-item .row { flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.svc-item h3 { margin: 0; }
+.svc-toggle { flex-direction: row; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
+.svc-form { margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--card-alt); }
+#stt-globals-form { margin-top: 1rem; }

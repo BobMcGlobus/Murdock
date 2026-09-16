@@ -103,6 +103,12 @@ async def export_backup(ctx: AppContext = Depends(get_context)):
             "settings.json",
             json.dumps(dump_settings(ctx.db), indent=2, ensure_ascii=False),
         )
+        # STT services, credentials included; the roles stored in
+        # settings.json refer to these ids.
+        zf.writestr(
+            "stt_services.json",
+            json.dumps(ctx.stt_services.dump(), indent=2, ensure_ascii=False),
+        )
 
         manifest = {
             "version": BACKUP_VERSION,
@@ -258,6 +264,18 @@ async def restore_backup(
             settings_data = json.loads(zf.read("settings.json"))
             if isinstance(settings_data, dict):
                 result.settings_restored = apply_settings(ctx.db, settings_data)
+                if "stt_services.json" in zf.namelist():
+                    rows = json.loads(zf.read("stt_services.json"))
+                    if isinstance(rows, list):
+                        ctx.stt_services.replace_all(rows)
+                else:
+                    # An archive from before services: its flat STT keys
+                    # were just restored, so derive services from them
+                    # unless this instance already has its own.
+                    from murdock.core.stt_services import migrate_legacy_settings
+
+                    migrate_legacy_settings(ctx.stt_services, ctx.db, ctx.settings)
+                ctx.sync_upstream_from_services()
                 ctx.speakers.threshold = ctx.get_verify_threshold()
                 ctx.load_calibration()
                 try:

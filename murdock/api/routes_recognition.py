@@ -32,12 +32,11 @@ class RecognitionEventOut(BaseModel):
     # Set when a captured (untagged) unknown sample exists for this
     # session, so the UI can offer "assign to speaker" on blocked entries.
     unknown_sample_id: Optional[int] = None
-    # A/B shadow engine result, filled in asynchronously.
-    shadow_transcript: Optional[str] = None
-    shadow_engine: Optional[str] = None
-    # Wall-clock time per STT engine, so the A/B view compares speed too.
+    # Wall-clock time of the answering STT service.
     transcript_ms: Optional[float] = None
-    shadow_ms: Optional[float] = None
+    # Each shadow service's reading, filled in after the answer went out:
+    # [{"service_id", "engine", "transcript", "ms", "error"}, ...]
+    shadows: List[dict] = []
     # {"ttfb_ms", "body_ms", "total_ms", "sent_bytes", "audio_ms", …}
     transcript_timing: Optional[dict] = None
     weight: Optional[float] = None
@@ -92,10 +91,8 @@ async def list_events(
                 verify_ms=e.verify_ms,
                 transcript=e.transcript,
                 unknown_sample_id=session_map.get(e.session_id),
-                shadow_transcript=e.shadow_transcript,
-                shadow_engine=e.shadow_engine,
                 transcript_ms=e.transcript_ms,
-                shadow_ms=e.shadow_ms,
+                shadows=e.shadows,
                 transcript_timing=e.transcript_timing,
                 weight=e.weight,
                 margin=e.margin,

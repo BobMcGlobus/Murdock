@@ -71,14 +71,17 @@ async def status(ctx: AppContext = Depends(get_context)):
     recent = ctx.recognition.list_events(limit=1)
     last_at = recent[0].created_at if recent else None
 
-    backend = ctx.get_stt_backend()
+    # The main service by the name it was given — "Kroko" says more than
+    # the protocol it speaks.
+    main = ctx.get_main_service()
+    backend = main.name if main is not None else ""
     mqtt_ok = bool(ctx.mqtt and ctx.mqtt.connected)
     ha_ok = bool(ctx.ha and ctx.ha.configured)
 
     setup = [
         SetupStep(
             key="stt",
-            done=True,
+            done=main is not None,
             detail=backend,
         ),
         SetupStep(

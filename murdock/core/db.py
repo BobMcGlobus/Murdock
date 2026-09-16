@@ -79,6 +79,33 @@ CREATE TABLE IF NOT EXISTS speaker_satellite_centroids (
     PRIMARY KEY (speaker_id, satellite_id)
 );
 
+-- Speech-to-text services, one row per configured connection. Roles
+-- (main, ordered fallbacks, shadows) live in the settings table and
+-- refer to these ids. Credentials sit in the config JSON and are never
+-- returned by the API.
+CREATE TABLE IF NOT EXISTS stt_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    created_at REAL NOT NULL
+);
+
+-- One row per shadow transcription of an utterance. The single
+-- shadow_* columns on recognition_events predate multiple shadows and
+-- stay readable for old rows.
+CREATE TABLE IF NOT EXISTS shadow_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    service_id INTEGER,
+    engine TEXT,
+    transcript TEXT,
+    ms REAL,
+    error TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shadow_results_event ON shadow_results(event_id);
+
 CREATE TABLE IF NOT EXISTS recognition_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at REAL NOT NULL,

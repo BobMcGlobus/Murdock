@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+**Speech-to-text engines are now services.** Every engine — a Wyoming
+server, an OpenAI-compatible API, Voxtral, a Home Assistant STT entity —
+is set up once under *Settings → Transcription* with its own name,
+address, key, model and optional timeout. Switching the engine that
+answers is one click; nothing has to be retyped.
+
+Each service takes roles:
+
+- **Main** — exactly one; it answers Home Assistant.
+- **Fallbacks** — an ordered chain, tried when the main fails. When a
+  service that needs the internet cannot even be reached, the remaining
+  internet fallbacks are skipped and the chain goes straight to the
+  local ones, so the offline fallback does not wait behind every dead
+  cloud timeout. *Ask the fallbacks when the main heard nothing* (on by
+  default) sends an empty answer down the chain as well; this replaces
+  "let the shadow answer when the primary heard nothing".
+- **Shadows** — any number, for benchmarking. They run only after the
+  answer has gone out, strictly one at a time, and wait while another
+  utterance is being transcribed, so they never slow the answer or skew
+  each other's timings. The recognition log lists every shadow's
+  transcript, time or error under the utterance.
+
+A **Test** button checks a service with what is in the form: Wyoming
+servers and Home Assistant are asked what they support (and whether your
+language is among it); HTTP APIs get one second of silence, which is a
+normal, billed request.
+
+The **dual transcript is removed**. Existing settings are converted once
+on first start: the backend becomes the main, the local fallback a
+Wyoming fallback, the A/B shadow a shadow (and also a fallback if the
+rescue was on). A stored-but-empty upstream address still means the
+add-on's `upstream_uri`, as it always did. The add-on's STT options now
+only seed the first service. Backups carry the services, keys included,
+in `stt_services.json`.
+
 ## 0.10.4
 
 **The transcription form had no Save button**, so the speech-to-text

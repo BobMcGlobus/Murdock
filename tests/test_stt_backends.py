@@ -1,4 +1,4 @@
-"""Tests for the OpenAI-compatible backend, fallback config and A/B shadow."""
+"""Tests for the OpenAI-compatible backend and how services build it."""
 
 from __future__ import annotations
 
@@ -133,26 +133,21 @@ def test_vocabulary_prompt_skipped_for_voxtral_and_openrouter():
     assert "prompt" not in orb._request_kwargs(b"RIFF", None)["json"]
 
 
+def _openai(ctx, model="whisper-large-v3-turbo", **cfg):
+    svc = ctx.stt_services.create("OpenAI", "openai", {"model": model, **cfg})
+    return lambda: ctx.build_stt_backend(ctx.stt_services.get(svc.id))
+
+
 def test_context_injects_vocabulary_into_openai_backend(tmp_path):
     ctx = _ctx(tmp_path)
-    ctx.set_openai_model("whisper-large-v3-turbo")
-    assert ctx.get_openai_backend().prompt is None
+    backend = _openai(ctx)
+    assert backend().prompt is None
     ctx.set_enable_stt_vocabulary(True)
     ctx.set_stt_vocabulary("Fehenlichter, Sat1")
-    assert ctx.get_openai_backend().prompt == "Fehenlichter, Sat1"
+    assert backend().prompt == "Fehenlichter, Sat1"
     # Toggle off → prompt gone even though the text stays stored.
     ctx.set_enable_stt_vocabulary(False)
-    assert ctx.get_openai_backend().prompt is None
-
-
-def test_dual_transcript_needs_shadow(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_enable_dual_transcript(True)
-    assert ctx.dual_transcript_active() is False  # no shadow engine
-    ctx.set_shadow_stt_backend("voxtral")
-    assert ctx.dual_transcript_active() is True
-    ctx.set_enable_dual_transcript(False)
-    assert ctx.dual_transcript_active() is False
+    assert backend().prompt is None
 
 
 def test_voxtral_is_openai_compatible():
@@ -169,115 +164,6 @@ def test_backend_raises_on_connection_failure():
     )
     with pytest.raises(STTBackendError):
         asyncio.run(b.transcribe(b"\x00\x00" * 16000))
-
-
-# --- context wiring -------------------------------------------------------------
-
-
-def test_stt_backend_accepts_openai(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_stt_backend("openai")
-    assert ctx.get_stt_backend() == "openai"
-    with pytest.raises(ValueError):
-        ctx.set_stt_backend("bogus")
-
-
-def test_active_cloud_backend_dispatch(tmp_path):
-    ctx = _ctx(tmp_path)
-    assert ctx.get_active_cloud_backend() is None  # upstream
-    ctx.set_stt_backend("voxtral")
-    assert isinstance(ctx.get_active_cloud_backend(), VoxtralBackend)
-    ctx.set_stt_backend("openai")
-    backend = ctx.get_active_cloud_backend()
-    assert isinstance(backend, OpenAICompatibleBackend)
-    assert backend.model == "gpt-4o-transcribe"
-
-
-def test_openai_backend_requires_model(tmp_path):
-    ctx = _ctx(tmp_path)
-    # No model anywhere (empty settings default, no override) → no backend.
-    ctx.settings.openai_model = ""
-    assert ctx.get_openai_backend() is None
-    ctx.set_openai_model("whisper-large-v3-turbo")
-    ctx.set_openai_base_url("https://api.groq.com/openai")
-    b = ctx.get_openai_backend()
-    assert b.base_url == "https://api.groq.com/openai"
-
-
-def test_local_fallback_round_trip(tmp_path):
-    ctx = _ctx(tmp_path)
-    assert ctx.get_stt_local_fallback() is False
-    ctx.set_stt_local_fallback(True)
-    assert ctx.get_stt_local_fallback() is True
-
-
-# --- shadow engine ---------------------------------------------------------------
-
-
-def test_shadow_backend_validation(tmp_path):
-    ctx = _ctx(tmp_path)
-    assert ctx.get_shadow_stt_backend() == "none"
-    ctx.set_shadow_stt_backend("voxtral")
-    assert ctx.get_shadow_stt_backend() == "voxtral"
-    with pytest.raises(ValueError):
-        ctx.set_shadow_stt_backend("bogus")
-
-
-def test_shadow_voxtral_uses_own_model_and_main_key(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_shadow_stt_backend("voxtral")
-    b = ctx.get_shadow_backend()
-    assert isinstance(b, VoxtralBackend)
-    assert b.model == "voxtral-small-latest"
-    assert b.api_key == "mk"  # primary Mistral key (fallback)
-
-
-def test_shadow_voxtral_own_key_wins(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_shadow_stt_backend("voxtral")
-    assert ctx.has_shadow_mistral_api_key() is False
-    ctx.set_shadow_mistral_api_key("shadow-mk")
-    assert ctx.has_shadow_mistral_api_key() is True
-    assert ctx.get_shadow_backend().api_key == "shadow-mk"
-    # Clearing falls back to the primary key again.
-    ctx.set_shadow_mistral_api_key("")
-    assert ctx.get_shadow_backend().api_key == "mk"
-
-
-def test_shadow_openai_key_falls_back_to_primary(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_openai_api_key("primary-key")
-    ctx.set_shadow_stt_backend("openai")
-    ctx.set_shadow_openai_model("whisper-large-v3-turbo")
-    b = ctx.get_shadow_backend()
-    assert b.api_key == "primary-key"
-    ctx.set_shadow_openai_api_key("own-key")
-    assert ctx.get_shadow_backend().api_key == "own-key"
-
-
-def test_shadow_upstream_uri_normalised(tmp_path):
-    ctx = _ctx(tmp_path)
-    ctx.set_shadow_upstream_uri("host:10301")
-    assert ctx.get_shadow_upstream_uri() == "tcp://host:10301"
-
-
-# --- recognition log shadow column -----------------------------------------------
-
-
-def test_set_shadow_round_trip(tmp_path):
-    conn = open_db(tmp_path / "m.db")
-    log = RecognitionLog(conn)
-    event_id = log.record(
-        session_id="s1", satellite_id=None, duration_sec=2.0,
-        outcome="match", transcript="licht an",
-    )
-    assert event_id > 0
-    assert log.set_shadow(event_id, "licht an bitte", "openai:whisper") is True
-    ev = log.list_events(limit=1)[0]
-    assert ev.shadow_transcript == "licht an bitte"
-    assert ev.shadow_engine == "openai:whisper"
-    # Unknown id → False.
-    assert log.set_shadow(999999, "x", "y") is False
 
 
 def test_defaults():
@@ -373,25 +259,59 @@ def test_timing_is_recorded_even_when_the_request_fails(monkeypatch):
 
     monkeypatch.setattr(mod.httpx, "AsyncClient", _Client)
     b = mod.OpenAICompatibleBackend(api_key="k", model="m")
-    with pytest.raises(mod.STTBackendError):
+    with pytest.raises(mod.STTNetworkError):
         asyncio.run(b.transcribe(b"\x00" * 3200))
-    assert b.last_timing["failed"] == "timeout"
+    assert b.last_timing["failed"] == "unreachable"
     assert b.last_timing["total_ms"] >= 0
+
+
+def test_a_slow_answer_is_a_timeout_not_an_outage(monkeypatch):
+    """Only a failed connect may make the fallback chain skip the cloud."""
+    import murdock.core.stt_backend as mod
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def build_request(self, *a, **kw):
+            return object()
+
+        async def send(self, request, stream=False):
+            raise mod.httpx.ReadTimeout("slow")
+
+    monkeypatch.setattr(mod.httpx, "AsyncClient", _Client)
+    b = mod.OpenAICompatibleBackend(api_key="k", model="m")
+    with pytest.raises(mod.STTBackendError) as err:
+        asyncio.run(b.transcribe(b"\x00" * 3200))
+    assert not isinstance(err.value, mod.STTNetworkError)
+    assert b.last_timing["failed"] == "timeout"
 
 
 def test_timeout_is_configurable_and_reaches_every_backend(tmp_path):
     """The old hard-coded 30s held the assistant for half a minute."""
     ctx = _ctx(tmp_path)
-    ctx.set_openai_model("whisper-large-v3-turbo")
-    ctx.set_mistral_api_key("k")
+    openai = _openai(ctx)
+    vox = ctx.stt_services.create("Voxtral", "voxtral", {"api_key": "k"})
+    voxtral = lambda: ctx.build_stt_backend(ctx.stt_services.get(vox.id))  # noqa: E731
     assert ctx.get_stt_timeout() == 8.0
-    assert ctx.get_openai_backend().timeout == 8.0
-    assert ctx.get_voxtral_backend().timeout == 8.0
+    assert openai().timeout == 8.0
+    assert voxtral().timeout == 8.0
 
     ctx.set_stt_timeout(3.5)
     assert ctx.get_stt_timeout() == 3.5
-    assert ctx.get_openai_backend().timeout == 3.5
-    assert ctx.get_voxtral_backend().timeout == 3.5
+    assert openai().timeout == 3.5
+    assert voxtral().timeout == 3.5
+
+    # A service's own timeout beats the default.
+    ctx.stt_services.update(vox.id, config={"timeout_sec": 12})
+    assert voxtral().timeout == 12.0
+    assert openai().timeout == 3.5
 
 
 def test_timeout_is_clamped_to_something_sane(tmp_path):
@@ -427,9 +347,9 @@ def test_full_language_tags_are_reduced_to_iso_639_1():
 def test_configured_language_fills_in_when_ha_sends_none(tmp_path):
     """An endpoint with no hint picks its own default, usually English."""
     ctx = _ctx(tmp_path)
-    ctx.set_openai_model("parakeet-tdt-0.6b-v3")
+    backend = _openai(ctx, "parakeet-tdt-0.6b-v3")
     assert ctx.get_stt_language() == "de"
-    assert ctx.get_openai_backend().language == "de"
+    assert backend().language == "de"
 
     # HA's value wins where it exists; the fallback covers its absence.
     b = OpenAICompatibleBackend(api_key="k", model="m", language="de")
@@ -437,26 +357,37 @@ def test_configured_language_fills_in_when_ha_sends_none(tmp_path):
     assert b._request_kwargs(b"RIFF", None)["data"].get("language") is None
 
     ctx.set_stt_language("")
-    assert ctx.get_openai_backend().language is None
+    assert backend().language is None
 
 
-def test_ping_accepts_an_unsaved_uri_to_test():
-    """The button sits beside the input, so it must test what was typed.
+def test_the_test_button_tries_what_the_form_holds(tmp_path, monkeypatch):
+    """The button sits beside the inputs, so it must test what was typed.
 
-    Pinging the stored value while the user looks at an edited field
+    Testing the stored value while the user looks at an edited field
     reads as "my input is being ignored" — which is exactly how it was
-    reported.
+    reported. An empty key field still means "the stored key".
     """
-    import inspect
+    import murdock.api.routes_stt_services as routes
 
-    from murdock.api.routes_settings import UpstreamPingIn, ping_upstream
+    seen = {}
 
-    assert "uri" in UpstreamPingIn.model_fields
-    # Optional body: no argument still pings the live URI.
-    params = inspect.signature(ping_upstream).parameters
-    assert params["body"].default is None
+    async def _transcribe(self, audio, **kw):
+        seen["model"], seen["key"] = self.model, self.api_key
+        return ""
 
-    from murdock.core.context import _normalize_wyoming_uri
+    monkeypatch.setattr(OpenAICompatibleBackend, "transcribe", _transcribe)
+    ctx = _ctx(tmp_path)
+    svc = ctx.stt_services.create("MAI", "openai", {"model": "old", "api_key": "stored"})
+    out = asyncio.run(routes.test_service(
+        routes.TestIn(id=svc.id, config={"model": "microsoft/mai-transcribe-2", "api_key": ""}),
+        ctx,
+    ))
+    assert out.ok is True
+    assert seen == {"model": "microsoft/mai-transcribe-2", "key": "stored"}
+    # Nothing was saved by testing.
+    assert ctx.stt_services.get(svc.id).config["model"] == "old"
+
+    from murdock.core.stt_services import _normalize_wyoming_uri
 
     # A bare host:port from the field grows the scheme before dialling.
     assert _normalize_wyoming_uri("192.168.2.25:10400") == "tcp://192.168.2.25:10400"

@@ -71,6 +71,11 @@ options:
   advertised_languages: "de,en"
   mqtt_enabled: true
 schema:
+  # The STT options below only seed the first speech-to-text service on
+  # the first start of 0.11 or later (or a fresh install). From then on,
+  # services are managed in the web UI under Settings → Transcription,
+  # and changing these options has no effect.
+  #
   # STT backend: "upstream" proxies to a Wyoming STT container, "voxtral"
   # sends audio to the Mistral Cloud API, "openai" to any OpenAI-compatible
   # /v1/audio/transcriptions endpoint (OpenAI, Groq, local speaches, …).

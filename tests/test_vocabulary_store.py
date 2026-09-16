@@ -239,18 +239,25 @@ def test_selection_ignores_terms_that_vanished(tmp_path):
 
 def test_backend_prompt_support_is_reported_honestly(tmp_path):
     ctx = _ctx(tmp_path)
+    from murdock.core.stt_services import SttRoles
+
+    store = ctx.stt_services
+
+    def main(kind, config):
+        svc = store.create(kind, kind, config)
+        store.set_roles(SttRoles(main=svc.id, fallbacks=[], shadows=[]))
+
     # The local upstream has no prompt field at all.
-    ctx.set_stt_backend("upstream")
+    main("wyoming", {"uri": "tcp://kroko:10300"})
     assert ctx.active_backend_supports_prompt() is False
     # Voxtral doesn't document one.
-    ctx.set_stt_backend("voxtral")
+    main("voxtral", {"api_key": "k"})
     assert ctx.active_backend_supports_prompt() is False
     # OpenAI-compatible does...
-    ctx.set_stt_backend("openai")
-    ctx.set_openai_base_url("https://api.openai.com")
+    main("openai", {"base_url": "https://api.openai.com", "api_key": "k", "model": "m"})
     assert ctx.active_backend_supports_prompt() is True
     # ...except OpenRouter, whose request shape skips it.
-    ctx.set_openai_base_url("https://openrouter.ai")
+    main("openai", {"base_url": "https://openrouter.ai", "api_key": "k", "model": "m"})
     assert ctx.active_backend_supports_prompt() is False
 
 

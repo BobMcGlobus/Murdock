@@ -94,25 +94,63 @@ def test_recognition_log_persists_stt_timings(tmp_path):
     assert row_id > 0
     ev = log.list_events(limit=1)[0]
     assert ev.transcript_ms == pytest.approx(412.5)
-    # The shadow arrives later, via set_shadow.
-    assert ev.shadow_ms is None
+    # Shadows arrive later, one row per service.
+    assert ev.shadows == []
 
-    assert log.set_shadow(row_id, "hallo!", "openai:whisper", 1183.0) is True
+    assert log.add_shadow_result(
+        row_id, service_id=3, engine="MAI", transcript="hallo!", ms=1183.0,
+    ) is True
+    assert log.add_shadow_result(
+        row_id, service_id=4, engine="Voxtral", transcript="", ms=None,
+        error="HTTP 401",
+    ) is True
     ev = log.list_events(limit=1)[0]
-    assert ev.shadow_transcript == "hallo!"
-    assert ev.shadow_ms == pytest.approx(1183.0)
+    assert [(x["engine"], x["transcript"], x["error"]) for x in ev.shadows] == [
+        ("MAI", "hallo!", None), ("Voxtral", "", "HTTP 401"),
+    ]
+    assert ev.shadows[0]["ms"] == pytest.approx(1183.0)
+    assert ev.shadows[1]["ms"] is None
 
 
-def test_set_shadow_without_timing_keeps_none(tmp_path):
+def test_a_shadow_for_a_trimmed_event_is_dropped(tmp_path):
     from murdock.core.db import open_db as _open
     from murdock.core.recognition_log import RecognitionLog
 
     log = RecognitionLog(_open(tmp_path / "t2.db"))
-    row_id = log.record(
-        session_id="s", satellite_id=None, duration_sec=1.0, outcome="match"
+    assert log.add_shadow_result(
+        999999, service_id=1, engine="x", transcript="y", ms=1.0,
+    ) is False
+
+
+def test_clearing_the_log_clears_its_shadows(tmp_path):
+    from murdock.core.db import open_db as _open
+    from murdock.core.recognition_log import RecognitionLog
+
+    conn = _open(tmp_path / "t4.db")
+    log = RecognitionLog(conn)
+    row_id = log.record(session_id="s", satellite_id=None, duration_sec=1.0, outcome="match")
+    log.add_shadow_result(row_id, service_id=1, engine="x", transcript="y", ms=1.0)
+    log.clear()
+    assert conn.execute("SELECT COUNT(*) FROM shadow_results").fetchone()[0] == 0
+
+
+def test_an_old_single_shadow_reads_like_the_new_ones(tmp_path):
+    """Events logged before 0.11 keep their one shadow in the log view."""
+    from murdock.core.db import open_db as _open
+    from murdock.core.recognition_log import RecognitionLog
+
+    conn = _open(tmp_path / "t5.db")
+    log = RecognitionLog(conn)
+    row_id = log.record(session_id="s", satellite_id=None, duration_sec=1.0, outcome="match")
+    conn.execute(
+        "UPDATE recognition_events SET shadow_transcript = ?, shadow_engine = ?, "
+        "shadow_ms = ? WHERE id = ?", ("hallo", "voxtral:voxtral-small-latest", 900.0, row_id),
     )
-    log.set_shadow(row_id, "text", "engine")
-    assert log.list_events(limit=1)[0].shadow_ms is None
+    conn.commit()
+    [shadow] = log.list_events(limit=1)[0].shadows
+    assert shadow["engine"] == "voxtral:voxtral-small-latest"
+    assert shadow["transcript"] == "hallo"
+    assert shadow["ms"] == pytest.approx(900.0)
 
 
 def test_recognition_api_exposes_timings(tmp_path):
@@ -130,7 +168,7 @@ def test_recognition_api_exposes_timings(tmp_path):
         outcome="match", matched_speaker="Jonas", transcript="hi",
         transcript_ms=300.0, weight=1.0, margin=0.2,
     )
-    log.set_shadow(row_id, "hi", "shadow-engine", 900.0)
+    log.add_shadow_result(row_id, service_id=2, engine="Voxtral", transcript="hi", ms=900.0)
 
     ctx = SimpleNamespace(
         recognition=log,
@@ -141,6 +179,7 @@ def test_recognition_api_exposes_timings(tmp_path):
     out = asyncio.run(list_events(limit=10, outcome=None, speaker=None, ctx=ctx))
     ev = out.events[0]
     assert ev.transcript_ms == pytest.approx(300.0)
-    assert ev.shadow_ms == pytest.approx(900.0)
+    assert ev.shadows[0]["engine"] == "Voxtral"
+    assert ev.shadows[0]["ms"] == pytest.approx(900.0)
     assert ev.weight == pytest.approx(1.0)
     assert ev.margin == pytest.approx(0.2)

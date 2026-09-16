@@ -51,8 +51,6 @@ class SettingsOut(BaseModel):
     silence_abort_sec: float = 3.0
     stt_timeout_sec: float = 8.0
     stt_language: str = "de"
-    ha_stt_entity: str = ""
-    shadow_rescues_empty: bool = True
     extraction_threshold: float = 0.25
     extraction_min_region_sec: float = 0.6
     enable_calibration: bool = True
@@ -72,8 +70,6 @@ class SettingsOut(BaseModel):
     transcript_template_known: str = ""
     transcript_template_unknown: str = ""
     upstream_uri: str
-    upstream_uri_default: str
-    upstream_uri_source: str  # "env" | "override"
     listen_uri: str
     ha_configured: bool
     ha_url: str = ""
@@ -84,29 +80,11 @@ class SettingsOut(BaseModel):
     ha_distance_entity: str = ""
     ha_nearest_entity: str = ""
     ha_role_entity: str = ""
-    stt_backend: str = "upstream"  # "upstream" | "voxtral" | "openai"
-    mistral_api_key_set: bool = False
-    mistral_model: str = "voxtral-mini-latest"
-    # OpenAI-compatible cloud backend (OpenAI, Groq, local speaches, …)
-    openai_base_url: str = "https://api.openai.com"
-    openai_api_key_set: bool = False
-    openai_model: str = "gpt-4o-transcribe"
-    # Local Wyoming fallback for cloud backend failures
-    stt_local_fallback: bool = False
-    # A/B shadow engine (transcript logged, never returned via Wyoming)
-    shadow_stt_backend: str = "none"  # none | upstream | voxtral | openai
-    shadow_upstream_uri: str = ""
-    shadow_mistral_model: str = "voxtral-small-latest"
-    shadow_mistral_api_key_set: bool = False
-    shadow_openai_base_url: str = ""
-    shadow_openai_api_key_set: bool = False
-    shadow_openai_model: str = ""
     # Transcript quality tiers
     enable_stt_vocabulary: bool = False
     stt_vocabulary: str = ""
     enable_stt_dictionary: bool = False
     stt_dictionary: str = ""
-    enable_dual_transcript: bool = False
     # MQTT integration (recommended over the REST/token path)
     mqtt_enabled: bool = False
     mqtt_host: str = ""
@@ -150,8 +128,6 @@ class SettingsPatch(BaseModel):
     silence_abort_sec: Optional[float] = Field(default=None, ge=0.0, le=30.0)
     stt_timeout_sec: Optional[float] = Field(default=None, ge=1.0, le=120.0)
     stt_language: Optional[str] = None
-    ha_stt_entity: Optional[str] = None
-    shadow_rescues_empty: Optional[bool] = None
     extraction_threshold: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     extraction_min_region_sec: Optional[float] = Field(default=None, ge=0.0, le=5.0)
     enable_calibration: Optional[bool] = None
@@ -163,10 +139,6 @@ class SettingsPatch(BaseModel):
     transcript_hint_mode: Optional[str] = None
     transcript_template_known: Optional[str] = None
     transcript_template_unknown: Optional[str] = None
-    # None → field not touched
-    # ""   → clear override, fall back to env default
-    # "…"  → set override (host:port accepted, tcp:// auto-prefixed)
-    upstream_uri: Optional[str] = None
     # None  → field not touched
     # []    → clear override, fall back to upstream auto-detect
     # [...] → hard override
@@ -183,26 +155,10 @@ class SettingsPatch(BaseModel):
     # no model is on disk is harmless — the handler gates on both flag AND
     # model availability before attempting inference.
     quality_weights: Optional[dict] = None  # {"speech_ratio":0.25,...} — pass {} to reset
-    # STT backend selection
-    stt_backend: Optional[str] = None  # "upstream" | "voxtral" | "openai"
-    mistral_api_key: Optional[str] = None
-    mistral_model: Optional[str] = None
-    openai_base_url: Optional[str] = None
-    openai_api_key: Optional[str] = None
-    openai_model: Optional[str] = None
-    stt_local_fallback: Optional[bool] = None
-    shadow_stt_backend: Optional[str] = None
-    shadow_upstream_uri: Optional[str] = None
-    shadow_mistral_model: Optional[str] = None
-    shadow_mistral_api_key: Optional[str] = None
-    shadow_openai_base_url: Optional[str] = None
-    shadow_openai_api_key: Optional[str] = None
-    shadow_openai_model: Optional[str] = None
     enable_stt_vocabulary: Optional[bool] = None
     stt_vocabulary: Optional[str] = None
     enable_stt_dictionary: Optional[bool] = None
     stt_dictionary: Optional[str] = None
-    enable_dual_transcript: Optional[bool] = None
     # MQTT integration
     mqtt_enabled: Optional[bool] = None
     mqtt_host: Optional[str] = None
@@ -253,8 +209,6 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         silence_abort_sec=ctx.get_silence_abort_sec(),
         stt_timeout_sec=ctx.get_stt_timeout(),
         stt_language=ctx.get_stt_language(),
-        ha_stt_entity=ctx.get_ha_stt_entity(),
-        shadow_rescues_empty=ctx.get_shadow_rescues_empty(),
         extraction_threshold=ctx.get_extraction_threshold(),
         extraction_min_region_sec=ctx.get_extraction_min_region_sec(),
         enable_calibration=ctx.get_enable_calibration(),
@@ -273,28 +227,11 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         transcript_template_known=ctx.get_transcript_template_known(),
         transcript_template_unknown=ctx.get_transcript_template_unknown(),
         upstream_uri=ctx.get_upstream_uri(),
-        upstream_uri_default=ctx.settings.upstream_uri,
-        upstream_uri_source=ctx.get_upstream_uri_source(),
         listen_uri=ctx.settings.listen_uri,
-        stt_backend=ctx.get_stt_backend(),
-        mistral_api_key_set=ctx.has_mistral_api_key(),
-        mistral_model=ctx.get_mistral_model(),
-        openai_base_url=ctx.get_openai_base_url(),
-        openai_api_key_set=ctx.has_openai_api_key(),
-        openai_model=ctx.get_openai_model(),
-        stt_local_fallback=ctx.get_stt_local_fallback(),
-        shadow_stt_backend=ctx.get_shadow_stt_backend(),
-        shadow_upstream_uri=ctx.get_shadow_upstream_uri(),
-        shadow_mistral_model=ctx.get_shadow_mistral_model(),
-        shadow_mistral_api_key_set=ctx.has_shadow_mistral_api_key(),
-        shadow_openai_base_url=ctx.get_shadow_openai_base_url(),
-        shadow_openai_api_key_set=ctx.has_shadow_openai_api_key(),
-        shadow_openai_model=ctx.get_shadow_openai_model(),
         enable_stt_vocabulary=ctx.get_enable_stt_vocabulary(),
         stt_vocabulary=ctx.get_stt_vocabulary(),
         enable_stt_dictionary=ctx.get_enable_stt_dictionary(),
         stt_dictionary=ctx.get_stt_dictionary(),
-        enable_dual_transcript=ctx.get_enable_dual_transcript(),
         mqtt_enabled=ctx.get_mqtt_enabled(),
         mqtt_host=ctx.get_mqtt_host(),
         mqtt_port=ctx.get_mqtt_port(),
@@ -374,10 +311,6 @@ async def patch_settings(
         ctx.set_stt_timeout(body.stt_timeout_sec)
     if body.stt_language is not None:
         ctx.set_stt_language(body.stt_language)
-    if body.ha_stt_entity is not None:
-        ctx.set_ha_stt_entity(body.ha_stt_entity)
-    if body.shadow_rescues_empty is not None:
-        ctx.set_shadow_rescues_empty(body.shadow_rescues_empty)
     if body.extraction_threshold is not None:
         ctx.set_extraction_threshold(body.extraction_threshold)
     if body.extraction_min_region_sec is not None:
@@ -406,8 +339,6 @@ async def patch_settings(
         ctx.set_transcript_template_known(body.transcript_template_known)
     if body.transcript_template_unknown is not None:
         ctx.set_transcript_template_unknown(body.transcript_template_unknown)
-    if body.upstream_uri is not None:
-        ctx.set_upstream_uri(body.upstream_uri)
     if body.advertised_languages is not None:
         # An empty list means "clear override" — fall through to
         # upstream auto-detect. A non-empty list is a hard override.
@@ -447,37 +378,6 @@ async def patch_settings(
             ctx.set_quality_weights(None)
         else:
             ctx.set_quality_weights(body.quality_weights)
-    # STT backend selection
-    if body.stt_backend is not None:
-        try:
-            ctx.set_stt_backend(body.stt_backend)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if body.openai_base_url is not None:
-        ctx.set_openai_base_url(body.openai_base_url)
-    if body.openai_api_key is not None:
-        ctx.set_openai_api_key(body.openai_api_key)
-    if body.openai_model is not None:
-        ctx.set_openai_model(body.openai_model)
-    if body.stt_local_fallback is not None:
-        ctx.set_stt_local_fallback(body.stt_local_fallback)
-    if body.shadow_stt_backend is not None:
-        try:
-            ctx.set_shadow_stt_backend(body.shadow_stt_backend)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-    if body.shadow_upstream_uri is not None:
-        ctx.set_shadow_upstream_uri(body.shadow_upstream_uri)
-    if body.shadow_mistral_model is not None:
-        ctx.set_shadow_mistral_model(body.shadow_mistral_model)
-    if body.shadow_mistral_api_key is not None:
-        ctx.set_shadow_mistral_api_key(body.shadow_mistral_api_key)
-    if body.shadow_openai_base_url is not None:
-        ctx.set_shadow_openai_base_url(body.shadow_openai_base_url)
-    if body.shadow_openai_api_key is not None:
-        ctx.set_shadow_openai_api_key(body.shadow_openai_api_key)
-    if body.shadow_openai_model is not None:
-        ctx.set_shadow_openai_model(body.shadow_openai_model)
     if body.enable_stt_vocabulary is not None:
         ctx.set_enable_stt_vocabulary(body.enable_stt_vocabulary)
     if body.stt_vocabulary is not None:
@@ -486,12 +386,6 @@ async def patch_settings(
         ctx.set_enable_stt_dictionary(body.enable_stt_dictionary)
     if body.stt_dictionary is not None:
         ctx.set_stt_dictionary(body.stt_dictionary)
-    if body.enable_dual_transcript is not None:
-        ctx.set_enable_dual_transcript(body.enable_dual_transcript)
-    if body.mistral_api_key is not None:
-        ctx.set_mistral_api_key(body.mistral_api_key)
-    if body.mistral_model is not None:
-        ctx.set_mistral_model(body.mistral_model)
     # MQTT settings — restart the client when any of them change.
     mqtt_changed = False
     if body.mqtt_enabled is not None:
@@ -518,80 +412,6 @@ async def patch_settings(
     if mqtt_changed:
         await ctx.apply_mqtt_settings()
     return _build_settings_out(ctx)
-
-
-class UpstreamPingOut(BaseModel):
-    ok: bool
-    upstream_uri: str
-    latency_ms: Optional[float] = None
-    languages: List[str] = Field(default_factory=list)
-    error: Optional[str] = None
-
-
-class UpstreamPingIn(BaseModel):
-    # A URI to test *instead of* the stored one, so the button beside the
-    # input tests what was typed. Pinging the saved value while the user
-    # looks at an edited field reads as "the field is being ignored".
-    uri: Optional[str] = None
-
-
-@router.post("/ping-upstream", response_model=UpstreamPingOut)
-async def ping_upstream(
-    body: Optional[UpstreamPingIn] = None,
-    ctx: AppContext = Depends(get_context),
-):
-    """Open a Wyoming connection to an upstream STT and describe it.
-
-    Pure diagnostic endpoint: lets the user verify from the Settings tab
-    that Murdock can actually reach its upstream, instead of having to
-    interpret the container logs. With no body it tests the live URI (UI
-    override > compose default), which is what the handler would use.
-    """
-    import time as _time
-
-    from wyoming.client import AsyncClient
-    from wyoming.info import Describe, Info
-
-    from murdock.core.context import _normalize_wyoming_uri
-
-    candidate = (body.uri or "").strip() if body else ""
-    upstream_uri = (
-        _normalize_wyoming_uri(candidate) if candidate else ctx.get_upstream_uri()
-    )
-    t0 = _time.monotonic()
-    try:
-        async with AsyncClient.from_uri(upstream_uri) as client:
-            await client.write_event(Describe().event())
-            # Bounded wait: the upstream should respond within a second.
-            deadline = _time.monotonic() + 5.0
-            langs: List[str] = []
-            while _time.monotonic() < deadline:
-                event = await asyncio.wait_for(
-                    client.read_event(),
-                    timeout=max(0.1, deadline - _time.monotonic()),
-                )
-                if event is None:
-                    break
-                if Info.is_type(event.type):
-                    info = Info.from_event(event)
-                    for asr in info.asr:
-                        for model in asr.models:
-                            for lang in model.languages:
-                                if lang and lang not in langs:
-                                    langs.append(lang)
-                    break
-            latency_ms = (_time.monotonic() - t0) * 1000
-            return UpstreamPingOut(
-                ok=True,
-                upstream_uri=upstream_uri,
-                latency_ms=latency_ms,
-                languages=langs,
-            )
-    except Exception as exc:
-        _LOGGER.warning("ping-upstream failed: %s", exc)
-        return UpstreamPingOut(
-            ok=False, upstream_uri=upstream_uri, error=str(exc)
-        )
 
 
 @router.post("/refresh-languages", response_model=SettingsOut)
@@ -735,79 +555,6 @@ async def recalibrate(ctx: AppContext = Depends(get_context)):
 class HATestOut(BaseModel):
     ok: bool
     error: Optional[str] = None
-
-
-class HASTTTestIn(BaseModel):
-    # Test an entity that has not been saved yet, the way the upstream
-    # ping does — otherwise the button reports on the old value while
-    # the user looks at an edited field.
-    entity_id: Optional[str] = None
-
-
-class HASTTTestOut(BaseModel):
-    ok: bool
-    entity_id: str = ""
-    languages: List[str] = Field(default_factory=list)
-    language_ok: Optional[bool] = None
-    configured_language: str = ""
-    formats: List[str] = Field(default_factory=list)
-    error: Optional[str] = None
-
-
-@router.post("/test-ha-stt", response_model=HASTTTestOut)
-async def test_ha_stt(
-    body: Optional[HASTTTestIn] = None,
-    ctx: AppContext = Depends(get_context),
-):
-    """Ask Home Assistant what a speech-to-text entity accepts.
-
-    Home Assistant answers an unsupported combination with a bare 415 and
-    no explanation, so "it doesn't work" is otherwise unfalsifiable. This
-    reports the entity's own supported languages and whether the
-    configured one is among them.
-    """
-    from murdock.core.stt_backend import (
-        HomeAssistantSTTBackend,
-        STTBackendError,
-        _normalize_language,
-    )
-
-    entity = ((body.entity_id if body else None) or ctx.get_ha_stt_entity()).strip()
-    lang = ctx.get_stt_language() or ""
-    if not entity:
-        return HASTTTestOut(
-            ok=False, configured_language=lang,
-            error="no entity configured",
-        )
-    backend = HomeAssistantSTTBackend(
-        base_url=ctx.ha.base_url or "",
-        token=ctx.ha.token or "",
-        entity_id=entity,
-        timeout=ctx.get_stt_timeout(),
-    )
-    try:
-        caps = await backend.capabilities()
-    except STTBackendError as exc:
-        return HASTTTestOut(
-            ok=False, entity_id=entity, configured_language=lang, error=str(exc)
-        )
-
-    languages = [str(x) for x in (caps.get("languages") or [])]
-    formats = [str(x) for x in (caps.get("formats") or [])]
-    # Home Assistant lists full locales; Murdock stores a bare code and
-    # grows it at send time, so compare on the primary subtag.
-    want = _normalize_language(lang)
-    language_ok = None
-    if want and languages:
-        language_ok = any(_normalize_language(x) == want for x in languages)
-    return HASTTTestOut(
-        ok=True,
-        entity_id=entity,
-        languages=languages,
-        language_ok=language_ok,
-        configured_language=lang,
-        formats=formats,
-    )
 
 
 @router.post("/test-ha", response_model=HATestOut)

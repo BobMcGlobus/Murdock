@@ -16,6 +16,7 @@ from murdock.config import Settings
 from murdock.core.context import AppContext
 from murdock.core.db import open_db
 from murdock.core.stt_backend import HomeAssistantSTTBackend, STTBackendError
+from murdock.core.stt_services import SttRoles
 
 
 def _backend(**kw):
@@ -64,28 +65,33 @@ def _ctx(tmp_path, entity, ha_ok=True):
                            token="tok" if ha_ok else ""),
         mqtt=None, recognition=None,
     )
-    ctx.set_ha_stt_entity(entity)
+    ctx.stt_services.create("HA Cloud", "ha", {"entity_id": entity})
     return ctx
+
+
+def _built(ctx):
+    [svc] = ctx.stt_services.list()
+    return ctx.build_stt_backend(svc)
 
 
 def test_pointing_it_at_murdock_itself_is_refused(tmp_path):
     """Murdock is an STT provider in HA; this would call itself forever."""
-    assert _ctx(tmp_path, "stt.murdock").get_ha_stt_backend() is None
-    assert _ctx(tmp_path, "stt.Murdock_Proxy").get_ha_stt_backend() is None
+    assert _built(_ctx(tmp_path / "a", "stt.murdock")) is None
+    assert _built(_ctx(tmp_path / "b", "stt.Murdock_Proxy")) is None
     # A real entity still works.
-    assert _ctx(tmp_path, "stt.home_assistant_cloud").get_ha_stt_backend()
+    assert _built(_ctx(tmp_path / "c", "stt.home_assistant_cloud"))
 
 
 def test_no_backend_without_home_assistant_credentials(tmp_path):
-    assert _ctx(tmp_path, "stt.home_assistant_cloud", ha_ok=False) \
-        .get_ha_stt_backend() is None
-    assert _ctx(tmp_path, "").get_ha_stt_backend() is None
+    assert _built(_ctx(tmp_path / "a", "stt.home_assistant_cloud", ha_ok=False)) is None
+    assert _built(_ctx(tmp_path / "b", "")) is None
 
 
 def test_it_is_selectable_as_a_backend(tmp_path):
     ctx = _ctx(tmp_path, "stt.home_assistant_cloud")
-    assert "ha" in ctx.STT_BACKENDS
-    ctx.set_stt_backend("ha")
+    [svc] = ctx.stt_services.list()
+    ctx.stt_services.set_roles(SttRoles(main=svc.id, fallbacks=[], shadows=[]))
+    assert ctx.get_stt_backend() == "ha"
     assert ctx.get_active_cloud_backend() is not None
 
 
@@ -135,10 +141,10 @@ def test_the_probe_says_which_part_is_missing(tmp_path):
     """'It doesn't work' has three causes; the test must name one."""
     import asyncio
 
-    from murdock.api.routes_settings import test_ha_stt
+    from murdock.api.routes_stt_services import TestIn, test_service
 
-    out = asyncio.run(test_ha_stt(None, _ctx(tmp_path, "")))
-    assert out.ok is False and "entity" in (out.error or "")
+    out = asyncio.run(test_service(TestIn(kind="ha", config={"entity_id": ""}), _ctx(tmp_path, "")))
+    assert out.ok is False and "incomplete" in (out.error or "")
 
 
 def test_a_language_mismatch_is_named_rather_than_a_bare_415(monkeypatch, tmp_path):
@@ -146,7 +152,7 @@ def test_a_language_mismatch_is_named_rather_than_a_bare_415(monkeypatch, tmp_pa
     import asyncio
 
     import murdock.core.stt_backend as mod
-    from murdock.api.routes_settings import test_ha_stt
+    from murdock.api.routes_stt_services import TestIn, test_service
 
     async def _caps(self):
         return {"languages": ["en-US", "en-GB"], "formats": ["wav"]}
@@ -154,7 +160,9 @@ def test_a_language_mismatch_is_named_rather_than_a_bare_415(monkeypatch, tmp_pa
     monkeypatch.setattr(mod.HomeAssistantSTTBackend, "capabilities", _caps)
     ctx = _ctx(tmp_path, "stt.home_assistant_cloud")
     ctx.set_stt_language("de")
-    out = asyncio.run(test_ha_stt(None, ctx))
+    [svc] = ctx.stt_services.list()
+    probe = TestIn(id=svc.id)
+    out = asyncio.run(test_service(probe, ctx))
     assert out.ok is True
     assert out.language_ok is False
     assert "en-US" in out.languages
@@ -165,4 +173,4 @@ def test_a_language_mismatch_is_named_rather_than_a_bare_415(monkeypatch, tmp_pa
         return {"languages": ["de-DE", "en-US"], "formats": ["wav"]}
 
     monkeypatch.setattr(mod.HomeAssistantSTTBackend, "capabilities", _caps_de)
-    assert asyncio.run(test_ha_stt(None, ctx)).language_ok is True
+    assert asyncio.run(test_service(probe, ctx)).language_ok is True
