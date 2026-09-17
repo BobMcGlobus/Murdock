@@ -11,15 +11,19 @@ from murdock.core.db import open_db
 from murdock.core.transcript_tools import (
     HINT_ADDITIONAL,
     HINT_ALTERNATIVE,
-    HINT_READING,
     apply_correction_dictionary,
     apply_correction_dictionary_ex,
-    merge_transcripts,
-    merge_transcripts_ex,
     parse_correction_dictionary,
     render_hints,
     resolve_hints,
+    TranscriptHint,
+    TranscriptResult,
 )
+
+
+def _hinted(text, rule):
+    """A result with one alternative-reading hint, from an annotate rule."""
+    return apply_correction_dictionary_ex(text, parse_correction_dictionary(rule))
 
 
 def _ctx(tmp_path, *, mqtt_connected=False, ha_configured=False):
@@ -69,48 +73,8 @@ def test_legacy_dictionary_wrapper_unchanged():
     )
 
 
-# ----------------------------------------------------------------------
-# Merge: hints carry the exact spans
-# ----------------------------------------------------------------------
-
-
-def test_merge_replace_yields_hint():
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
-    assert r.clean == "mach das Licht an"
-    assert "[oder: Nicht]" in r.annotated
-    assert [(h.original, h.alternative) for h in r.hints] == [("Licht", "Nicht")]
-
-
-def test_merge_insert_yields_additional_hint():
-    r = merge_transcripts_ex("mach das Licht an", "mach das Licht nicht an")
-    assert r.clean == "mach das Licht an"
-    hint = r.hints[0]
-    assert hint.kind == HINT_ADDITIONAL
-    assert hint.original == ""
-    assert hint.alternative == "nicht"
-
-
-def test_merge_divergent_yields_reading_hint():
-    r = merge_transcripts_ex("mach das Licht an", "wie ist das Wetter morgen")
-    assert r.clean == "mach das Licht an"
-    assert r.hints[0].kind == HINT_READING
-    assert "alternative Lesart" in r.annotated
-
-
-def test_merge_identical_has_no_hints():
-    r = merge_transcripts_ex("mach das Licht an", "Mach das licht an!")
-    assert r.hints == []
-    assert r.clean == r.annotated == "mach das Licht an"
-
-
-def test_legacy_merge_wrapper_unchanged():
-    assert merge_transcripts("mach das Licht an", "mach das Nicht an") == (
-        "mach das Licht [oder: Nicht] an"
-    )
-
-
 def test_render_hints_shape():
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
+    r = _hinted("mach das Licht an", "Licht ~> Nicht")
     assert render_hints(r.hints) == [
         {"original": "Licht", "alternative": "Nicht", "kind": "alternative"}
     ]
@@ -122,8 +86,7 @@ def test_render_hints_shape():
 
 
 def test_resolve_hints_rewrites_to_known_entity():
-    r = merge_transcripts_ex("schalte Bad-Lightstrip ein",
-                             "schalte Bed-Lightstrip ein")
+    r = _hinted("schalte Bad-Lightstrip ein", "Bad-Lightstrip ~> Bed-Lightstrip")
     resolved = resolve_hints(r, ["Bed-Lightstrip", "Deckenlampe"])
     # Exactly one reading is a real entity → decided, not marked.
     assert resolved.clean == "schalte Bed-Lightstrip ein"
@@ -131,15 +94,14 @@ def test_resolve_hints_rewrites_to_known_entity():
 
 
 def test_resolve_hints_drops_when_heard_reading_is_the_entity():
-    r = merge_transcripts_ex("schalte Bed-Lightstrip ein",
-                             "schalte Bad-Lightstrip ein")
+    r = _hinted("schalte Bed-Lightstrip ein", "Bed-Lightstrip ~> Bad-Lightstrip")
     resolved = resolve_hints(r, ["Bed-Lightstrip"])
     assert resolved.clean == "schalte Bed-Lightstrip ein"
     assert resolved.hints == []
 
 
 def test_resolve_hints_keeps_genuine_ambiguity():
-    r = merge_transcripts_ex("schalte Bett-Licht ein", "schalte Bad-Licht ein")
+    r = _hinted("schalte Bett-Licht ein", "Bett-Licht ~> Bad-Licht")
     # Both are entities → genuinely ambiguous, keep the hint.
     resolved = resolve_hints(r, ["Bett-Licht", "Bad-Licht"])
     assert len(resolved.hints) == 1
@@ -149,13 +111,17 @@ def test_resolve_hints_keeps_genuine_ambiguity():
 
 
 def test_resolve_hints_without_vocabulary_is_noop():
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
+    r = _hinted("mach das Licht an", "Licht ~> Nicht")
     assert resolve_hints(r, None) is r
     assert resolve_hints(r, []) is r
 
 
 def test_resolve_hints_ignores_non_alternative_kinds():
-    r = merge_transcripts_ex("mach das Licht an", "mach das Licht nicht an")
+    r = TranscriptResult(
+        clean="mach das Licht an",
+        annotated="mach das Licht an [oder zusätzlich: nicht]",
+        hints=[TranscriptHint(original="", alternative="nicht", kind=HINT_ADDITIONAL)],
+    )
     resolved = resolve_hints(r, ["nicht"])
     assert len(resolved.hints) == 1
 
@@ -213,7 +179,7 @@ def _deliver(ctx, result, label="test"):
 
 def test_deliver_inline_keeps_markers(tmp_path):
     ctx = _ctx(tmp_path)
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
+    r = _hinted("mach das Licht an", "Licht ~> Nicht")
     text, hints = _deliver(ctx, r)
     assert text == r.annotated
     assert hints == []
@@ -222,7 +188,7 @@ def test_deliver_inline_keeps_markers(tmp_path):
 def test_deliver_sidecar_moves_hints_out(tmp_path):
     ctx = _ctx(tmp_path)
     ctx.set_transcript_hint_mode("sidecar")
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
+    r = _hinted("mach das Licht an", "Licht ~> Nicht")
     text, hints = _deliver(ctx, r)
     assert text == "mach das Licht an"
     assert "[oder:" not in text
@@ -234,7 +200,7 @@ def test_deliver_sidecar_moves_hints_out(tmp_path):
 def test_deliver_clean_drops_hints(tmp_path):
     ctx = _ctx(tmp_path)
     ctx.set_transcript_hint_mode("clean")
-    r = merge_transcripts_ex("mach das Licht an", "mach das Nicht an")
+    r = _hinted("mach das Licht an", "Licht ~> Nicht")
     text, hints = _deliver(ctx, r)
     assert text == "mach das Licht an"
     assert hints == []
@@ -248,8 +214,7 @@ def test_deliver_sidecar_resolves_against_vocabulary(tmp_path):
             {"entity_id": "light.bed", "name": "Bed-Lightstrip", "aliases": []}
         ]}
     )
-    r = merge_transcripts_ex("schalte Bad-Lightstrip ein",
-                             "schalte Bed-Lightstrip ein")
+    r = _hinted("schalte Bad-Lightstrip ein", "Bad-Lightstrip ~> Bed-Lightstrip")
     text, hints = _deliver(ctx, r)
     # Decided, not marked: clean text carries the real entity name.
     assert text == "schalte Bed-Lightstrip ein"

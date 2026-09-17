@@ -1,7 +1,8 @@
-"""Transcript post-processing: correction dictionary and dual-engine merge.
+"""Transcript post-processing: the correction dictionary and its hints.
 
-Two of the three weapons against systematic STT mistakes (the third —
-vocabulary biasing via the backend ``prompt`` — lives in stt_backend):
+One of the weapons against systematic STT mistakes (vocabulary biasing
+via the backend ``prompt`` lives in stt_backend, fuzzy name correction
+in canonicalizer):
 
 * **Correction dictionary** — user-maintained list of known
   misrecognitions. Each entry either *replaces* the wrong phrase with
@@ -10,22 +11,14 @@ vocabulary biasing via the backend ``prompt`` — lives in stt_backend):
   Lichter") or *annotates* it with the likely correction as an
   alternative reading for an LLM agent.
 
-* **Dual-transcript merge** — align the primary and shadow engines'
-  transcripts word-by-word and mark disagreements inline as
-  ``primary [oder: shadow]``. Engines fail on *different* words, so
-  the union carries strictly more information than either alone; the
-  conversation agent picks the reading that makes sense.
-
-Both are pure text functions, deliberately free of any Murdock state so
+These are pure text functions, deliberately free of any Murdock state so
 they are trivially testable.
 """
 
 from __future__ import annotations
 
-import difflib
 import logging
 import re
-import string
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -35,8 +28,9 @@ MODE_REPLACE = "replace"
 MODE_ANNOTATE = "annotate"
 
 # Hint kinds (plan §13). "alternative" = a different reading of the same
-# span, "additional" = words only one engine heard, "reading" = the two
-# transcripts diverged too far to align word-wise.
+# span. "additional" and "reading" came from the removed dual-transcript
+# merge; they stay defined because the HA integration still understands
+# them and events from older versions may carry them.
 HINT_ALTERNATIVE = "alternative"
 HINT_ADDITIONAL = "additional"
 HINT_READING = "reading"
@@ -78,9 +72,7 @@ _SEP_RE = re.compile(r"\s*(->|~>)\s*")
 
 # Below this SequenceMatcher ratio the transcripts are considered too
 # different for a word merge — show both readings whole instead.
-_MERGE_MIN_SIMILARITY = 0.3
 
-_PUNCT_TABLE = str.maketrans("", "", string.punctuation + "„“”‚‘’«»…")
 
 
 def parse_correction_dictionary(text: str) -> List[Tuple[str, str, str]]:
@@ -154,77 +146,6 @@ def apply_correction_dictionary(
 ) -> str:
     """Annotated rendering only — the inline-marker behaviour."""
     return apply_correction_dictionary_ex(transcript, entries).annotated
-
-
-def _norm_token(token: str) -> str:
-    """Casefold and strip punctuation for diff matching."""
-    return token.translate(_PUNCT_TABLE).casefold()
-
-
-def merge_transcripts_ex(primary: str, shadow: str) -> TranscriptResult:
-    """Merge two engines' transcripts, collecting the disagreements.
-
-    The primary transcript is the base and stays the ``clean`` rendering;
-    wherever the shadow reads differently its reading becomes a hint,
-    which ``annotated`` also spells out inline as ``[oder: …]``. Tokens
-    are compared casefolded and punctuation-stripped so "Lichter," vs
-    "lichter" never triggers a false disagreement. When the transcripts
-    barely overlap, a word merge would be noise — the shadow reading is
-    then carried whole as ``[alternative Lesart: …]``.
-    """
-    p, s = (primary or "").strip(), (shadow or "").strip()
-    if not p:
-        return TranscriptResult(clean=s, annotated=s)
-    if not s:
-        return TranscriptResult(clean=p, annotated=p)
-
-    p_tokens = p.split()
-    s_tokens = s.split()
-    p_norm = [_norm_token(t) for t in p_tokens]
-    s_norm = [_norm_token(t) for t in s_tokens]
-    if p_norm == s_norm:
-        return TranscriptResult(clean=p, annotated=p)
-
-    matcher = difflib.SequenceMatcher(a=p_norm, b=s_norm, autojunk=False)
-    if matcher.ratio() < _MERGE_MIN_SIMILARITY:
-        return TranscriptResult(
-            clean=p,
-            annotated=f"{p} [alternative Lesart: {s}]",
-            hints=[TranscriptHint(original=p, alternative=s, kind=HINT_READING)],
-        )
-
-    out: List[str] = []
-    hints: List[TranscriptHint] = []
-    for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        if op == "equal":
-            out.extend(p_tokens[i1:i2])
-        elif op == "replace":
-            original = " ".join(p_tokens[i1:i2])
-            alternative = " ".join(s_tokens[j1:j2])
-            out.extend(p_tokens[i1:i2])
-            out.append(f"[oder: {alternative}]")
-            hints.append(
-                TranscriptHint(original=original, alternative=alternative)
-            )
-        elif op == "delete":
-            # Primary-only words: keep them, the base is the primary.
-            out.extend(p_tokens[i1:i2])
-        elif op == "insert":
-            # Shadow heard extra words the primary missed — they can
-            # flip the meaning ("nicht"!), so surface them.
-            alternative = " ".join(s_tokens[j1:j2])
-            out.append(f"[oder zusätzlich: {alternative}]")
-            hints.append(
-                TranscriptHint(
-                    original="", alternative=alternative, kind=HINT_ADDITIONAL
-                )
-            )
-    return TranscriptResult(clean=p, annotated=" ".join(out), hints=hints)
-
-
-def merge_transcripts(primary: str, shadow: str) -> str:
-    """Annotated rendering only — the inline-marker behaviour."""
-    return merge_transcripts_ex(primary, shadow).annotated
 
 
 def resolve_hints(

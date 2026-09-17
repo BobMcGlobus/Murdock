@@ -1,4 +1,4 @@
-"""Tests for the correction dictionary and the dual-transcript merge."""
+"""Tests for the correction dictionary."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import pytest
 
 from murdock.core.transcript_tools import (
     apply_correction_dictionary,
-    merge_transcripts,
     parse_correction_dictionary,
 )
 
@@ -69,44 +68,3 @@ def test_longer_phrase_wins_over_substring():
 def test_apply_noop_without_entries():
     assert apply_correction_dictionary("hallo", []) == "hallo"
     assert apply_correction_dictionary("", [("a", "b", "replace")]) == ""
-
-
-# --- dual merge -----------------------------------------------------------------
-
-
-def test_merge_identical_returns_primary():
-    assert merge_transcripts("Licht an", "Licht an") == "Licht an"
-
-
-def test_merge_ignores_case_and_punctuation_noise():
-    # Different casing/punctuation must not create a fake disagreement.
-    assert merge_transcripts(
-        "Schalte das Licht an.", "schalte das licht an"
-    ) == "Schalte das Licht an."
-
-
-def test_merge_marks_single_disagreement():
-    out = merge_transcripts(
-        "Schalte fehlende Lichter aus",
-        "Schalte Fehenlichter aus",
-    )
-    assert out == "Schalte fehlende Lichter [oder: Fehenlichter] aus"
-
-
-def test_merge_marks_shadow_only_words():
-    out = merge_transcripts("mach das Licht an", "mach das Licht nicht an")
-    assert "[oder zusätzlich: nicht]" in out
-
-
-def test_merge_empty_sides():
-    assert merge_transcripts("", "nur schatten") == "nur schatten"
-    assert merge_transcripts("nur primär", "") == "nur primär"
-
-
-def test_merge_low_similarity_appends_whole_alternative():
-    out = merge_transcripts(
-        "Wetterbericht für morgen bitte",
-        "Der Drucker im Keller brennt",
-    )
-    assert out.startswith("Wetterbericht für morgen bitte")
-    assert "[alternative Lesart: Der Drucker im Keller brennt]" in out

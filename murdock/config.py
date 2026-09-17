@@ -286,13 +286,6 @@ class Settings(BaseSettings):
     # for an LLM agent. "#" starts a comment.
     enable_stt_dictionary: bool = Field(default=False)
     stt_dictionary: str = Field(default="")
-    # Tier 3: dual transcript. Run the shadow engine *blocking* in
-    # parallel with the primary and merge both transcripts, marking
-    # disagreements inline as "primary [oder: shadow]". Costs the max of
-    # both engines' latency and is LLM-only (breaks rigid intents).
-    # Only effective when a shadow engine is configured.
-    enable_dual_transcript: bool = Field(default=False)
-
     # Logging
     log_level: str = Field(default="info")
 
