@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
 
 **Speech-to-text engines are now services.** Every engine — a Wyoming
 server, an OpenAI-compatible API, Voxtral, a Home Assistant STT entity —
