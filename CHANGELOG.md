@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1
 
 **Transcripts came back with holes and missing endings** ("Schalte alle
 Lich-") since 0.11. Home Assistant hands Murdock audio in chunks of about
