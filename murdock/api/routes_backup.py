@@ -264,6 +264,8 @@ async def restore_backup(
             settings_data = json.loads(zf.read("settings.json"))
             if isinstance(settings_data, dict):
                 result.settings_restored = apply_settings(ctx.db, settings_data)
+                # The role keys were just rewritten behind the store's back.
+                ctx.stt_services.invalidate()
                 if "stt_services.json" in zf.namelist():
                     rows = json.loads(zf.read("stt_services.json"))
                     if isinstance(rows, list):

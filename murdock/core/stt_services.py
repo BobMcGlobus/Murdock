@@ -166,6 +166,35 @@ class SttServiceStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
         self._lock = RLock()
+        # Reads come from memory: the handler asks for the main service
+        # on every session and the pipeline must never wait on SQLite.
+        # Every write goes through this class and drops the cache.
+        self._services: Optional[Dict[int, SttService]] = None
+        self._roles: Optional[SttRoles] = None
+
+    def invalidate(self) -> None:
+        """Forget cached rows, e.g. after the settings table was restored."""
+        with self._lock:
+            self._services = None
+            self._roles = None
+
+    def _cached_services(self) -> Dict[int, SttService]:
+        with self._lock:
+            if self._services is None:
+                rows = self.conn.execute(
+                    "SELECT id, name, kind, config, created_at FROM stt_services "
+                    "ORDER BY id"
+                ).fetchall()
+                self._services = {int(r["id"]): self._row(r) for r in rows}
+            return self._services
+
+    @staticmethod
+    def _copy(service: SttService) -> SttService:
+        # Callers may mutate what they get; the cache must not change.
+        return SttService(
+            service.id, service.name, service.kind,
+            dict(service.config), service.created_at,
+        )
 
     # -- services ------------------------------------------------------
 
@@ -181,22 +210,13 @@ class SttServiceStore:
         )
 
     def list(self) -> List[SttService]:
-        with self._lock:
-            rows = self.conn.execute(
-                "SELECT id, name, kind, config, created_at FROM stt_services "
-                "ORDER BY id"
-            ).fetchall()
-        return [self._row(r) for r in rows]
+        return [self._copy(s) for s in self._cached_services().values()]
 
     def get(self, service_id: Optional[int]) -> Optional[SttService]:
         if service_id is None:
             return None
-        with self._lock:
-            row = self.conn.execute(
-                "SELECT id, name, kind, config, created_at FROM stt_services "
-                "WHERE id = ?", (int(service_id),),
-            ).fetchone()
-        return self._row(row) if row else None
+        found = self._cached_services().get(int(service_id))
+        return self._copy(found) if found else None
 
     def create(self, name: str, kind: str, config: dict) -> SttService:
         if kind not in KINDS:
@@ -211,6 +231,7 @@ class SttServiceStore:
             )
             self.conn.commit()
             new_id = int(cur.lastrowid)
+            self._services = None
         # The first service anyone creates is the obvious main.
         roles = self.roles()
         if roles.main is None:
@@ -244,6 +265,7 @@ class SttServiceStore:
                 (new_name, json.dumps(merged), int(service_id)),
             )
             self.conn.commit()
+            self._services = None
         return self.get(service_id)  # type: ignore[return-value]
 
     def delete(self, service_id: int) -> None:
@@ -253,6 +275,7 @@ class SttServiceStore:
         with self._lock:
             self.conn.execute("DELETE FROM stt_services WHERE id = ?", (int(service_id),))
             self.conn.commit()
+            self._services = None
         roles.fallbacks = [i for i in roles.fallbacks if i != int(service_id)]
         roles.shadows = [i for i in roles.shadows if i != int(service_id)]
         self.set_roles(roles)
@@ -278,6 +301,13 @@ class SttServiceStore:
         return out
 
     def roles(self) -> SttRoles:
+        with self._lock:
+            if self._roles is None:
+                self._roles = self._read_roles()
+            r = self._roles
+        return SttRoles(r.main, list(r.fallbacks), list(r.shadows), r.fallback_on_empty)
+
+    def _read_roles(self) -> SttRoles:
         main_raw = get_setting(self.conn, _KEY_MAIN)
         try:
             main = int(main_raw) if main_raw else None
@@ -315,6 +345,8 @@ class SttServiceStore:
             self.conn, _KEY_FALLBACK_ON_EMPTY,
             "true" if roles.fallback_on_empty else "false",
         )
+        with self._lock:
+            self._roles = None
         return SttRoles(main, fallbacks, shadows, roles.fallback_on_empty)
 
     # -- backup ------------------------------------------------------------
@@ -355,6 +387,8 @@ class SttServiceStore:
                 "VALUES (?, ?, ?, ?, ?)", clean,
             )
             self.conn.commit()
+            self._services = None
+            self._roles = None
         return len(clean)
 
     def is_configured(self) -> bool:

@@ -234,6 +234,16 @@ class MurdockHandler(AsyncEventHandler):
         # A wake word that fired with nobody there to talk.
         self._no_speech: bool = False
         self._silence_probed: bool = False
+        # Settings the per-chunk path needs, read once per session. Home
+        # Assistant sends audio in ~10 ms chunks — a hundred a second —
+        # and a database round trip per chunk per setting pushed the
+        # handler below real time on a small VM. The satellite then
+        # dropped audio it could not hand over, and transcripts came back
+        # with holes and missing endings.
+        self._buffered_mode: Optional[bool] = None
+        self._abort_after_sec: float = 0.0
+        self._early_reject_on: bool = False
+        self._skip_bytes: int = 0
 
         # Streaming-Verify (early cutoff) state.
         self._early_probe_task: Optional[asyncio.Task] = None
@@ -297,6 +307,8 @@ class MurdockHandler(AsyncEventHandler):
         streaming Wyoming upstream. Name kept for the many call sites;
         semantics are "is a buffering cloud backend".
         """
+        if self._buffered_mode is not None:
+            return self._buffered_mode
         return self.context.get_stt_backend() in ("voxtral", "openai", "ha")
 
     # ------------------------------------------------------------------
@@ -400,7 +412,7 @@ class MurdockHandler(AsyncEventHandler):
             # A wake word that fired on its own leaves a stream with no
             # speech in it. Checked once, after the configured window, so
             # the turn can end without inventing a request out of silence.
-            abort_after = self.context.get_silence_abort_sec()
+            abort_after = self._abort_after_sec
             if (
                 not self._silence_probed
                 and abort_after > 0
@@ -418,12 +430,9 @@ class MurdockHandler(AsyncEventHandler):
             if (
                 not self._reject_probed
                 and not self._early_match
-                and self.context.get_enable_early_reject()
+                and self._early_reject_on
             ):
-                skip_bytes = int(
-                    self.context.get_skip_leading_seconds() * 16000 * 2
-                )
-                if len(self._audio_buffer) >= skip_bytes + 48000:
+                if len(self._audio_buffer) >= self._skip_bytes + 48000:
                     self._reject_probed = True
                     if len(self.context.speakers.list_speakers()) > 0:
                         snapshot = bytes(self._audio_buffer)
@@ -444,6 +453,13 @@ class MurdockHandler(AsyncEventHandler):
     # ------------------------------------------------------------------
 
     def _reset_session_state(self) -> None:
+        # Snapshot first: everything below and every chunk of this
+        # session reads these instead of the database.
+        self._buffered_mode = None
+        self._buffered_mode = self.context.get_stt_backend() in ("voxtral", "openai", "ha")
+        self._abort_after_sec = self.context.get_silence_abort_sec()
+        self._early_reject_on = bool(self.context.get_enable_early_reject())
+        self._skip_bytes = int(self.context.get_skip_leading_seconds() * 16000 * 2)
         self._audio_buffer = bytearray()
         self._responded = False
         self._stream_start = time.monotonic()
@@ -1405,11 +1421,17 @@ class MurdockHandler(AsyncEventHandler):
             self._early_probe_task.cancel()
 
         raw_audio = bytes(self._audio_buffer)
+        # Audio received vs. time the stream was open. Far below 1.0 means
+        # audio was lost before it got here — the handler (or something
+        # upstream) did not keep up with real time.
+        bytes_per_sec = max(1, self._audio_rate * self._audio_width * self._audio_channels)
+        audio_sec = len(raw_audio) / bytes_per_sec
+        stream_sec = max(0.001, time.monotonic() - self._stream_start)
         _LOGGER.info(
-            "[%s] AudioStop from HA — buffered=%d bytes, upstream_open=%s, "
-            "upstream_failed=%s, early_match=%s",
-            sid, len(raw_audio), self._upstream_open, self._upstream_failed,
-            self._early_match,
+            "[%s] AudioStop from HA — %.2fs audio in %.2fs stream (%.0f%%), "
+            "upstream_open=%s, upstream_failed=%s, early_match=%s",
+            sid, audio_sec, stream_sec, 100.0 * audio_sec / stream_sec,
+            self._upstream_open, self._upstream_failed, self._early_match,
         )
 
         # Tell upstream that the audio stream is complete (Wyoming path only).

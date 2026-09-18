@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+**Transcripts came back with holes and missing endings** ("Schalte alle
+Lich-") since 0.11. Home Assistant hands Murdock audio in chunks of about
+10 ms, and 0.11 looked the main STT service up in the database on every
+single one — around 700 SQLite queries per second of speech. On a small
+VM that pushed the handler below real time; the add-on log showed 2.1 s
+of audio arriving over a 5 s stream. The audio that could not be handed
+over in time was lost before it reached Murdock, which also made normal
+speech look whispered.
+
+The settings the audio path needs are now read once when a session
+starts, and the STT services are held in memory. A regression test
+feeds 300 chunks through the real handler and fails on any query.
+
+The AudioStop log line now reads e.g. `2.13s audio in 5.00s stream
+(43%)`, so a stream that loses audio is visible at a glance.
+
 ## 0.11.0
 
 **Speech-to-text engines are now services.** Every engine — a Wyoming
