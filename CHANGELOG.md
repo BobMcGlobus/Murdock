@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
 
 **The recognition log keeps the audio.** Every logged utterance — blocked
 ones included — now keeps two recordings for as long as it is among the
