@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from murdock.core.context import AppContext
@@ -34,6 +34,9 @@ class RecognitionEventOut(BaseModel):
     unknown_sample_id: Optional[int] = None
     # Wall-clock time of the answering STT service.
     transcript_ms: Optional[float] = None
+    # Recordings still stored for this utterance: "mic" (what the
+    # microphone sent) and "upload" (the copy the service received).
+    audio: List[str] = []
     # Each shadow service's reading, filled in after the answer went out:
     # [{"service_id", "engine", "transcript", "ms", "error"}, ...]
     shadows: List[dict] = []
@@ -92,6 +95,7 @@ async def list_events(
                 transcript=e.transcript,
                 unknown_sample_id=session_map.get(e.session_id),
                 transcript_ms=e.transcript_ms,
+                audio=e.audio,
                 shadows=e.shadows,
                 transcript_timing=e.transcript_timing,
                 weight=e.weight,
@@ -156,4 +160,32 @@ async def insert_test_event(
         )
     return TestEventOut(
         ok=False, id=0, message="Insert failed — check container logs"
+    )
+
+
+@router.get("/{event_id}/audio/{kind}")
+async def event_audio(
+    event_id: int, kind: str, ctx: AppContext = Depends(get_context)
+):
+    """The stored recording of one utterance, as a playable WAV.
+
+    ``kind`` is ``mic`` for the untouched capture or ``upload`` for the
+    copy the speech-to-text service received — listening to both is what
+    settles whether a wrong transcript came from the audio or the model.
+    """
+    from murdock.core.audio import encode_wav
+
+    if kind not in ("mic", "upload"):
+        raise HTTPException(status_code=400, detail="kind must be mic or upload")
+    found = ctx.recognition.get_audio(event_id, kind)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no audio stored for this event")
+    pcm, rate = found
+    return Response(
+        content=encode_wav(pcm, sample_rate=rate),
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition":
+                f'inline; filename="murdock_{event_id}_{kind}.wav"'
+        },
     )

@@ -985,3 +985,16 @@ button.secondary.active {
 .svc-toggle { flex-direction: row; align-items: center; gap: 0.3rem; font-size: 0.85rem; }
 .svc-form { margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: var(--card-alt); }
 #stt-globals-form { margin-top: 1rem; }
+
+
+/* Recordings under a log entry: what the microphone sent, and the copy
+   the speech-to-text service received. */
+.rec-audio {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.3rem 0 0 0.6rem;
+}
+.rec-audio audio { height: 2rem; max-width: 22rem; }
+#rec-audio-form { align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }

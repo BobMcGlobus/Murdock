@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS stt_services (
 -- One row per shadow transcription of an utterance. The single
 -- shadow_* columns on recognition_events predate multiple shadows and
 -- stay readable for old rows.
+-- What an utterance actually sounded like, kept for a short while so a
+-- disputed transcript can be listened to instead of guessed at. "mic" is
+-- the untouched capture, "upload" the copy that went to the service.
+CREATE TABLE IF NOT EXISTS event_audio (
+    event_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    audio BLOB NOT NULL,
+    sample_rate INTEGER NOT NULL DEFAULT 16000,
+    created_at REAL NOT NULL,
+    PRIMARY KEY (event_id, kind)
+);
+
 CREATE TABLE IF NOT EXISTS shadow_results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL,

@@ -46,6 +46,8 @@ class SettingsOut(BaseModel):
     auto_enroll: bool
     enable_extraction: bool = True
     enable_stt_prep: bool = True
+    enable_event_audio: bool = True
+    event_audio_keep: int = 20
     liveness_media_boost: float = 0.15
     cancel_words: str = ""
     silence_abort_sec: float = 3.0
@@ -123,6 +125,8 @@ class SettingsPatch(BaseModel):
     auto_enroll: Optional[bool] = None
     enable_extraction: Optional[bool] = None
     enable_stt_prep: Optional[bool] = None
+    enable_event_audio: Optional[bool] = None
+    event_audio_keep: Optional[int] = Field(default=None, ge=0, le=200)
     liveness_media_boost: Optional[float] = Field(default=None, ge=0.0, le=0.9)
     cancel_words: Optional[str] = None
     silence_abort_sec: Optional[float] = Field(default=None, ge=0.0, le=30.0)
@@ -204,6 +208,8 @@ def _build_settings_out(ctx: AppContext) -> SettingsOut:
         auto_enroll=ctx.get_auto_enroll(),
         enable_extraction=ctx.get_enable_extraction(),
         enable_stt_prep=ctx.get_enable_stt_prep(),
+        enable_event_audio=ctx.get_enable_event_audio(),
+        event_audio_keep=ctx.get_event_audio_keep(),
         liveness_media_boost=ctx.get_liveness_media_boost(),
         cancel_words=", ".join(ctx.get_cancel_words()),
         silence_abort_sec=ctx.get_silence_abort_sec(),
@@ -301,6 +307,10 @@ async def patch_settings(
         ctx.set_enable_extraction(body.enable_extraction)
     if body.enable_stt_prep is not None:
         ctx.set_enable_stt_prep(body.enable_stt_prep)
+    if body.enable_event_audio is not None:
+        ctx.set_enable_event_audio(body.enable_event_audio)
+    if body.event_audio_keep is not None:
+        ctx.set_event_audio_keep(body.event_audio_keep)
     if body.liveness_media_boost is not None:
         ctx.set_liveness_media_boost(body.liveness_media_boost)
     if body.cancel_words is not None:

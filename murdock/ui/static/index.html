@@ -21,7 +21,6 @@
             <button data-tab="speakers" class="tab-btn" data-i18n="nav.speakers">Speakers</button>
             <button data-tab="verify" class="tab-btn" data-i18n="nav.verify">Verify</button>
             <button data-tab="recognition" class="tab-btn" data-i18n="nav.recognition">Recognition log</button>
-            <button data-tab="unknown" class="tab-btn" data-i18n="nav.unknown">Unknown</button>
             <button data-tab="settings" class="tab-btn" data-i18n="nav.settings">Settings</button>
             <button data-tab="experimental" class="tab-btn" data-i18n="nav.experimental">Experimental</button>
         </nav>
@@ -221,40 +220,24 @@
                     <button id="clear-rec" class="danger" data-i18n="rec.clear_log">Clear log</button>
                 </div>
                 <div id="rec-stats" class="meta"></div>
+                <form id="rec-audio-form" class="toolbar">
+                    <label class="switch">
+                        <input type="checkbox" name="enable_event_audio">
+                        <span data-i18n="rec.audio_keep">Keep the recordings</span>
+                    </label>
+                    <label>
+                        <span data-i18n="rec.audio_keep_n">Utterances kept</span>
+                        <input type="number" name="event_audio_keep" min="0" max="200" step="1" style="width:6rem">
+                    </label>
+                    <button type="submit" data-i18n="generic.save">Save</button>
+                    <small class="meta" data-i18n="rec.audio_keep_hint">Only the newest utterances keep their audio; older ones drop it. About 200 kB per utterance.</small>
+                </form>
+                <div id="rec-audio-feedback" class="feedback"></div>
                 <div id="rec-list" class="list"></div>
             </div>
         </section>
 
         <!-- Unknown tab -->
-        <section id="tab-unknown" class="tab">
-            <div class="card">
-                <h2 data-i18n="unknown.title">Unknown samples</h2>
-                <div class="toolbar">
-                    <label><input type="checkbox" id="include-tagged"> <span data-i18n="unknown.include_tagged">Include tagged</span></label>
-                    <button id="refresh-unknown" data-i18n="unknown.refresh">Refresh</button>
-                    <button id="cleanup-unknown" data-i18n="unknown.cleanup">Cleanup expired</button>
-                </div>
-                <div id="unknown-list" class="list"></div>
-            </div>
-
-            <div class="card">
-                <h2 data-i18n="cluster.title">Voice clusters</h2>
-                <p class="meta" data-i18n="cluster.description">
-                    Group untagged unknown samples by voice similarity so you can
-                    bulk-assign the same voice to a speaker in one click.
-                </p>
-                <div class="toolbar">
-                    <label style="flex-direction:row; align-items:center; gap:0.4rem">
-                        <span data-i18n="cluster.threshold">Similarity threshold</span>
-                        <input type="number" id="cluster-threshold" step="0.01" min="0" max="1" value="0.25" style="width:6rem">
-                    </label>
-                    <button id="cluster-refresh" class="secondary" data-i18n="cluster.refresh">Compute clusters</button>
-                </div>
-                <div id="cluster-list" class="list"></div>
-                <div id="cluster-feedback" class="feedback"></div>
-            </div>
-        </section>
-
         <!-- Settings tab -->
         <!-- Experimental tab -->
         <section id="tab-experimental" class="tab">

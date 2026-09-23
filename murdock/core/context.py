@@ -375,6 +375,30 @@ class AppContext:
             return override.lower() in ("1", "true", "yes", "on")
         return self.settings.enable_stt_prep
 
+    def get_enable_event_audio(self) -> bool:
+        override = get_setting(self.db, "enable_event_audio")
+        if override is not None:
+            return override.lower() in ("1", "true", "yes", "on")
+        return bool(getattr(self.settings, "enable_event_audio", True))
+
+    def set_enable_event_audio(self, enabled: bool) -> None:
+        set_setting(self.db, "enable_event_audio", "true" if enabled else "false")
+
+    def get_event_audio_keep(self) -> int:
+        """How many utterances keep their recordings. 0 disables storage."""
+        override = get_setting(self.db, "event_audio_keep")
+        raw = override if override is not None else getattr(
+            self.settings, "event_audio_keep", 20
+        )
+        try:
+            value = int(float(raw))
+        except (TypeError, ValueError):
+            value = 20
+        return max(0, min(200, value))
+
+    def set_event_audio_keep(self, value: int) -> None:
+        set_setting(self.db, "event_audio_keep", str(max(0, min(200, int(value)))))
+
     def set_enable_stt_prep(self, enabled: bool) -> None:
         set_setting(self.db, "enable_stt_prep", "true" if enabled else "false")
 

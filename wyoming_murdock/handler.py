@@ -269,6 +269,8 @@ class MurdockHandler(AsyncEventHandler):
         # Conditioned upload audio, prepared once and reused by every
         # fallback that needs it.
         self._prepared_audio: Optional[bytes] = None
+        # The session's converted capture, kept for the recognition log.
+        self._session_audio: Optional[bytes] = None
         # Whether this session is counted as a main request in flight.
         self._main_slot_held: bool = False
 
@@ -481,6 +483,7 @@ class MurdockHandler(AsyncEventHandler):
         self._main_failed = False
         self._remote_down = False
         self._prepared_audio = None
+        self._session_audio = None
         if self._main_slot_held:
             # A session that never answered must not keep shadows
             # waiting for ever.
@@ -1467,6 +1470,8 @@ class MurdockHandler(AsyncEventHandler):
             _LOGGER.warning("[%s] Audio normalization failed: %s", sid, exc)
             audio_16k = raw_audio
 
+        # The microphone's own copy, for the recognition log.
+        self._session_audio = audio_16k
         duration = len(audio_16k) / (16000 * 2) if audio_16k else 0.0
         _LOGGER.debug("[%s] Audio stop: %.2fs (%d bytes)", sid, duration, len(audio_16k))
 
@@ -2135,7 +2140,7 @@ class MurdockHandler(AsyncEventHandler):
         id (0 on failure) so the A/B shadow can attach its transcript
         later."""
         try:
-            return self.context.recognition.record(
+            event_id = self.context.recognition.record(
                 session_id=self._session_id,
                 satellite_id=self._satellite_id,
                 duration_sec=duration_sec,
@@ -2153,6 +2158,18 @@ class MurdockHandler(AsyncEventHandler):
                 whisper_score=self._whisper_score,
                 speakers=self._speakers or None,
             )
+            # Every logged utterance keeps its audio, blocked ones very
+            # much included: "why was this thrown away" is answered by
+            # listening to it, not by reading the verdict again. Never at
+            # the audit row's expense, though — that row matters more.
+            try:
+                self._store_event_audio(event_id)
+            except Exception:
+                _LOGGER.debug(
+                    "[%s] Keeping the audio failed", self._session_id,
+                    exc_info=True,
+                )
+            return event_id
         except Exception:
             # Loud on purpose: a swallowed failure here looks exactly like
             # "nothing is happening", which is how a bad keyword argument
@@ -2180,6 +2197,39 @@ class MurdockHandler(AsyncEventHandler):
             event_id, audio_16k, self._prepared_audio, self._language,
             self._session_id, shadows,
         ))
+
+    def _store_event_audio(self, event_id: int) -> None:
+        """Keep this utterance's recordings for the log, off the loop.
+
+        Two copies where they differ: what the microphone sent, and the
+        conditioned copy that went to the service. When a transcript and
+        the audio disagree, that difference is the first thing worth
+        hearing.
+        """
+        mic = self._session_audio
+        if not mic:
+            return
+        try:
+            if not self.context.get_enable_event_audio():
+                return
+            keep = self.context.get_event_audio_keep()
+        except Exception:
+            return
+        if keep <= 0:
+            return
+        upload = self._prepared_audio
+        log = self.context.recognition
+
+        async def _store() -> None:
+            await asyncio.to_thread(
+                log.store_audio, event_id, "mic", mic, keep_events=keep
+            )
+            if upload and upload != mic:
+                await asyncio.to_thread(
+                    log.store_audio, event_id, "upload", upload, keep_events=keep
+                )
+
+        asyncio.create_task(_store())
 
     async def _run_shadows(
         self, event_id: int, audio_16k: bytes, prepared: Optional[bytes],

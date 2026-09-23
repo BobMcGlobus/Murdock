@@ -286,6 +286,11 @@ class Settings(BaseSettings):
     # for an LLM agent. "#" starts a comment.
     enable_stt_dictionary: bool = Field(default=False)
     stt_dictionary: str = Field(default="")
+    # Keep the last N utterances' audio for the recognition log, so a
+    # disputed transcript can be listened to. 0 disables it.
+    enable_event_audio: bool = Field(default=True)
+    event_audio_keep: int = Field(default=20)
+
     # Logging
     log_level: str = Field(default="info")
 

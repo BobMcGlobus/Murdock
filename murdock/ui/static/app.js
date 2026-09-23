@@ -57,7 +57,6 @@ if (langSelector) {
         if (activeTab) {
             const tab = activeTab.dataset.tab;
             if (tab === "speakers") loadSpeakers();
-            if (tab === "unknown") loadUnknown();
             if (tab === "settings") loadSettings();
             if (tab === "recognition") loadRecognition();
         }
@@ -152,9 +151,8 @@ $$(".tab-btn").forEach((btn) => {
         if (btn.dataset.tab === "overview") loadOverview();
         if (btn.dataset.tab === "speakers") { loadSpeakers(); loadCoach(); }
         if (btn.dataset.tab === "verify") loadRoles();
-        if (btn.dataset.tab === "unknown") loadUnknown();
         if (btn.dataset.tab === "settings") loadSettings();
-        if (btn.dataset.tab === "recognition") loadRecognition();
+        if (btn.dataset.tab === "recognition") { loadRecognition(); loadSettings(); }
         // The experimental tab hosts settings cards, so it needs the
         // same population pass as the settings tab.
         if (btn.dataset.tab === "experimental") loadSettings();
@@ -1026,275 +1024,6 @@ async function toggleSamples(btn) {
 
 // --- Unknown list ---------------------------------------------------------
 
-async function loadUnknown() {
-    const list = $("#unknown-list");
-    const includeTagged = $("#include-tagged").checked;
-    list.innerHTML = t("generic.loading");
-    try {
-        // Ensure speaker cache is populated for the datalist autocomplete.
-        if (CACHED_SPEAKERS.length === 0) {
-            try {
-                CACHED_SPEAKERS = await api("/api/speakers");
-            } catch (_) {
-                /* non-fatal */
-            }
-        }
-        const samples = await api(
-            "/api/unknown?include_tagged=" + (includeTagged ? "true" : "false")
-        );
-        if (samples.length === 0) {
-            list.innerHTML = `<p class="meta">${escapeHtml(t("unknown.no_samples"))}</p>`;
-            return;
-        }
-        list.innerHTML = "";
-        // Shared datalist for all assign inputs on this page render.
-        const dl = document.createElement("datalist");
-        dl.id = "unknown-speaker-names";
-        dl.innerHTML = CACHED_SPEAKERS.map(
-            (sp) => `<option value="${escapeHtml(sp.name)}"></option>`
-        ).join("");
-        list.appendChild(dl);
-        for (const s of samples) {
-            const livenessBadge =
-                s.liveness_score == null
-                    ? ""
-                    : s.liveness_score < 0.35
-                    ? `<span class="badge tv">${escapeHtml(t("unknown.likely_tv"))}</span>`
-                    : `<span class="badge live">${escapeHtml(t("unknown.likely_live"))}</span>`;
-            const item = document.createElement("div");
-            item.className = "list-item";
-            item.innerHTML = `
-                <div class="row">
-                    <h3>#${s.id}</h3>
-                    ${livenessBadge}
-                    ${s.tag ? `<span class="badge">tag: ${escapeHtml(s.tag)}</span>` : ""}
-                    <span class="meta">${new Date(s.created_at * 1000).toLocaleString()}</span>
-                </div>
-                <div class="row">
-                    <span class="meta">${s.duration_sec.toFixed(1)}s · ${t("unknown.distance")} ${s.best_distance.toFixed(
-                3
-            )} · ${t("unknown.best")} ${escapeHtml(s.best_speaker || "–")}${
-                s.liveness_score != null
-                    ? ` · ${t("unknown.liveness")} ${s.liveness_score.toFixed(2)}`
-                    : ""
-            }</span>
-                </div>
-                <audio controls src="${apiUrl(`/api/unknown/${s.id}/audio`)}"></audio>
-                <div class="row">
-                    <input type="text" list="unknown-speaker-names" placeholder="${escapeHtml(t("unknown.assign_ph"))}" data-assign-name="${s.id}">
-                    <button data-assign="${s.id}">${escapeHtml(t("unknown.assign_btn"))}</button>
-                    <button class="secondary" data-tag-tv="${s.id}">${escapeHtml(t("unknown.tag_tv"))}</button>
-                    <button class="danger" data-del-unknown="${s.id}">${escapeHtml(t("unknown.delete"))}</button>
-                </div>
-            `;
-            list.appendChild(item);
-        }
-        list.querySelectorAll("button[data-del-unknown]").forEach((b) =>
-            b.addEventListener("click", async () => {
-                await api("/api/unknown/" + b.dataset.delUnknown, { method: "DELETE" });
-                loadUnknown();
-            })
-        );
-        list.querySelectorAll("button[data-tag-tv]").forEach((b) =>
-            b.addEventListener("click", async () => {
-                await api("/api/unknown/" + b.dataset.tagTv + "/tag", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ tag: "tv" }),
-                });
-                loadUnknown();
-            })
-        );
-        list.querySelectorAll("button[data-assign]").forEach((b) =>
-            b.addEventListener("click", async () => {
-                const id = b.dataset.assign;
-                const input = list.querySelector(`input[data-assign-name="${id}"]`);
-                const name = input.value.trim();
-                if (!name) {
-                    alert(t("unknown.enter_name"));
-                    return;
-                }
-                await api("/api/unknown/" + id + "/assign", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ speaker_name: name, create_if_missing: true }),
-                });
-                loadUnknown();
-            })
-        );
-    } catch (err) {
-        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
-    }
-}
-
-$("#refresh-unknown").addEventListener("click", loadUnknown);
-$("#include-tagged").addEventListener("change", loadUnknown);
-$("#cleanup-unknown").addEventListener("click", async () => {
-    const res = await api("/api/unknown/cleanup", { method: "POST" });
-    setStatus(t("unknown.cleaned", { n: res.deleted }), "ok");
-    loadUnknown();
-});
-
-// --- Voice clusters (bulk-assign) -----------------------------------------
-
-function setClusterFeedback(msg, cls) {
-    const el = $("#cluster-feedback");
-    if (!el) return;
-    el.className = "feedback " + (cls || "");
-    el.textContent = msg;
-    if (!msg) return;
-    setTimeout(() => {
-        if (el.textContent === msg) {
-            el.textContent = "";
-            el.className = "feedback";
-        }
-    }, 6000);
-}
-
-async function loadClusters() {
-    const list = $("#cluster-list");
-    if (!list) return;
-    const thresholdInput = $("#cluster-threshold");
-    const threshold = parseFloat(thresholdInput?.value || "0.25");
-    if (Number.isNaN(threshold) || threshold < 0 || threshold > 1) {
-        setClusterFeedback(t("cluster.invalid_threshold"), "err");
-        return;
-    }
-    // Ensure speakers are cached for the assign datalist.
-    if (CACHED_SPEAKERS.length === 0) {
-        try {
-            CACHED_SPEAKERS = await api("/api/speakers");
-        } catch (_) {
-            /* non-fatal */
-        }
-    }
-    list.innerHTML = t("generic.loading");
-    try {
-        const data = await api(
-            "/api/unknown/clusters?threshold=" + encodeURIComponent(threshold)
-        );
-        if (!data.clusters || data.clusters.length === 0) {
-            list.innerHTML = `<p class="meta">${escapeHtml(t("cluster.none"))}</p>`;
-            return;
-        }
-        list.innerHTML = "";
-        // Shared datalist for all assign inputs.
-        const dl = document.createElement("datalist");
-        dl.id = "cluster-speaker-names";
-        dl.innerHTML = CACHED_SPEAKERS.map(
-            (sp) => `<option value="${escapeHtml(sp.name)}"></option>`
-        ).join("");
-        list.appendChild(dl);
-
-        for (const c of data.clusters) {
-            const item = document.createElement("div");
-            item.className = "list-item";
-            const sats = c.satellites.length
-                ? c.satellites
-                      .map(
-                          (s) =>
-                              `<span class="badge satellite">${escapeHtml(s)}</span>`
-                      )
-                      .join(" ")
-                : "";
-            const memberRows = c.members
-                .map((m) => {
-                    const when = new Date(m.created_at * 1000).toLocaleString();
-                    const d = m.distance_to_centroid.toFixed(3);
-                    const dur = m.duration_sec.toFixed(1);
-                    const tagBadge = m.tag
-                        ? `<span class="badge">${escapeHtml(m.tag)}</span>`
-                        : "";
-                    const satBadge = m.satellite_id
-                        ? `<span class="badge satellite">${escapeHtml(m.satellite_id)}</span>`
-                        : "";
-                    return `
-                        <div class="sample-row">
-                            <div class="row">
-                                <span class="filename">#${m.sample_id}</span>
-                                <span class="meta">${dur}s · ${escapeHtml(t("cluster.d"))}=${d}</span>
-                                ${satBadge}
-                                ${tagBadge}
-                                <span class="meta">${escapeHtml(when)}</span>
-                            </div>
-                            <audio controls src="${apiUrl(`/api/unknown/${m.sample_id}/audio`)}"></audio>
-                        </div>
-                    `;
-                })
-                .join("");
-
-            item.innerHTML = `
-                <div class="row">
-                    <h3>${escapeHtml(t("cluster.label", { n: c.cluster_id }))}</h3>
-                    <span class="badge">${escapeHtml(t("cluster.size", { n: c.size }))}</span>
-                    <span class="meta">${escapeHtml(t("cluster.avg_d"))} ${c.avg_distance.toFixed(3)}</span>
-                    ${sats}
-                </div>
-                ${memberRows}
-                <div class="row">
-                    <input type="text" list="cluster-speaker-names"
-                           data-cluster-name="${c.cluster_id}"
-                           placeholder="${escapeHtml(t("cluster.assign_ph"))}">
-                    <button data-cluster-assign="${c.cluster_id}">${escapeHtml(t("cluster.assign_btn", { n: c.size }))}</button>
-                </div>
-            `;
-            // Attach member ids as data for the button.
-            list.appendChild(item);
-            const btn = item.querySelector(`button[data-cluster-assign]`);
-            btn.dataset.sampleIds = JSON.stringify(
-                c.members.map((m) => m.sample_id)
-            );
-        }
-        list.querySelectorAll("button[data-cluster-assign]").forEach((b) =>
-            b.addEventListener("click", async () => {
-                const cid = b.dataset.clusterAssign;
-                const input = list.querySelector(`input[data-cluster-name="${cid}"]`);
-                const name = (input?.value || "").trim();
-                if (!name) {
-                    setClusterFeedback(t("unknown.enter_name"), "err");
-                    return;
-                }
-                const sampleIds = JSON.parse(b.dataset.sampleIds || "[]");
-                b.disabled = true;
-                try {
-                    const res = await api("/api/unknown/bulk-assign", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            speaker_name: name,
-                            create_if_missing: true,
-                            sample_ids: sampleIds,
-                        }),
-                    });
-                    setClusterFeedback(
-                        t("cluster.assigned", {
-                            n: res.assigned,
-                            name,
-                            skipped: res.skipped,
-                        }),
-                        res.skipped ? "warn" : "ok"
-                    );
-                    loadClusters();
-                    loadUnknown();
-                } catch (err) {
-                    setClusterFeedback(err.message, "err");
-                } finally {
-                    b.disabled = false;
-                }
-            })
-        );
-    } catch (err) {
-        list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
-    }
-}
-
-const clusterRefreshBtn = $("#cluster-refresh");
-if (clusterRefreshBtn) {
-    clusterRefreshBtn.addEventListener("click", loadClusters);
-}
-
-// --- Settings -------------------------------------------------------------
-
 function renderLangHint(s) {
     const hint = $("#lang-hint");
     if (!hint) return;
@@ -1444,6 +1173,11 @@ async function loadSettings() {
         // Per-satellite thresholds + media restriction matrix
         loadSatelliteThresholds();
         loadMediaRestrictions();
+        const recAudio = $("#rec-audio-form");
+        if (recAudio) {
+            recAudio.enable_event_audio.checked = s.enable_event_audio !== false;
+            recAudio.event_audio_keep.value = s.event_audio_keep ?? 20;
+        }
         // STT services and the settings shared by all of them
         loadSttServices();
         const sttGlobals = $("#stt-globals-form");
@@ -2968,6 +2702,15 @@ function renderRecognitionEvent(e) {
             ${same ? "" : `<span class="meta"> ${escapeHtml(t("rec.shadow_differs"))}</span>`}
         </div>`;
     }).join("");
+    // The recordings, while they are still kept: what the microphone
+    // sent and, when it differs, the copy the service received.
+    const players = (e.audio || []).map((kind) => `
+        <div class="rec-audio">
+            <span class="meta">${escapeHtml(t("rec.audio_" + kind))}</span>
+            <audio controls preload="none" src="${apiUrl(`/api/recognition/${e.id}/audio/${kind}`)}"></audio>
+            <a class="meta" download href="${apiUrl(`/api/recognition/${e.id}/audio/${kind}`)}">${escapeHtml(t("rec.audio_download"))}</a>
+        </div>`).join("");
+
     // The room, not the entity id — the id is still there on hover for
     // anyone who needs it.
     const sat = e.satellite_id
@@ -3041,6 +2784,7 @@ function renderRecognitionEvent(e) {
             </div>
             ${transcript}
             ${shadow}
+            ${players}
             <div class="meta verdict">${escapeHtml(verdict)}</div>
             ${details}
             ${assignBtn ? `<div class="row">${assignBtn}</div>` : ""}
@@ -3641,4 +3385,29 @@ const enrollStyleSel = $("#enroll-style");
 if (enrollStyleSel) {
     enrollStyleSel.addEventListener("change", updateEnrollStyleHint);
     updateEnrollStyleHint();
+}
+
+
+const recAudioForm = $("#rec-audio-form");
+if (recAudioForm) {
+    recAudioForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fb = $("#rec-audio-feedback");
+        try {
+            await api("/api/settings", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    enable_event_audio: recAudioForm.enable_event_audio.checked,
+                    event_audio_keep: parseInt(recAudioForm.event_audio_keep.value || "0", 10),
+                }),
+            });
+            fb.className = "feedback ok";
+            fb.textContent = t("settings.saved");
+            setTimeout(() => { fb.textContent = ""; fb.className = "feedback"; }, 2500);
+        } catch (err) {
+            fb.className = "feedback err";
+            fb.textContent = err.message;
+        }
+    });
 }

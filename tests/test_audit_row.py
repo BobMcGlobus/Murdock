@@ -43,6 +43,12 @@ def _handler(tmp_path):
     # The real method, bound to the stand-in — stubbing it here would
     # let the timing payload drift away from what the handler sends.
     fake._timing_with_rescue = lambda: MurdockHandler._timing_with_rescue(fake)
+    # No audio in this stand-in, so keeping it is a no-op — but the call
+    # itself must stay on the path the handler really takes.
+    fake._session_audio = None
+    fake._store_event_audio = lambda event_id: MurdockHandler._store_event_audio(
+        fake, event_id
+    )
     return fake, log
 
 

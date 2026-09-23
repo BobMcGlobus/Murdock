@@ -39,7 +39,6 @@ const I18N = (() => {
             "nav.speakers": "Speakers",
             "nav.verify": "Verify",
             "nav.recognition": "Recognition log",
-            "nav.unknown": "Unknown",
             "nav.experimental": "Experimental",
             "exp.title": "Experimental features",
             "exp.description": "Unfinished or unproven features. They are safe to leave off, and safe to switch on — but expect rough edges, and don't build automations you rely on around them yet.",
@@ -53,7 +52,6 @@ const I18N = (() => {
             "speakers.name": "Name",
             "speakers.ha_user_id": "HA user ID (optional — only applied to new speakers)",
             "rec.whisper_score": "whisper {score}",
-            "unknown.whisper": "whisper score {score}",
             "speakers.style_whisper_badge": "whispered",
             "speakers.style": "Speaking style",
             "speakers.style_normal": "Normal speech",
@@ -206,22 +204,6 @@ const I18N = (() => {
             "outcome.empty": "Empty",
 
             // -- Unknown tab --
-            "unknown.title": "Unknown samples",
-            "unknown.include_tagged": "Include tagged",
-            "unknown.refresh": "Refresh",
-            "unknown.cleanup": "Cleanup expired",
-            "unknown.no_samples": "No unknown samples logged.",
-            "unknown.likely_tv": "Likely TV",
-            "unknown.likely_live": "Likely live",
-            "unknown.assign_ph": "Assign to speaker",
-            "unknown.assign_btn": "Assign",
-            "unknown.tag_tv": "Tag as TV",
-            "unknown.delete": "Delete",
-            "unknown.enter_name": "Enter a speaker name first.",
-            "unknown.cleaned": "Cleaned up {n} expired samples",
-            "unknown.distance": "distance",
-            "unknown.best": "best:",
-            "unknown.liveness": "liveness",
 
             // -- Settings tab --
             "settings.recognition_title": "Speaker recognition",
@@ -529,19 +511,6 @@ const I18N = (() => {
             "media_restrict.invalid": "Enter a valid number.",
 
             // -- Voice clusters --
-            "cluster.title": "Voice clusters",
-            "cluster.description": "Group untagged unknown samples by voice similarity so you can bulk-assign the same voice to a speaker in one click.",
-            "cluster.threshold": "Similarity threshold",
-            "cluster.refresh": "Compute clusters",
-            "cluster.none": "No clusters yet. Tighten the threshold or wait for more unknown samples.",
-            "cluster.invalid_threshold": "Threshold must be a number between 0 and 1.",
-            "cluster.label": "Cluster {n}",
-            "cluster.size": "{n} samples",
-            "cluster.avg_d": "avg d=",
-            "cluster.d": "d",
-            "cluster.assign_ph": "Assign cluster to speaker…",
-            "cluster.assign_btn": "Assign {n} samples",
-            "cluster.assigned": 'Assigned {n} → "{name}" ({skipped} skipped)',
 
             // -- Settings hints --
             "hint.lang_override": "Override active → advertising: {langs}. Clear the field and save to fall back to upstream auto-detect.",
@@ -628,6 +597,14 @@ const I18N = (() => {
             "svc.fallback_on_empty": "Ask the fallbacks when the main heard nothing",
             "svc.fallback_on_empty_hint": "An unsure engine returns nothing rather than guessing — honest, and useless to the person waiting. With this on, an empty answer goes down the fallback chain like an error does. Costs latency only in that case.",
             "svc.roles_hint": "Fallbacks are tried in order when the main fails. Shadows transcribe the same recording after the answer has gone out, one after another, and appear in the recognition log for comparison — they never slow down or influence the answer.",
+
+            // -- Recordings in the log --
+            "rec.audio_mic": "Microphone",
+            "rec.audio_upload": "Sent to the service",
+            "rec.audio_download": "download",
+            "rec.audio_keep": "Keep the recordings",
+            "rec.audio_keep_n": "Utterances kept",
+            "rec.audio_keep_hint": "Only the newest utterances keep their audio; older ones drop it. Roughly 200 kB per utterance. “Microphone” is the untouched capture, “Sent to the service” the conditioned copy — where a transcript and the audio disagree, comparing the two says which side is at fault.",
         },
 
         de: {
@@ -659,7 +636,6 @@ const I18N = (() => {
             "nav.speakers": "Sprecher",
             "nav.verify": "Verifizieren",
             "nav.recognition": "Erkennungsprotokoll",
-            "nav.unknown": "Unbekannt",
             "nav.experimental": "Experimentell",
             "exp.title": "Experimentelle Funktionen",
             "exp.description": "Unfertige oder unerprobte Funktionen. Sie können bedenkenlos aus bleiben und bedenkenlos eingeschaltet werden — aber erwarte Ecken und Kanten, und baue noch keine Automationen darauf, auf die du dich verlässt.",
@@ -673,7 +649,6 @@ const I18N = (() => {
             "speakers.name": "Name",
             "speakers.ha_user_id": "HA Benutzer-ID (optional — gilt nur für neue Sprecher)",
             "rec.whisper_score": "Flüstern {score}",
-            "unknown.whisper": "Flüster-Wert {score}",
             "speakers.style_whisper_badge": "geflüstert",
             "speakers.style": "Sprechweise",
             "speakers.style_normal": "Normale Sprache",
@@ -826,22 +801,6 @@ const I18N = (() => {
             "outcome.empty": "Leer",
 
             // -- Unknown tab --
-            "unknown.title": "Unbekannte Proben",
-            "unknown.include_tagged": "Markierte anzeigen",
-            "unknown.refresh": "Aktualisieren",
-            "unknown.cleanup": "Abgelaufene bereinigen",
-            "unknown.no_samples": "Keine unbekannten Proben vorhanden.",
-            "unknown.likely_tv": "Vermutlich TV",
-            "unknown.likely_live": "Vermutlich live",
-            "unknown.assign_ph": "Sprecher zuweisen",
-            "unknown.assign_btn": "Zuweisen",
-            "unknown.tag_tv": "Als TV markieren",
-            "unknown.delete": "Löschen",
-            "unknown.enter_name": "Bitte zuerst einen Sprechernamen eingeben.",
-            "unknown.cleaned": "{n} abgelaufene Proben bereinigt",
-            "unknown.distance": "Distanz",
-            "unknown.best": "nächster:",
-            "unknown.liveness": "Lebendigkeit",
 
             // -- Settings tab --
             "settings.recognition_title": "Sprechererkennung",
@@ -1149,19 +1108,6 @@ const I18N = (() => {
             "media_restrict.invalid": "Bitte eine gültige Zahl eingeben.",
 
             // -- Stimmen-Cluster --
-            "cluster.title": "Stimmen-Cluster",
-            "cluster.description": "Untagged Unknown-Proben nach Stimmähnlichkeit gruppieren — so ordnest du dieselbe Stimme mit einem Klick einem Sprecher zu.",
-            "cluster.threshold": "Ähnlichkeitsschwelle",
-            "cluster.refresh": "Cluster berechnen",
-            "cluster.none": "Noch keine Cluster. Schwelle verschärfen oder auf weitere Unknown-Proben warten.",
-            "cluster.invalid_threshold": "Schwelle muss eine Zahl zwischen 0 und 1 sein.",
-            "cluster.label": "Cluster {n}",
-            "cluster.size": "{n} Proben",
-            "cluster.avg_d": "Ø d=",
-            "cluster.d": "d",
-            "cluster.assign_ph": "Cluster Sprecher zuordnen…",
-            "cluster.assign_btn": "{n} Proben zuordnen",
-            "cluster.assigned": '{n} zugeordnet → "{name}" ({skipped} übersprungen)',
 
             // -- Settings hints --
             "hint.lang_override": "Überschreibung aktiv → bewirbt: {langs}. Feld leeren und speichern für automatische Erkennung.",
@@ -1248,6 +1194,14 @@ const I18N = (() => {
             "svc.fallback_on_empty": "Fallbacks fragen, wenn der Main nichts verstanden hat",
             "svc.fallback_on_empty_hint": "Eine unsichere Engine gibt lieber nichts zurück als zu raten — ehrlich, und nutzlos für den, der wartet. Ist das an, geht eine leere Antwort die Fallback-Kette entlang wie ein Fehler. Kostet nur in diesem Fall Latenz.",
             "svc.roles_hint": "Fallbacks werden der Reihe nach versucht, wenn der Main ausfällt. Shadows transkribieren dieselbe Aufnahme, nachdem die Antwort raus ist, einer nach dem anderen, und stehen zum Vergleich im Erkennungslog — sie bremsen oder beeinflussen die Antwort nie.",
+
+            // -- Recordings in the log --
+            "rec.audio_mic": "Mikrofon",
+            "rec.audio_upload": "An den Dienst gesendet",
+            "rec.audio_download": "herunterladen",
+            "rec.audio_keep": "Aufnahmen behalten",
+            "rec.audio_keep_n": "Aufbewahrte Äußerungen",
+            "rec.audio_keep_hint": "Nur die neuesten Äußerungen behalten ihr Audio, ältere verlieren es. Etwa 200 kB pro Äußerung. „Mikrofon“ ist die unveränderte Aufnahme, „An den Dienst gesendet“ die aufbereitete Kopie — wenn Transkript und Audio nicht zusammenpassen, zeigt der Vergleich, woran es liegt.",
         },
     };
 

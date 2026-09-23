@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+**The recognition log keeps the audio.** Every logged utterance — blocked
+ones included — now keeps two recordings for as long as it is among the
+newest few: what the microphone sent, and the copy the speech-to-text
+service received. They play inline in the log and can be downloaded. A
+wrong transcript has two possible causes, bad audio or a misreading
+engine, and they are indistinguishable from the text alone; comparing
+the recording against the transcript settles it.
+
+How many utterances keep their audio is set in the log itself (20 by
+default, roughly 200 kB each, 0 to store nothing). Older utterances drop
+their recordings, and clearing the log clears them too.
+
+**The Unknown tab is gone.** The recognition log filters by outcome, has
+the same "assign to speaker" action, and now carries the audio as well.
+Voice clustering and bulk assignment went with the tab.
+
 ## 0.11.1
 
 **Transcripts came back with holes and missing endings** ("Schalte alle

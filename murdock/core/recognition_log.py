@@ -75,6 +75,9 @@ class RecognitionEvent:
     # plus what was actually uploaded. One number can't distinguish
     # "the model thought hard" from "the upload crawled".
     transcript_timing: Optional[dict] = None
+    # Which recordings of this utterance are still stored: "mic",
+    # "upload", or neither once they have aged out.
+    audio: List[str] = field(default_factory=list)
     # Every shadow service's reading of this utterance. Events logged
     # before multiple shadows existed carry their single legacy shadow
     # here too, so the UI has one shape to render.
@@ -212,6 +215,10 @@ class RecognitionLog:
             "DELETE FROM shadow_results WHERE event_id NOT IN "
             "(SELECT id FROM recognition_events)"
         )
+        self.conn.execute(
+            "DELETE FROM event_audio WHERE event_id NOT IN "
+            "(SELECT id FROM recognition_events)"
+        )
 
     def list_events(
         self,
@@ -272,6 +279,9 @@ class RecognitionLog:
             )
             for row in rows
         ]
+        by_audio = self.audio_for([e.id for e in events])
+        for event in events:
+            event.audio = by_audio.get(event.id, [])
         by_event = self.shadows_for([e.id for e in events])
         for event in events:
             found = by_event.get(event.id)
@@ -288,6 +298,64 @@ class RecognitionLog:
                     "error": None,
                 }]
         return events
+
+    def store_audio(
+        self, event_id: int, kind: str, pcm: bytes, *, sample_rate: int = 16000,
+        keep_events: int = 20,
+    ) -> bool:
+        """Keep this event's audio, dropping all but the newest events'.
+
+        Storage is bounded by event count rather than age: it is a
+        debugging aid, and what you want is always the last handful of
+        utterances, whenever they happened.
+        """
+        if not event_id or not pcm or keep_events <= 0:
+            return False
+        with self._lock:
+            try:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO event_audio "
+                    "(event_id, kind, audio, sample_rate, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (int(event_id), kind, sqlite3.Binary(pcm), int(sample_rate), time.time()),
+                )
+                self.conn.execute(
+                    "DELETE FROM event_audio WHERE event_id NOT IN ("
+                    "SELECT event_id FROM event_audio ORDER BY event_id DESC LIMIT ?)",
+                    (int(keep_events),),
+                )
+                self.conn.commit()
+                return True
+            except Exception:
+                _LOGGER.exception("Failed to store event audio")
+                return False
+
+    def get_audio(self, event_id: int, kind: str) -> Optional[tuple]:
+        """``(pcm, sample_rate)`` for one stored clip, or None."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT audio, sample_rate FROM event_audio "
+                "WHERE event_id = ? AND kind = ?", (int(event_id), kind),
+            ).fetchone()
+        if not row:
+            return None
+        return bytes(row["audio"]), int(row["sample_rate"])
+
+    def audio_for(self, event_ids: List[int]) -> dict:
+        """``{event_id: [kind, ...]}`` so the log can offer what exists."""
+        ids = [int(i) for i in event_ids if i]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT event_id, kind FROM event_audio "
+                f"WHERE event_id IN ({placeholders}) ORDER BY kind", ids,
+            ).fetchall()
+        out: dict = {}
+        for row in rows:
+            out.setdefault(int(row["event_id"]), []).append(row["kind"])
+        return out
 
     def add_shadow_result(
         self,
@@ -376,5 +444,6 @@ class RecognitionLog:
         with self._lock:
             cur = self.conn.execute("DELETE FROM recognition_events")
             self.conn.execute("DELETE FROM shadow_results")
+            self.conn.execute("DELETE FROM event_audio")
             self.conn.commit()
             return cur.rowcount
