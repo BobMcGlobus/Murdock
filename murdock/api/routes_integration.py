@@ -32,6 +32,29 @@ router = APIRouter(prefix="/api", tags=["integration"])
 
 class VersionOut(BaseModel):
     version: str
+    # Where Home Assistant reaches this add-on without mDNS, e.g.
+    # http://9a87bc67-murdock:8099. Only set when running as an add-on —
+    # there Home Assistant shares Murdock's Docker network.
+    internal_url: Optional[str] = None
+    # The add-on's slug, for a configuration link that opens the panel.
+    addon_slug: Optional[str] = None
+
+
+def _addon_identity() -> tuple:
+    """``(internal_url, slug)`` when running under the Supervisor."""
+    import os
+    import socket
+
+    if not os.environ.get("SUPERVISOR_TOKEN"):
+        return None, None
+    host = socket.gethostname()
+    if not host or "." in host:
+        return None, None
+    port = os.environ.get("WEB_PORT") or "8099"
+    # The Supervisor names add-on containers after the slug, with the
+    # underscore after the repository hash turned into a dash.
+    slug = host.replace("-", "_", 1)
+    return f"http://{host}:{port}", slug
 
 
 class SatelliteOut(BaseModel):
@@ -63,7 +86,8 @@ class StateOut(BaseModel):
 
 @router.get("/version", response_model=VersionOut)
 async def get_version() -> VersionOut:
-    return VersionOut(version=__version__)
+    internal_url, slug = _addon_identity()
+    return VersionOut(version=__version__, internal_url=internal_url, addon_slug=slug)
 
 
 @router.get("/satellites", response_model=SatelliteList)

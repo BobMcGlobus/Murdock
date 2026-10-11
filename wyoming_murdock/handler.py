@@ -33,7 +33,7 @@ import logging
 import re
 import time
 import uuid
-from typing import Optional
+from typing import Dict, Optional
 
 import numpy as np
 from wyoming.asr import Transcribe, Transcript
@@ -42,6 +42,8 @@ from wyoming.client import AsyncClient
 from wyoming.event import Event
 from wyoming.info import Describe
 from wyoming.server import AsyncEventHandler
+
+from murdock.core import loop_monitor
 
 from murdock.core.context import AppContext
 from murdock.core.extraction import extract_target_speaker
@@ -143,6 +145,16 @@ _SHADOW_GATE = _ShadowGate()
 #: one-shot engine never pays it.
 _UPSTREAM_FINAL_GRACE = 0.35
 
+#: Below this share of real time a stream counts as degraded and is
+#: called out in the log.
+_DELIVERY_WARN_PCT = 80.0
+
+#: The silence abort is an irreversible early decision; it is not taken
+#: on a stream that is already arriving this far behind real time, where
+#: the audio may be patchy and the user is still waiting for a response
+#: from the satellite.
+_SILENCE_ABORT_MIN_DELIVERY = 0.7
+
 
 _TEMPLATE_VAR = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 
@@ -199,6 +211,17 @@ class MurdockHandler(AsyncEventHandler):
         self._language: Optional[str] = None
         self._responded = False
         self._stream_start: Optional[float] = None
+        # How the audio actually arrived: when the first chunk came, the
+        # longest silence between two chunks, and how long Murdock itself
+        # spent on the slowest one. Together they say whether a stream
+        # that ran slower than real time was slow on Home Assistant's side
+        # or on ours.
+        self._first_chunk_at: Optional[float] = None
+        self._last_chunk_at: Optional[float] = None
+        self._chunk_count: int = 0
+        self._max_gap: float = 0.0
+        self._max_handle: float = 0.0
+        self._delivery: Optional[dict] = None
         # When HA stopped sending audio. Everything the caller
         # actually waits for happens after this instant, and it
         # was the one stretch Murdock could not account for.
@@ -269,6 +292,14 @@ class MurdockHandler(AsyncEventHandler):
         # Conditioned upload audio, prepared once and reused by every
         # fallback that needs it.
         self._prepared_audio: Optional[bytes] = None
+        # Requests to fallback services started before the main answered,
+        # by service id. Read by the chain and, later, by the shadows, so
+        # one request serves all three purposes.
+        self._prefetch: Dict[int, asyncio.Task] = {}
+        # A main that was overtaken by a fallback, still running so its
+        # answer and time can be logged once the utterance is recorded.
+        self._late_main: Optional[asyncio.Task] = None
+        self._main_result: Optional[dict] = None
         # The session's converted capture, kept for the recognition log.
         self._session_audio: Optional[bytes] = None
         # Whether this session is counted as a main request in flight.
@@ -328,7 +359,7 @@ class MurdockHandler(AsyncEventHandler):
                 for model in asr.models
                 for lang in model.languages
             ]
-            _LOGGER.info(
+            _LOGGER.debug(
                 "[%s] Describe → advertising languages: %s",
                 sid, ", ".join(languages) or "(none)",
             )
@@ -359,89 +390,17 @@ class MurdockHandler(AsyncEventHandler):
             return True
 
         if AudioChunk.is_type(event.type):
-            # After an early reject the session is decided: stop buffering
-            # and forwarding, just drain the stream until AudioStop.
-            if self._early_rejected or self._responded:
-                return True
-            chunk = AudioChunk.from_event(event)
-            self._audio_rate = chunk.rate
-            self._audio_width = chunk.width
-            self._audio_channels = chunk.channels
-            self._audio_buffer.extend(chunk.audio)
-            if not self._main_slot_held:
-                _SHADOW_GATE.acquire_main()
-                self._main_slot_held = True
-
-            # Lazily open upstream on the first chunk so we know the format.
-            # When using Voxtral cloud backend, skip the upstream connection
-            # entirely — we'll transcribe the buffered audio on AudioStop.
-            if not self._is_voxtral:
-                if self._upstream_client is None and not self._upstream_failed:
-                    await self._open_upstream(chunk.rate, chunk.width, chunk.channels)
-
-                # Forward the chunk as-is to the upstream STT.
-                if self._upstream_open:
-                    try:
-                        await self._upstream_client.write_event(  # type: ignore[union-attr]
-                            AudioChunk(
-                                audio=chunk.audio,
-                                rate=chunk.rate,
-                                width=chunk.width,
-                                channels=chunk.channels,
-                            ).event()
-                        )
-                    except Exception:
-                        _LOGGER.exception("[%s] Upstream write failed", sid)
-                        self._upstream_failed = True
-                        self._upstream_open = False
-
-            # --- Streaming-Verify: early probe ---
-            # After ~1.5 s of 16 kHz/16-bit audio (48000 bytes) we have
-            # enough material for a meaningful embedding. Fire off a
-            # background probe; if it matches with high confidence the
-            # HA events are sent immediately, shaving 2-4 s off the
-            # perceived speaker-recognition latency.
-            if not self._early_probed and len(self._audio_buffer) >= 48000:
-                self._early_probed = True
-                speaker_count = len(self.context.speakers.list_speakers())
-                if speaker_count > 0:
-                    snapshot = bytes(self._audio_buffer)
-                    self._early_probe_task = asyncio.create_task(
-                        self._run_early_probe(snapshot)
-                    )
-
-            # --- Silence abort ---
-            # A wake word that fired on its own leaves a stream with no
-            # speech in it. Checked once, after the configured window, so
-            # the turn can end without inventing a request out of silence.
-            abort_after = self._abort_after_sec
-            if (
-                not self._silence_probed
-                and abort_after > 0
-                and self.context.vad is not None
-                and len(self._audio_buffer) >= int(abort_after * 16000 * 2)
-            ):
-                self._silence_probed = True
-                await self._probe_for_silence(bytes(self._audio_buffer))
-
-            # --- Early reject (opt-in) ---
-            # Fires once there are ~1.5 s of voice AFTER the chime trim,
-            # i.e. later than the accept probe — a reject needs more
-            # evidence than a confirm. With no speakers enrolled there is
-            # nothing to be "far away from", so the probe never arms.
-            if (
-                not self._reject_probed
-                and not self._early_match
-                and self._early_reject_on
-            ):
-                if len(self._audio_buffer) >= self._skip_bytes + 48000:
-                    self._reject_probed = True
-                    if len(self.context.speakers.list_speakers()) > 0:
-                        snapshot = bytes(self._audio_buffer)
-                        self._reject_probe_task = asyncio.create_task(
-                            self._run_early_reject(snapshot)
-                        )
-            return True
+            arrived = time.monotonic()
+            if self._first_chunk_at is None:
+                self._first_chunk_at = arrived
+            elif self._last_chunk_at is not None:
+                self._max_gap = max(self._max_gap, arrived - self._last_chunk_at)
+            self._last_chunk_at = arrived
+            self._chunk_count += 1
+            try:
+                return await self._handle_chunk(event)
+            finally:
+                self._max_handle = max(self._max_handle, time.monotonic() - arrived)
 
         if AudioStop.is_type(event.type):
             if not self._responded:
@@ -450,9 +409,107 @@ class MurdockHandler(AsyncEventHandler):
 
         return True
 
+    async def _handle_chunk(self, event: Event) -> bool:
+        """Everything one audio chunk sets off, timed by the caller."""
+        sid = self._session_id
+        # After an early reject the session is decided: stop buffering
+        # and forwarding, just drain the stream until AudioStop.
+        if self._early_rejected or self._responded:
+            return True
+        chunk = AudioChunk.from_event(event)
+        self._audio_rate = chunk.rate
+        self._audio_width = chunk.width
+        self._audio_channels = chunk.channels
+        self._audio_buffer.extend(chunk.audio)
+        if not self._main_slot_held:
+            _SHADOW_GATE.acquire_main()
+            self._main_slot_held = True
+
+        # Lazily open upstream on the first chunk so we know the format.
+        # When using Voxtral cloud backend, skip the upstream connection
+        # entirely — we'll transcribe the buffered audio on AudioStop.
+        if not self._is_voxtral:
+            if self._upstream_client is None and not self._upstream_failed:
+                await self._open_upstream(chunk.rate, chunk.width, chunk.channels)
+
+            # Forward the chunk as-is to the upstream STT.
+            if self._upstream_open:
+                try:
+                    await self._upstream_client.write_event(  # type: ignore[union-attr]
+                        AudioChunk(
+                            audio=chunk.audio,
+                            rate=chunk.rate,
+                            width=chunk.width,
+                            channels=chunk.channels,
+                        ).event()
+                    )
+                except Exception:
+                    _LOGGER.exception("[%s] Upstream write failed", sid)
+                    self._upstream_failed = True
+                    self._upstream_open = False
+
+        # --- Streaming-Verify: early probe ---
+        # After ~1.5 s of 16 kHz/16-bit audio (48000 bytes) we have
+        # enough material for a meaningful embedding. Fire off a
+        # background probe; if it matches with high confidence the
+        # HA events are sent immediately, shaving 2-4 s off the
+        # perceived speaker-recognition latency.
+        if not self._early_probed and len(self._audio_buffer) >= 48000:
+            self._early_probed = True
+            speaker_count = len(self.context.speakers.list_speakers())
+            if speaker_count > 0:
+                snapshot = bytes(self._audio_buffer)
+                self._early_probe_task = asyncio.create_task(
+                    self._run_early_probe(snapshot)
+                )
+
+        # --- Silence abort ---
+        # A wake word that fired on its own leaves a stream with no
+        # speech in it. Checked once, after the configured window, so
+        # the turn can end without inventing a request out of silence.
+        abort_after = self._abort_after_sec
+        if (
+            not self._silence_probed
+            and abort_after > 0
+            and self._delivery_ratio() >= _SILENCE_ABORT_MIN_DELIVERY
+            and self.context.vad is not None
+            and len(self._audio_buffer) >= int(abort_after * 16000 * 2)
+        ):
+            self._silence_probed = True
+            await self._probe_for_silence(bytes(self._audio_buffer))
+
+        # --- Early reject (opt-in) ---
+        # Fires once there are ~1.5 s of voice AFTER the chime trim,
+        # i.e. later than the accept probe — a reject needs more
+        # evidence than a confirm. With no speakers enrolled there is
+        # nothing to be "far away from", so the probe never arms.
+        if (
+            not self._reject_probed
+            and not self._early_match
+            and self._early_reject_on
+        ):
+            if len(self._audio_buffer) >= self._skip_bytes + 48000:
+                self._reject_probed = True
+                if len(self.context.speakers.list_speakers()) > 0:
+                    snapshot = bytes(self._audio_buffer)
+                    self._reject_probe_task = asyncio.create_task(
+                        self._run_early_reject(snapshot)
+                    )
+        return True
+
     # ------------------------------------------------------------------
     # Session helpers
     # ------------------------------------------------------------------
+
+    def _delivery_ratio(self) -> float:
+        """Audio received so far over wall time since AudioStart, 0..∞."""
+        if self._stream_start is None:
+            return 1.0
+        elapsed = time.monotonic() - self._stream_start
+        if elapsed < 0.5:
+            return 1.0
+        bytes_per_sec = max(1, self._audio_rate * self._audio_width * self._audio_channels)
+        return (len(self._audio_buffer) / bytes_per_sec) / elapsed
 
     def _reset_session_state(self) -> None:
         # Snapshot first: everything below and every chunk of this
@@ -465,6 +522,12 @@ class MurdockHandler(AsyncEventHandler):
         self._audio_buffer = bytearray()
         self._responded = False
         self._stream_start = time.monotonic()
+        self._first_chunk_at = None
+        self._last_chunk_at = None
+        self._chunk_count = 0
+        self._max_gap = 0.0
+        self._max_handle = 0.0
+        self._delivery = None
         self._upstream_client = None
         self._upstream_open = False
         self._upstream_failed = False
@@ -483,6 +546,11 @@ class MurdockHandler(AsyncEventHandler):
         self._main_failed = False
         self._remote_down = False
         self._prepared_audio = None
+        # New containers rather than cleared ones: a finished session's
+        # shadows may still hold the old ones.
+        self._prefetch = {}
+        self._late_main = None
+        self._main_result = None
         self._session_audio = None
         if self._main_slot_held:
             # A session that never answered must not keep shadows
@@ -828,7 +896,9 @@ class MurdockHandler(AsyncEventHandler):
             # embedding has no voicing to match against. Rejecting it here
             # would silently kill exactly the utterances the whisper
             # feature exists to notice, so check before dropping.
-            whisper_probe = self.context.detect_whisper(audio_16k)
+            whisper_probe = await asyncio.to_thread(
+                self.context.detect_whisper, audio_16k
+            )
             if whisper_probe is not None:
                 self._whisper_score = round(whisper_probe.score, 4)
             if whisper_probe is not None and whisper_probe.is_whisper:
@@ -1044,45 +1114,160 @@ class MurdockHandler(AsyncEventHandler):
         self._prepared_audio = upload
         return upload
 
-    async def _transcribe_cloud(self, audio_16k: bytes) -> str:
-        """Transcribe buffered audio with the main service.
+    async def _call_service(
+        self, service, audio_16k: bytes, *, prepared: Optional[bytes],
+        language: Optional[str],
+    ) -> dict:
+        """One request to one service, touching no session state.
 
-        A failure is recorded rather than handled: what happens next is
-        the fallback chain's decision, made in one place for every kind
-        of main.
+        Requests may outlive the session that started them — a slow main
+        overtaken by a fallback, a prefetch read later by a shadow — and
+        must not write flags into whatever session the handler is serving
+        by then. Everything the caller needs comes back in the result.
         """
         from murdock.core.stt_backend import STTBackendError, STTNetworkError
+        from murdock.core.stt_services import KIND_WYOMING
 
+        result = {
+            "service_id": service.id, "name": service.name, "text": "",
+            "ms": 0.0, "error": None, "network": False, "timing": None,
+        }
+        backend = self.context.build_stt_backend(service)
+        if backend is None:
+            result["error"] = "not fully configured"
+            return result
+        audio = audio_16k if service.kind == KIND_WYOMING else (prepared or audio_16k)
+        started = time.monotonic()
+        try:
+            text = await asyncio.wait_for(
+                backend.transcribe(
+                    audio, rate=16000, width=2, channels=1, language=language,
+                ),
+                timeout=self.context.service_timeout(service) + 2.0,
+            )
+            result["text"] = (text or "").strip()
+        except STTNetworkError as exc:
+            result["error"] = str(exc) or "unreachable"
+            result["network"] = True
+        except asyncio.TimeoutError:
+            result["error"] = "timeout"
+        except STTBackendError as exc:
+            result["error"] = str(exc) or type(exc).__name__
+        except Exception as exc:  # never let one service sink the answer
+            _LOGGER.exception("STT service %s crashed", service.name)
+            result["error"] = str(exc) or type(exc).__name__
+        finally:
+            result["ms"] = round((time.monotonic() - started) * 1000, 1)
+            result["timing"] = dict(getattr(backend, "last_timing", None) or {}) or None
+        return result
+
+    def _start_prefetch(
+        self, service, audio_16k: bytes, prepared: Optional[bytes],
+        language: Optional[str],
+    ) -> None:
+        if service.id in self._prefetch:
+            return
+        self._prefetch[service.id] = asyncio.create_task(
+            self._call_service(service, audio_16k, prepared=prepared, language=language)
+        )
+
+    def _hedge_candidate(self):
+        """The first fallback that could actually answer right now."""
+        for service in self.context.get_fallback_services():
+            if self.context.is_service_remote(service) and self._remote_down:
+                continue
+            if self.context.build_stt_backend(service) is None:
+                continue
+            return service
+        return None
+
+    def _take_main(self, main, result: dict, started: float) -> str:
+        """Adopt the main's result into the session that is waiting for it."""
+        sid = self._session_id
+        self._transcript_ms = (time.monotonic() - started) * 1000
+        timing = dict(result.get("timing") or {})
+        if timing and self._stt_prep:
+            timing.update(self._stt_prep)
+        self._transcript_timing = timing or None
+        self._main_result = {
+            "main_engine": main.name, "main_ms": result["ms"],
+            "main_error": bool(result["error"]),
+        }
+        if result["error"]:
+            _LOGGER.warning("[%s] Main STT failed: %s", sid, result["error"])
+            self._main_failed = True
+            if result["network"] and self.context.is_service_remote(main):
+                self._remote_down = True
+            return ""
+        return result["text"]
+
+    async def _main_with_patience(self, audio_16k: bytes) -> str:
+        """The main's answer, unless it keeps the user waiting.
+
+        Only for a buffered main — a streaming one has been decoding all
+        along and answers the moment the audio stops. When the first
+        fallback is local it is asked straight away, in parallel: it is
+        free, and usually done long before the main. A remote one is only
+        asked once the patience has run out. Whichever way, the user
+        waits at most the patience for a slow main, not its full timeout
+        plus the fallback after it.
+        """
         sid = self._session_id
         main = self.context.get_main_service()
-        backend = self.context.build_stt_backend(main)
-        if backend is None:
+        patience = self.context.get_stt_patience()
+        hedge = self._hedge_candidate() if patience > 0 else None
+        started = time.monotonic()
+        prepared = await self._prepared_upload(audio_16k)
+        language = self._language
+        if main is None or self.context.build_stt_backend(main) is None:
             _LOGGER.warning(
                 "[%s] Main STT service %r is not fully configured",
                 sid, main.name if main else None,
             )
             self._main_failed = True
             return ""
-        upload_audio = await self._prepared_upload(audio_16k)
-        _LOGGER.info("[%s] Transcribing via %s…", sid, backend.label)
-        try:
-            return await backend.transcribe(
-                upload_audio, rate=16000, width=2, channels=1,
-                language=self._language,
-            )
-        except STTBackendError as exc:
-            _LOGGER.warning("[%s] Main STT failed: %s", sid, exc)
-            self._main_failed = True
-            if isinstance(exc, STTNetworkError) and self.context.is_service_remote(main):
-                self._remote_down = True
-            return ""
-        finally:
-            # Kept on the failure path too: a timeout's breakdown is
-            # exactly what tells a stalled upload from a slow model.
-            timing = dict(getattr(backend, "last_timing", None) or {})
-            if timing and self._stt_prep:
-                timing.update(self._stt_prep)
-            self._transcript_timing = timing or None
+        if hedge is not None and not self.context.is_service_remote(hedge):
+            self._start_prefetch(hedge, audio_16k, prepared, language)
+        main_task = asyncio.create_task(
+            self._call_service(main, audio_16k, prepared=prepared, language=language)
+        )
+        _LOGGER.info(
+            "[%s] Transcribing via %s%s…", sid, main.name,
+            f" (patience {patience:.1f}s, {hedge.name} standing by)" if hedge else "",
+        )
+        if hedge is None:
+            return self._take_main(main, await main_task, started)
+
+        done, _ = await asyncio.wait({main_task}, timeout=patience)
+        if main_task in done:
+            return self._take_main(main, main_task.result(), started)
+
+        self._start_prefetch(hedge, audio_16k, prepared, language)
+        backup = self._prefetch[hedge.id]
+        done, _ = await asyncio.wait(
+            {main_task, backup}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if main_task in done:
+            return self._take_main(main, main_task.result(), started)
+        answer = backup.result()
+        if answer["network"] and self.context.is_service_remote(hedge):
+            self._remote_down = True
+        if not answer["text"]:
+            # The stand-in has nothing to offer; the main is the only
+            # hope left, so give it the rest of its time.
+            return self._take_main(main, await main_task, started)
+        _LOGGER.info(
+            "[%s] %s still busy after %.1fs — answering with %s (%.0fms): %r",
+            sid, main.name, patience, hedge.name, answer["ms"], answer["text"][:80],
+        )
+        self._rescued_by = hedge.name
+        self._transcript_ms = (time.monotonic() - started) * 1000
+        self._main_result = {
+            "main_engine": main.name, "main_ms": None, "main_error": False,
+            "overtaken": True,
+        }
+        self._late_main = main_task
+        return answer["text"]
 
     async def _run_fallback_chain(self, audio_16k: bytes, *, reason: str) -> str:
         """Try the fallback services in order until one answers.
@@ -1110,42 +1295,41 @@ class MurdockHandler(AsyncEventHandler):
                     sid, service.name,
                 )
                 continue
-            backend = self.context.build_stt_backend(service)
-            if backend is None:
+            if self.context.build_stt_backend(service) is None:
                 _LOGGER.info(
                     "[%s] Fallback %s is not fully configured — skipped",
                     sid, service.name,
                 )
                 continue
-            # Each engine gets its audio the way it would as the main.
-            audio = (
-                audio_16k if service.kind == KIND_WYOMING
-                else await self._prepared_upload(audio_16k)
-            )
             _LOGGER.info(
                 "[%s] Main %s — trying fallback %s", sid,
                 "failed" if reason == "error" else "heard nothing", service.name,
             )
-            try:
-                text = await asyncio.wait_for(
-                    backend.transcribe(
-                        audio, rate=16000, width=2, channels=1,
-                        language=self._language,
-                    ),
-                    timeout=self.context.service_timeout(service) + 2.0,
+            pending = self._prefetch.get(service.id)
+            if pending is not None:
+                # Asked in parallel with the main already; often done.
+                result = await pending
+            else:
+                prepared = (
+                    None if service.kind == KIND_WYOMING
+                    else await self._prepared_upload(audio_16k)
                 )
-            except STTNetworkError as exc:
-                if remote:
-                    self._remote_down = True
-                _LOGGER.warning("[%s] Fallback %s unreachable: %s", sid, service.name, exc)
+                result = await self._call_service(
+                    service, audio_16k, prepared=prepared, language=self._language,
+                )
+            if result["error"]:
+                if result["network"]:
+                    if remote:
+                        self._remote_down = True
+                    _LOGGER.warning(
+                        "[%s] Fallback %s unreachable: %s", sid, service.name, result["error"]
+                    )
+                else:
+                    _LOGGER.warning(
+                        "[%s] Fallback %s failed: %s", sid, service.name, result["error"]
+                    )
                 continue
-            except (STTBackendError, asyncio.TimeoutError) as exc:
-                _LOGGER.warning("[%s] Fallback %s failed: %s", sid, service.name, exc)
-                continue
-            except Exception:
-                _LOGGER.exception("[%s] Fallback %s crashed", sid, service.name)
-                continue
-            text = (text or "").strip()
+            text = result["text"]
             if text:
                 self._rescued_by = service.name
                 _LOGGER.info(
@@ -1171,7 +1355,7 @@ class MurdockHandler(AsyncEventHandler):
         started = time.monotonic()
         try:
             if self._is_voxtral:
-                return await self._transcribe_cloud(audio_16k)
+                return await self._main_with_patience(audio_16k)
             text = await self._wait_for_upstream_transcript()
             if self._upstream_failed:
                 self._main_failed = True
@@ -1246,8 +1430,8 @@ class MurdockHandler(AsyncEventHandler):
         User-written rules therefore always win over a fuzzy match.
         """
         transcript = await self._transcribe_and_correct(audio_16k)
-        corrected, replacements = self.context.canonicalize_transcript(
-            transcript
+        corrected, replacements = await asyncio.to_thread(
+            self.context.canonicalize_transcript, transcript
         )
         if replacements:
             self._canonicalizations = [r.as_dict() for r in replacements]
@@ -1430,12 +1614,47 @@ class MurdockHandler(AsyncEventHandler):
         bytes_per_sec = max(1, self._audio_rate * self._audio_width * self._audio_channels)
         audio_sec = len(raw_audio) / bytes_per_sec
         stream_sec = max(0.001, time.monotonic() - self._stream_start)
+        pct = 100.0 * audio_sec / stream_sec
+        loop_lag = loop_monitor.max_lag_since(self._stream_start)
+        first_chunk = (
+            (self._first_chunk_at - self._stream_start)
+            if self._first_chunk_at is not None else None
+        )
+        self._delivery = {
+            "delivery_pct": round(pct, 1),
+            "stream_ms": round(stream_sec * 1000, 1),
+            "chunks": self._chunk_count,
+            "max_gap_ms": round(self._max_gap * 1000, 1),
+            "handler_max_ms": round(self._max_handle * 1000, 1),
+            "loop_lag_ms": round(loop_lag * 1000, 1),
+        }
+        if first_chunk is not None:
+            self._delivery["first_chunk_ms"] = round(first_chunk * 1000, 1)
         _LOGGER.info(
             "[%s] AudioStop from HA — %.2fs audio in %.2fs stream (%.0f%%), "
-            "upstream_open=%s, upstream_failed=%s, early_match=%s",
-            sid, audio_sec, stream_sec, 100.0 * audio_sec / stream_sec,
+            "%d chunks, longest gap %.0fms, slowest chunk %.1fms, "
+            "loop lag %.0fms, upstream_open=%s, upstream_failed=%s, early_match=%s",
+            sid, audio_sec, stream_sec, pct, self._chunk_count,
+            self._max_gap * 1000, self._max_handle * 1000, loop_lag * 1000,
             self._upstream_open, self._upstream_failed, self._early_match,
         )
+        if pct < _DELIVERY_WARN_PCT and stream_sec >= 1.5:
+            # Which side was slow is the whole question; say it.
+            if loop_lag >= 0.25 or self._max_handle >= 0.25:
+                culprit = (
+                    "Murdock's event loop was blocked — this side is the "
+                    "bottleneck"
+                )
+            else:
+                culprit = (
+                    "Murdock read every chunk promptly, so the audio "
+                    "arrived late — Home Assistant or the satellite's link"
+                )
+            _LOGGER.warning(
+                "[%s] Audio arrived slower than real time (%.0f%% of the "
+                "stream's duration) on %s: %s",
+                sid, pct, self._satellite_id or "unknown satellite", culprit,
+            )
 
         # Tell upstream that the audio stream is complete (Wyoming path only).
         if not self._is_voxtral:
@@ -1528,7 +1747,9 @@ class MurdockHandler(AsyncEventHandler):
         # speech is quiet and spectrally flat, which is exactly what the
         # liveness heuristic rejects as playback. Without checking first,
         # Murdock would discard the very utterances it should notice.
-        whisper_features = self.context.detect_whisper(audio_16k)
+        whisper_features = await asyncio.to_thread(
+            self.context.detect_whisper, audio_16k
+        )
         if whisper_features is not None:
             # Keep the score even below the bar: "0.55, just under" is the
             # information you need to tune the threshold.
@@ -2020,8 +2241,11 @@ class MurdockHandler(AsyncEventHandler):
             )
         except Exception as exc:
             _LOGGER.error(
-                "[%s] Failed to write Transcript back to satellite: %s",
-                sid, exc,
+                "[%s] Transcript %r could not be delivered — Home Assistant "
+                "had already closed the connection, %.0fms after AudioStop "
+                "(%s: %s). Nothing reached the user; a faster main service "
+                "or a shorter patience would have answered in time.",
+                sid, text, self._answer_ms or 0.0, type(exc).__name__, exc,
             )
 
     async def _passthrough_response(
@@ -2188,15 +2412,40 @@ class MurdockHandler(AsyncEventHandler):
         handler may already be serving the next utterance — reading
         session state then would mix two conversations.
         """
-        if not event_id or not audio_16k:
+        if not event_id:
+            return
+        if self._late_main is not None:
+            asyncio.create_task(self._log_late_main(event_id, self._late_main))
+            self._late_main = None
+        if not audio_16k:
             return
         shadows = self.context.get_shadow_services()
         if not shadows:
             return
         asyncio.create_task(self._run_shadows(
             event_id, audio_16k, self._prepared_audio, self._language,
-            self._session_id, shadows,
+            self._session_id, shadows, prefetched=dict(self._prefetch),
         ))
+
+    async def _log_late_main(self, event_id: int, task: asyncio.Task) -> None:
+        """Record what an overtaken main eventually said, and when.
+
+        Without it the main's slow tail would vanish from its own
+        statistics exactly in the cases that made it slow.
+        """
+        try:
+            result = await task
+        except Exception:
+            return
+        await asyncio.to_thread(
+            self.context.recognition.add_shadow_result,
+            event_id,
+            service_id=result["service_id"],
+            engine=result["name"],
+            transcript=result["text"],
+            ms=result["ms"],
+            error=result["error"],
+        )
 
     def _store_event_audio(self, event_id: int) -> None:
         """Keep this utterance's recordings for the log, off the loop.
@@ -2234,6 +2483,7 @@ class MurdockHandler(AsyncEventHandler):
     async def _run_shadows(
         self, event_id: int, audio_16k: bytes, prepared: Optional[bytes],
         language: Optional[str], sid: str, shadows: list,
+        prefetched: Optional[dict] = None,
     ) -> None:
         """Transcribe with each shadow in turn and log every result.
 
@@ -2244,11 +2494,38 @@ class MurdockHandler(AsyncEventHandler):
         from murdock.core.stt_backend import STTBackendError
         from murdock.core.stt_services import KIND_WYOMING
 
+        log = self.context.recognition
+
+        async def _record(**kw) -> None:
+            # Off the loop: this runs while the next utterance may already
+            # be streaming in.
+            await asyncio.to_thread(log.add_shadow_result, event_id, **kw)
+
         for service in shadows:
+            already = (prefetched or {}).get(service.id)
+            if already is not None:
+                # Asked during the answer already — as a stand-in for a
+                # slow main. Asking again would only measure it twice.
+                try:
+                    result = await already
+                except Exception:
+                    result = None
+                if result is not None:
+                    _LOGGER.info(
+                        "[%s] Shadow %s (%.0fms, reused): %r", sid, service.name,
+                        result["ms"],
+                        (result["error"] and f"⚠ {result['error']}") or result["text"][:80],
+                    )
+                    await _record(
+                        service_id=service.id, engine=service.name,
+                        transcript=result["text"], ms=result["ms"],
+                        error=result["error"],
+                    )
+                    continue
             backend = self.context.build_stt_backend(service)
             if backend is None:
-                self.context.recognition.add_shadow_result(
-                    event_id, service_id=service.id, engine=service.name,
+                await _record(
+                    service_id=service.id, engine=service.name,
                     transcript="", ms=None, error="not configured",
                 )
                 continue
@@ -2291,8 +2568,8 @@ class MurdockHandler(AsyncEventHandler):
                 "[%s] Shadow %s (%.0fms): %r", sid, service.name, ms,
                 (error and f"⚠ {error}") or text[:80],
             )
-            self.context.recognition.add_shadow_result(
-                event_id, service_id=service.id, engine=service.name,
+            await _record(
+                service_id=service.id, engine=service.name,
                 transcript=text, ms=ms, error=error,
             )
 
@@ -2305,6 +2582,10 @@ class MurdockHandler(AsyncEventHandler):
         the two used to be invisible — and unexplainable.
         """
         timing = dict(self._transcript_timing or {})
+        if getattr(self, "_delivery", None):
+            timing.update(self._delivery)
+        if getattr(self, "_main_result", None):
+            timing.update(self._main_result)
         if self._rescued_by:
             timing["rescued_by"] = self._rescued_by
         if self._gate_ms is not None:
@@ -2387,6 +2668,27 @@ class MurdockHandler(AsyncEventHandler):
         _LOGGER.info(
             "[%s] session done (%s) — wall=%.0fms", self._session_id, outcome, total_ms
         )
+
+    async def run(self) -> None:
+        """Serve one connection, treating a hang-up as an event, not a crash.
+
+        When Home Assistant gives up on a slow answer it closes the
+        socket; the next read or write then raises. Left alone that
+        surfaced as "Task exception was never retrieved" with a bare
+        BrokenPipeError — say instead when it happened relative to the
+        utterance.
+        """
+        try:
+            await super().run()
+        except (ConnectionError, asyncio.IncompleteReadError) as exc:
+            since_stop = (
+                f"{(time.monotonic() - self._stop_at) * 1000:.0f}ms after AudioStop"
+                if self._stop_at is not None else "before AudioStop"
+            )
+            _LOGGER.warning(
+                "[%s] Home Assistant closed the connection %s (%s)",
+                self._session_id, since_stop, type(exc).__name__,
+            )
 
     async def disconnect(self) -> None:
         """Wyoming server hook — clean up upstream connection on client close."""

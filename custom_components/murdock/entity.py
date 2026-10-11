@@ -38,24 +38,50 @@ class MurdockEntity(Entity):
         self.async_write_ha_state()
 
 
+def configuration_url(coordinator: MurdockCoordinator) -> str | None:
+    """Where "visit" on the device page should go.
+
+    The internal add-on address is not reachable from a browser, so for
+    the add-on it opens the panel inside Home Assistant instead.
+    """
+    if coordinator.addon_slug:
+        return f"homeassistant://hassio/ingress/{coordinator.addon_slug}"
+    url = coordinator.api.base_url
+    host = url.split("://", 1)[-1].split(":", 1)[0].split("/", 1)[0]
+    return url if "." in host or host == "localhost" else None
+
+
 def proxy_device_info(coordinator: MurdockCoordinator) -> DeviceInfo:
     """One diagnostics device for the proxy itself."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, coordinator.api.base_url)},
+    info = DeviceInfo(
+        identifiers={(DOMAIN, coordinator.id_prefix)},
         name="Murdock Proxy",
         manufacturer="Murdock",
         sw_version=coordinator.proxy_version,
-        configuration_url=coordinator.api.base_url,
     )
+    url = configuration_url(coordinator)
+    if url:
+        info["configuration_url"] = url
+    return info
+
+
+# Home Assistant replaced ``via_device`` (an identifier tuple) with
+# ``via_device_id`` (a registry id); the old key stops working in 2027.8.
+_HAS_VIA_DEVICE_ID = "via_device_id" in getattr(DeviceInfo, "__annotations__", {})
 
 
 def satellite_device_info(
     coordinator: MurdockCoordinator, satellite_id: str
 ) -> DeviceInfo:
-    """One device per mapped satellite."""
-    return DeviceInfo(
-        identifiers={(DOMAIN, f"{coordinator.api.base_url}:{satellite_id}")},
+    """One device per mapped satellite, hung under the proxy device."""
+    info = DeviceInfo(
+        identifiers={(DOMAIN, f"{coordinator.id_prefix}:{satellite_id}")},
         name=f"Murdock {satellite_id}",
         manufacturer="Murdock",
-        via_device=(DOMAIN, coordinator.api.base_url),
     )
+    if _HAS_VIA_DEVICE_ID:
+        if coordinator.proxy_device_id:
+            info["via_device_id"] = coordinator.proxy_device_id
+    else:
+        info["via_device"] = (DOMAIN, coordinator.id_prefix)
+    return info

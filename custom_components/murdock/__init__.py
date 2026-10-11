@@ -12,10 +12,17 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import llm
 
-from .const import CONF_MIRROR_VOCABULARY, DEFAULT_MIRROR_VOCABULARY, DOMAIN
+from .const import (
+    CONF_BASE_URL,
+    CONF_MIRROR_VOCABULARY,
+    DEFAULT_MIRROR_VOCABULARY,
+    DOMAIN,
+)
 from .coordinator import MurdockCoordinator
 from .llm_api import MurdockLLMApi
 from .vocabulary import VocabularyMirror
@@ -30,6 +37,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = MurdockCoordinator(hass, entry)
     await coordinator.async_setup()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    # The proxy device must exist before the satellite devices that hang
+    # under it: they point at it by registry id.
+    from .entity import proxy_device_info
+
+    proxy = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, **proxy_device_info(coordinator)
+    )
+    coordinator.proxy_device_id = proxy.id
 
     # LLM API (plan §18) — registered like Herold's, unregistered on unload.
     entry.async_on_unload(
@@ -70,3 +86,44 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Re-key entities and devices from the proxy URL to the entry id.
+
+    Unique ids and device identifiers used to begin with the base URL, so
+    pointing the entry at a new address — the add-on's internal hostname
+    instead of homeassistant.local — would have orphaned every entity.
+    """
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:
+        old = str(entry.data.get(CONF_BASE_URL, "")).rstrip("/")
+        new = entry.entry_id
+
+        def _rekey(value: str) -> str | None:
+            if old and (value == old or value.startswith(old + ":")):
+                return new + value[len(old):]
+            return None
+
+        @callback
+        def _entity(reg_entry: er.RegistryEntry) -> dict | None:
+            rekeyed = _rekey(reg_entry.unique_id)
+            return {"new_unique_id": rekeyed} if rekeyed else None
+
+        await er.async_migrate_entries(hass, entry.entry_id, _entity)
+
+        dev_reg = dr.async_get(hass)
+        for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+            identifiers = set()
+            changed = False
+            for domain, ident in device.identifiers:
+                rekeyed = _rekey(ident) if domain == DOMAIN else None
+                identifiers.add((domain, rekeyed or ident))
+                changed = changed or rekeyed is not None
+            if changed:
+                dev_reg.async_update_device(device.id, new_identifiers=identifiers)
+
+        hass.config_entries.async_update_entry(entry, minor_version=2)
+        _LOGGER.info("Murdock entities re-keyed from %s to the config entry", old)
+    return True

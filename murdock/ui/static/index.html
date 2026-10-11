@@ -563,6 +563,11 @@
                         <small class="meta" data-i18n="stt.language_hint">Used when Home Assistant sends no language.</small>
                     </label>
                     <label>
+                        <span data-i18n="svc.patience">Patience with the main (seconds)</span>
+                        <input type="number" step="0.5" min="0" max="30" name="stt_patience_sec">
+                        <small class="meta" data-i18n="svc.patience_hint">How long a cloud main may take before the first fallback answers instead.</small>
+                    </label>
+                    <label>
                         <span data-i18n="stt.timeout">Request timeout (seconds)</span>
                         <input type="number" step="0.5" min="1" max="120" name="stt_timeout_sec">
                         <small class="meta" data-i18n="stt.timeout_hint">Hard ceiling on one transcription request.</small>

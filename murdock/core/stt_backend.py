@@ -373,6 +373,7 @@ async def transcribe_via_wyoming(
             # on the first cut every utterance short — "wann Avengers
             # Doomsday rauskomm" instead of "rauskommt?".
             best = ""
+            answered = False
             while True:
                 try:
                     # Before anything has arrived, wait as long as the
@@ -397,13 +398,17 @@ async def transcribe_via_wyoming(
                     # Partial by definition in the streaming protocol.
                     continue
                 if Transcript.is_type(event.type):
+                    answered = True
                     text = Transcript.from_event(event).text or ""
                     if text:
                         best = text
-            if not best:
+            if not answered:
                 raise STTBackendError(
                     f"wyoming {uri}: closed without transcript"
                 )
+            # An empty Transcript is the server saying it heard nothing —
+            # an answer, not a failure. Treating it as an error made a
+            # quiet utterance look like an outage.
             return best
 
     try:
@@ -639,9 +644,26 @@ class WyomingBackend:
             "audio_ms": round(len(pcm_audio) / (rate * width * channels) * 1000, 1),
         }
         try:
-            return await transcribe_via_wyoming(
-                self.uri, pcm_audio, rate=rate, width=width, channels=channels,
-                language=language or self.language, timeout=self.timeout,
-            )
+            try:
+                return await transcribe_via_wyoming(
+                    self.uri, pcm_audio, rate=rate, width=width, channels=channels,
+                    language=language or self.language, timeout=self.timeout,
+                )
+            except STTBackendError as exc:
+                elapsed = time.monotonic() - t0
+                # Only a fast hang-up is worth a second try; a slow one
+                # has already spent the time a retry would need.
+                if "closed without transcript" not in str(exc) or elapsed > 1.0:
+                    raise
+                _LOGGER.info(
+                    "%s closed without answering after %.0fms — retrying once",
+                    self.uri, elapsed * 1000,
+                )
+                self.last_timing["retried"] = True
+                return await transcribe_via_wyoming(
+                    self.uri, pcm_audio, rate=rate, width=width, channels=channels,
+                    language=language or self.language,
+                    timeout=max(1.0, self.timeout - elapsed),
+                )
         finally:
             self.last_timing["total_ms"] = round((time.monotonic() - t0) * 1000, 1)

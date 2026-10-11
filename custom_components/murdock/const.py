@@ -50,4 +50,9 @@ SIGNAL_SPEAKER_UPDATE = f"{DOMAIN}_speaker_update"
 VOCABULARY_DEBOUNCE_SECONDS = 5.0
 
 # Slow poll keeping the connection sensor honest between events.
-HEALTH_POLL_INTERVAL_SECONDS = 300
+# A cheap request; often enough that one lost poll is noticed quickly,
+# and with the tolerance below no single one decides anything.
+HEALTH_POLL_INTERVAL_SECONDS = 60
+# Consecutive failed polls before the proxy counts as offline. One failed
+# request used to flip the connection sensor off for a whole interval.
+OFFLINE_AFTER_FAILURES = 3

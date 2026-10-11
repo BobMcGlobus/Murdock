@@ -54,7 +54,7 @@ class SpeakerSensor(MurdockEntity, SensorEntity):
         super().__init__(coordinator)
         self._satellite_id = satellite_id
         self._attr_unique_id = (
-            f"{coordinator.api.base_url}:{satellite_id}:speaker"
+            f"{coordinator.id_prefix}:{satellite_id}:speaker"
         )
         self._attr_device_info = satellite_device_info(
             coordinator, satellite_id
@@ -113,7 +113,7 @@ class LastRecognitionSensor(MurdockEntity, SensorEntity):
 
     def __init__(self, coordinator: MurdockCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.api.base_url}:last_recognition"
+        self._attr_unique_id = f"{coordinator.id_prefix}:last_recognition"
         self._attr_device_info = proxy_device_info(coordinator)
 
     @property
@@ -134,7 +134,7 @@ class DeliveryPathSensor(MurdockEntity, SensorEntity):
 
     def __init__(self, coordinator: MurdockCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.api.base_url}:delivery_path"
+        self._attr_unique_id = f"{coordinator.id_prefix}:delivery_path"
         self._attr_device_info = proxy_device_info(coordinator)
 
     @property
@@ -161,7 +161,7 @@ class VocabularyVersionSensor(MurdockEntity, SensorEntity):
 
     def __init__(self, coordinator: MurdockCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.api.base_url}:vocabulary_version"
+        self._attr_unique_id = f"{coordinator.id_prefix}:vocabulary_version"
         self._attr_device_info = proxy_device_info(coordinator)
 
     @property

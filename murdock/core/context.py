@@ -375,6 +375,25 @@ class AppContext:
             return override.lower() in ("1", "true", "yes", "on")
         return self.settings.enable_stt_prep
 
+    def get_stt_patience(self) -> float:
+        """Seconds to wait for a buffered main before a fallback answers.
+
+        0 switches it off: the main then has its full timeout, and the
+        fallback chain only starts once it has given up.
+        """
+        override = get_setting(self.db, "stt_patience_sec")
+        raw = override if override is not None else getattr(
+            self.settings, "stt_patience_sec", 2.5
+        )
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            value = 2.5
+        return max(0.0, min(30.0, value))
+
+    def set_stt_patience(self, value: float) -> None:
+        set_setting(self.db, "stt_patience_sec", str(max(0.0, min(30.0, float(value)))))
+
     def get_enable_event_audio(self) -> bool:
         override = get_setting(self.db, "enable_event_audio")
         if override is not None:

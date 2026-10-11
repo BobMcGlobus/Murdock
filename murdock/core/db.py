@@ -240,6 +240,16 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute("PRAGMA journal_mode = WAL;")
+    # Every commit used to fsync. The connection is shared by the event
+    # loop that also reads the satellites' audio, and on a VM disk —
+    # worst of all one on a parity-protected array — an fsync can take
+    # hundreds of milliseconds, during which no audio is read. In WAL
+    # mode NORMAL only syncs at checkpoints; a power cut can lose the
+    # last few log rows, never corrupt the database.
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    # Several threads share this connection; wait for a lock instead of
+    # failing outright.
+    conn.execute("PRAGMA busy_timeout = 5000;")
 
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)

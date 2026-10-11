@@ -299,6 +299,67 @@ class RecognitionLog:
                 }]
         return events
 
+    def engine_stats(self, *, since_seconds: float = 7 * 24 * 3600) -> dict:
+        """Latency and failure rate per STT engine, from real utterances.
+
+        Two sources: what each main answered (its time is in the event's
+        timing — or, when a fallback overtook it, in the late result
+        logged with the shadows) and every shadow's reading. Picking an
+        engine on these numbers beats picking it on a benchmark page.
+        """
+        cutoff = time.time() - since_seconds
+        samples: dict = {}
+
+        def add(name, ms, failed):
+            if not name:
+                return
+            entry = samples.setdefault(name, {"ms": [], "errors": 0, "n": 0})
+            entry["n"] += 1
+            if failed:
+                entry["errors"] += 1
+            elif ms is not None:
+                entry["ms"].append(float(ms))
+
+        with self._lock:
+            events = self.conn.execute(
+                "SELECT transcript_timing FROM recognition_events "
+                "WHERE created_at > ? AND transcript_timing IS NOT NULL",
+                (cutoff,),
+            ).fetchall()
+            shadows = self.conn.execute(
+                "SELECT engine, ms, error FROM shadow_results WHERE created_at > ?",
+                (cutoff,),
+            ).fetchall()
+        for row in events:
+            try:
+                timing = json.loads(row["transcript_timing"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(timing, dict) or timing.get("overtaken"):
+                continue  # counted from its late result instead
+            add(timing.get("main_engine"), timing.get("main_ms"), timing.get("main_error"))
+        for row in shadows:
+            add(row["engine"], row["ms"], bool(row["error"]))
+
+        def pct(values, q):
+            if not values:
+                return None
+            ordered = sorted(values)
+            k = (len(ordered) - 1) * q
+            lo = int(k)
+            hi = min(lo + 1, len(ordered) - 1)
+            return round(ordered[lo] + (ordered[hi] - ordered[lo]) * (k - lo), 1)
+
+        return {
+            name: {
+                "n": e["n"],
+                "errors": e["errors"],
+                "p50_ms": pct(e["ms"], 0.5),
+                "p95_ms": pct(e["ms"], 0.95),
+            }
+            for name, e in samples.items()
+        }
+
     def store_audio(
         self, event_id: int, kind: str, pcm: bytes, *, sample_rate: int = 16000,
         keep_events: int = 20,

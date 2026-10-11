@@ -289,6 +289,9 @@ class Settings(BaseSettings):
     # Keep the last N utterances' audio for the recognition log, so a
     # disputed transcript can be listened to. 0 disables it.
     enable_event_audio: bool = Field(default=True)
+    # How long a buffered main service may take before the first
+    # fallback's answer is used instead. 0 = wait for the main's timeout.
+    stt_patience_sec: float = Field(default=2.5)
     event_audio_keep: int = Field(default=20)
 
     # Logging

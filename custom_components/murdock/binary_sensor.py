@@ -39,7 +39,7 @@ class ConnectionSensor(MurdockEntity, BinarySensorEntity):
 
     def __init__(self, coordinator: MurdockCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.api.base_url}:connection"
+        self._attr_unique_id = f"{coordinator.id_prefix}:connection"
         self._attr_device_info = proxy_device_info(coordinator)
 
     @property
@@ -59,7 +59,7 @@ class WhisperSensor(MurdockEntity, BinarySensorEntity):
     def __init__(self, coordinator: MurdockCoordinator, satellite_id: str) -> None:
         super().__init__(coordinator)
         self._satellite_id = satellite_id
-        self._attr_unique_id = f"{coordinator.api.base_url}:{satellite_id}:whisper"
+        self._attr_unique_id = f"{coordinator.id_prefix}:{satellite_id}:whisper"
         self._attr_device_info = satellite_device_info(coordinator, satellite_id)
 
     @callback

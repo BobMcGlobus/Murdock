@@ -1184,6 +1184,7 @@ async function loadSettings() {
         if (sttGlobals) {
             sttGlobals.stt_language.value = s.stt_language ?? "";
             sttGlobals.stt_timeout_sec.value = s.stt_timeout_sec ?? 8;
+            sttGlobals.stt_patience_sec.value = s.stt_patience_sec ?? 2.5;
             sttGlobals.enable_stt_prep.checked = !!s.enable_stt_prep;
         }
         const sttForm = $("#stt-form");
@@ -1475,12 +1476,18 @@ let sttServicesState = {
     services: [],
     roles: { main: null, fallbacks: [], shadows: [], fallback_on_empty: true },
 };
+let sttServiceStats = {};
 
 async function loadSttServices() {
     const list = $("#stt-services-list");
     if (!list) return;
     try {
         sttServicesState = await api("/api/stt-services");
+        try {
+            sttServiceStats = await api("/api/stt-services/stats?days=7");
+        } catch {
+            sttServiceStats = {};
+        }
         renderSttServices();
     } catch (err) {
         list.innerHTML = `<p class="feedback err">${escapeHtml(err.message)}</p>`;
@@ -1496,6 +1503,22 @@ function svcSummary(svc) {
     if (svc.kind === "voxtral") return c.model || "voxtral-mini-latest";
     if (svc.kind === "ha") return c.entity_id || "";
     return "";
+}
+
+function svcStatsLine(st) {
+    // Measured on your own utterances over the last week — what the
+    // choice of main should rest on.
+    if (!st || !st.n) {
+        return `<div class="meta">${escapeHtml(t("svc.stats_none"))}</div>`;
+    }
+    const parts = [];
+    if (st.p50_ms != null) parts.push(`p50 ${formatMs(st.p50_ms)}`);
+    if (st.p95_ms != null) parts.push(`p95 ${formatMs(st.p95_ms)}`);
+    const errPct = Math.round((100 * st.errors) / st.n);
+    parts.push(t("svc.stats_errors", { pct: errPct }));
+    parts.push(`n=${st.n}`);
+    const slow = st.p95_ms != null && st.p95_ms > 3000;
+    return `<div class="meta svc-stats${slow || errPct >= 10 ? " warn" : ""}">${escapeHtml(t("svc.stats_label"))}: ${escapeHtml(parts.join(" · "))}</div>`;
 }
 
 function svcFeedback(text, cls) {
@@ -1550,6 +1573,7 @@ function renderSttServices() {
         return `<div class="list-item svc-item" data-svc-id="${svc.id}">
             <div class="row"><h3>${escapeHtml(svc.name)}</h3> ${badges.join(" ")}</div>
             <div class="meta"><code>${escapeHtml(svcSummary(svc))}</code></div>
+            ${svcStatsLine(sttServiceStats[svc.name])}
             <div class="row svc-roles">${roleControls}</div>
             <div class="row">
                 <button type="button" class="secondary small" data-svc-action="test">${escapeHtml(t("svc.test"))}</button>
@@ -1795,6 +1819,9 @@ if (sttGlobalsForm) {
         };
         if (f.stt_timeout_sec.value !== "") {
             body.stt_timeout_sec = parseFloat(f.stt_timeout_sec.value);
+        }
+        if (f.stt_patience_sec.value !== "") {
+            body.stt_patience_sec = parseFloat(f.stt_patience_sec.value);
         }
         try {
             await api("/api/settings", {
@@ -2766,7 +2793,23 @@ function renderRecognitionEvent(e) {
     // Everything that used to sit in three grey lines. Collapsed by
     // default: it is what you open when something looks wrong, not what
     // you read to find out whether it does.
-    const detailRows = [scoreLine, sttText, nearestHint].filter(Boolean);
+    // How the audio arrived. Far below 100 % means the stream ran slower
+    // than real time; the loop lag says whether Murdock was the reason.
+    let deliveryText = "";
+    let deliveryChip = "";
+    if (tt && tt.delivery_pct != null) {
+        const bits = [t("rec.delivery", { pct: Math.round(tt.delivery_pct) })];
+        if (tt.max_gap_ms != null) bits.push(t("rec.delivery_gap", { ms: formatMs(tt.max_gap_ms) }));
+        if (tt.loop_lag_ms != null) bits.push(t("rec.delivery_lag", { ms: formatMs(tt.loop_lag_ms) }));
+        deliveryText = escapeHtml(bits.join(" · "));
+        if (tt.delivery_pct < 80) {
+            const ours = (tt.loop_lag_ms || 0) >= 250 || (tt.handler_max_ms || 0) >= 250;
+            deliveryChip = `<span class="badge warn" title="${escapeHtml(
+                t(ours ? "rec.delivery_ours" : "rec.delivery_theirs"))}">${escapeHtml(
+                t("rec.delivery_chip", { pct: Math.round(tt.delivery_pct) }))}</span>`;
+        }
+    }
+    const detailRows = [scoreLine, sttText, deliveryText, nearestHint].filter(Boolean);
     const details = detailRows.length
         ? `<details class="rec-details">
                <summary>${escapeHtml(t("rec.details"))}</summary>
@@ -2780,6 +2823,7 @@ function renderRecognitionEvent(e) {
                 <span class="${badgeCls}">${escapeHtml(meta.label)}</span>
                 <strong>${who}</strong>
                 ${whisperChip}
+                ${deliveryChip}
                 <span class="meta">${ts} · ${e.duration_sec.toFixed(2)}s${sat}</span>
             </div>
             ${transcript}

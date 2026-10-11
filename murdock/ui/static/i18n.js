@@ -605,6 +605,19 @@ const I18N = (() => {
             "rec.audio_keep": "Keep the recordings",
             "rec.audio_keep_n": "Utterances kept",
             "rec.audio_keep_hint": "Only the newest utterances keep their audio; older ones drop it. Roughly 200 kB per utterance. “Microphone” is the untouched capture, “Sent to the service” the conditioned copy — where a transcript and the audio disagree, comparing the two says which side is at fault.",
+
+            // -- Latency --
+            "svc.patience": "Patience with the main (seconds)",
+            "svc.patience_hint": "How long a cloud main may take before the first fallback answers instead. A local first fallback is asked in parallel right away, so its answer is ready when the patience runs out; a remote one is only asked then. 0 waits for the main's full timeout, as before. Default: 2.5 s.",
+            "svc.stats_label": "Measured (7 days)",
+            "svc.stats_none": "No measurements yet — they appear once this service has answered as main or shadow.",
+            "svc.stats_errors": "{pct}% errors",
+            "rec.delivery": "audio {pct}% of real time",
+            "rec.delivery_gap": "longest gap {ms}",
+            "rec.delivery_lag": "loop lag {ms}",
+            "rec.delivery_chip": "audio late ({pct}%)",
+            "rec.delivery_ours": "Murdock's event loop was blocked while the audio came in — Murdock is the bottleneck.",
+            "rec.delivery_theirs": "Murdock read every chunk at once, so the audio itself arrived late — Home Assistant or the satellite's network link.",
         },
 
         de: {
@@ -1202,6 +1215,19 @@ const I18N = (() => {
             "rec.audio_keep": "Aufnahmen behalten",
             "rec.audio_keep_n": "Aufbewahrte Äußerungen",
             "rec.audio_keep_hint": "Nur die neuesten Äußerungen behalten ihr Audio, ältere verlieren es. Etwa 200 kB pro Äußerung. „Mikrofon“ ist die unveränderte Aufnahme, „An den Dienst gesendet“ die aufbereitete Kopie — wenn Transkript und Audio nicht zusammenpassen, zeigt der Vergleich, woran es liegt.",
+
+            // -- Latency --
+            "svc.patience": "Geduld mit dem Main (Sekunden)",
+            "svc.patience_hint": "Wie lange ein Cloud-Main brauchen darf, bevor der erste Fallback stattdessen antwortet. Ein lokaler erster Fallback wird sofort parallel gefragt, seine Antwort liegt also bereit, wenn die Geduld abläuft; ein entfernter wird erst dann gefragt. 0 wartet wie bisher den vollen Timeout des Mains ab. Standard: 2,5 s.",
+            "svc.stats_label": "Gemessen (7 Tage)",
+            "svc.stats_none": "Noch keine Messwerte — sie erscheinen, sobald dieser Dienst als Main oder Shadow geantwortet hat.",
+            "svc.stats_errors": "{pct} % Fehler",
+            "rec.delivery": "Audio mit {pct} % Echtzeit",
+            "rec.delivery_gap": "längste Lücke {ms}",
+            "rec.delivery_lag": "Loop-Verzögerung {ms}",
+            "rec.delivery_chip": "Audio verspätet ({pct} %)",
+            "rec.delivery_ours": "Murdocks Event-Loop war blockiert, während das Audio ankam — Murdock ist der Engpass.",
+            "rec.delivery_theirs": "Murdock hat jeden Chunk sofort gelesen, das Audio kam also selbst verspätet an — Home Assistant oder die Netzwerkverbindung des Satelliten.",
         },
     };
 

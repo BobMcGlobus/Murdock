@@ -23,7 +23,12 @@ _LOGGER = logging.getLogger("murdock.main")
 
 async def _run_web_ui(app, host: str, port: int) -> None:
     config = uvicorn.Config(
-        app, host=host, port=port, log_level="info", access_log=False
+        app, host=host, port=port, log_level="info", access_log=False,
+        # Longer than any client's own keep-alive. uvicorn's default of
+        # 5 s is shorter than aiohttp's 15 s, so Home Assistant would
+        # reuse a socket the server had just closed and get "connection
+        # reset by peer" — the integration's flapping connection sensor.
+        timeout_keep_alive=75,
     )
     server = uvicorn.Server(config)
     await server.serve()
@@ -38,10 +43,21 @@ async def main() -> None:
     )
 
     _LOGGER.info("Murdock v%s starting…", __version__)
-    _LOGGER.info("Listen: %s  Upstream: %s", settings.listen_uri, settings.upstream_uri)
+    _LOGGER.info("Listen: %s", settings.listen_uri)
     _LOGGER.info("Data dir: %s   Model dir: %s", settings.data_dir, settings.model_dir)
 
     context = build_context(settings)
+    # Name whatever holds the event loop: it is shared by the audio path,
+    # the web API and MQTT, and a stall anywhere slows the satellites.
+    from murdock.core import loop_monitor
+
+    loop_monitor.start()
+    main = context.get_main_service()
+    _LOGGER.info(
+        "Speech-to-text: main %s, %d fallback(s), %d shadow(s)",
+        f"{main.name} ({main.kind})" if main else "— none configured —",
+        len(context.get_fallback_services()), len(context.get_shadow_services()),
+    )
     speakers = context.speakers.list_speakers()
     _LOGGER.info(
         "Speaker store ready — %d speaker(s) enrolled, threshold=%.3f",

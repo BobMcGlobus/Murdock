@@ -47,6 +47,7 @@ from .const import (
     EVENT_SPEAKER_RECOGNITION,
     HEALTH_POLL_INTERVAL_SECONDS,
     MQTT_EVENT_SUFFIX,
+    OFFLINE_AFTER_FAILURES,
     SIGNAL_SPEAKER_UPDATE,
 )
 
@@ -125,6 +126,22 @@ class MurdockCoordinator:
         # recognition delivered over both paths is only applied once.
         self._last_seen: tuple[str, Any] | None = None
         self.mqtt_subscribed: bool = False
+        # Consecutive failed health polls; see OFFLINE_AFTER_FAILURES.
+        self._failures: int = 0
+        self._switch_checked: bool = False
+        # The add-on's slug, for a configuration link into its panel.
+        self.addon_slug: str | None = None
+        # Device registry id of the proxy device, parent of the satellites.
+        self.proxy_device_id: str | None = None
+
+    @property
+    def id_prefix(self) -> str:
+        """Stable prefix for unique ids: the entry, not the address.
+
+        Ids used to start with the URL, so reaching the same proxy by a
+        different address would have created a second set of entities.
+        """
+        return self.entry.entry_id
 
     # ------------------------------------------------------------------
     # Config accessors
@@ -246,14 +263,76 @@ class MurdockCoordinator:
     async def _async_health_poll(self, _now=None) -> None:
         was_available = self.available
         try:
-            self.proxy_version = await self.api.get_version()
+            info = await self.api.get_version_info()
+        except MurdockApiError as exc:
+            self._failures += 1
+            if self._heard_recently():
+                # A recognition just arrived over MQTT or the event bus:
+                # the proxy is plainly working, whatever this poll says.
+                _LOGGER.debug("Health poll failed but events are flowing: %s", exc)
+            elif self._failures >= OFFLINE_AFTER_FAILURES:
+                if self.available:
+                    _LOGGER.warning(
+                        "Murdock unreachable for %d polls in a row — marking "
+                        "it offline. Last error: %s", self._failures, exc,
+                    )
+                self.available = False
+            else:
+                _LOGGER.info(
+                    "Murdock health poll failed (%d of %d before going "
+                    "offline): %s", self._failures, OFFLINE_AFTER_FAILURES, exc,
+                )
+        else:
+            if self._failures and not self.available:
+                _LOGGER.info("Murdock reachable again at %s", self.api.base_url)
+            self._failures = 0
             self.available = True
-        except MurdockApiError:
-            self.available = False
-        if self.available:
+            self.proxy_version = str(info.get("version", "")) or self.proxy_version
+            self.addon_slug = info.get("addon_slug") or self.addon_slug
             await self._async_refresh_vocabulary_meta()
+            await self._async_prefer_internal_url(info)
         if was_available != self.available:
             async_dispatcher_send(self.hass, SIGNAL_SPEAKER_UPDATE, None)
+
+    def _heard_recently(self) -> bool:
+        if self.last_event_at is None:
+            return False
+        window = timedelta(
+            seconds=HEALTH_POLL_INTERVAL_SECONDS * OFFLINE_AFTER_FAILURES
+        )
+        return dt_util.utcnow() - self.last_event_at < window
+
+    async def _async_prefer_internal_url(self, info: dict[str, Any]) -> None:
+        """Move to the add-on's own hostname when one is on offer.
+
+        ``homeassistant.local`` has to be resolved over mDNS from inside
+        the Core container, which is slow and occasionally fails — and
+        each failure used to read as "proxy offline". The add-on's
+        container name resolves on the Supervisor's Docker network, with
+        no mDNS involved. Switched only after the new address has
+        answered, and only once per start.
+        """
+        internal = (info.get("internal_url") or "").rstrip("/")
+        if self._switch_checked or not internal:
+            return
+        self._switch_checked = True
+        if internal == self.api.base_url:
+            return
+        probe = MurdockApiClient(self.hass, internal, self.entry.data.get(CONF_TOKEN))
+        try:
+            await probe.get_version_info()
+        except MurdockApiError as exc:
+            _LOGGER.debug("Internal address %s not reachable: %s", internal, exc)
+            return
+        _LOGGER.info(
+            "Switching the Murdock address from %s to %s — no mDNS lookup "
+            "needed on the add-on network", self.api.base_url, internal,
+        )
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={**self.entry.data, CONF_BASE_URL: internal},
+            unique_id=internal,
+        )
 
     async def _async_refresh_vocabulary_meta(self) -> None:
         try:
@@ -314,6 +393,7 @@ class MurdockCoordinator:
         )
         self._states[sat] = state
         self.available = True
+        self._failures = 0
         self.last_event_at = state.recognized_at
         async_dispatcher_send(self.hass, SIGNAL_SPEAKER_UPDATE, sat)
 

@@ -118,6 +118,8 @@ class MurdockConfigFlow(ConfigFlow, domain=DOMAIN):
     """Connection → satellite mapping → settings."""
 
     VERSION = 1
+    # 2: unique ids and device identifiers keyed by entry id, not URL.
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         self._base_url: str = ""

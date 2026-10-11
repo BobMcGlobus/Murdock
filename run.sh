@@ -114,15 +114,11 @@ export DATA_DIR="/data"
 export MODEL_DIR="/data/models"
 mkdir -p "$DATA_DIR" "$MODEL_DIR"
 
-# Only seeds the first STT service; afterwards the web UI owns them.
-log "STT seed:     $STT_BACKEND"
 log "Listen URI:   $LISTEN_URI"
-if [ "$STT_BACKEND" = "upstream" ]; then
-    log "Upstream URI: $UPSTREAM_URI"
-else
-    log "Mistral model: ${MISTRAL_MODEL:-voxtral-mini-latest}"
-    log "API key:       ${MISTRAL_API_KEY:+set}"
-fi
+# The STT options only seed the first speech-to-text service on a fresh
+# install. Printed as such, so a stale upstream_uri (core-whisper, long
+# since stopped) is not mistaken for what is in use.
+log "STT options:  seed only ($STT_BACKEND${UPSTREAM_URI:+, $UPSTREAM_URI}) — services are managed in the web UI"
 log "Log level:    $LOG_LEVEL"
 log "Advertise:    ${ADVERTISED_LANGUAGES:-<auto>}"
 log "Data dir:     $DATA_DIR"

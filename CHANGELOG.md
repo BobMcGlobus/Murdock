@@ -1,5 +1,94 @@
 # Changelog
 
+## Unreleased
+
+### A slow main no longer costs the turn
+
+The main speech-to-text service used to get its full timeout (8 s)
+before the fallback chain even started, so a slow cloud request cost
+the timeout *plus* the fallback — long enough for Home Assistant to give
+up: "Failed to write Transcript back to satellite: Connection lost", and
+nothing happened for the user.
+
+Now the first fallback stands by. A **local** first fallback (Kroko) is
+asked in parallel straight away — it costs nothing and is usually done
+long before the main. A **remote** one is only asked once the
+**patience** has run out (*Settings → Transcription → For all services*,
+default 2.5 s; 0 restores the old behaviour). Either way a slow main is
+overtaken after the patience, not after its timeout. The overtaken
+request keeps running and its answer is logged under the utterance, so
+its slow tail still shows up in its statistics. A fallback that is also
+a shadow is not asked twice.
+
+Each service in the list now shows what it actually measured on your
+utterances over the last seven days: **p50, p95, error rate**.
+
+A hang-up by Home Assistant is logged with its timing ("closed the
+connection 5100 ms after AudioStop") instead of a stray BrokenPipeError
+traceback.
+
+**Kroko's "closed without transcript" was mostly not an error**: the
+server had answered with an empty transcript — it heard nothing — and
+the one-shot client treated that as a failure. An empty answer is now an
+answer. A genuine early close is retried once.
+
+### Finding out whether Murdock or Home Assistant is slow
+
+Murdock serves Wyoming, the web API and MQTT from one event loop, and it
+reads the next audio chunk only after the previous event is handled —
+so anything holding that loop makes Home Assistant's stream, and its
+end-of-speech detection, run behind real time. A stream arriving at a
+third of real time looks the same whether Murdock was stalled or the
+satellite's link was slow. Now each session says which:
+
+```
+AudioStop from HA — 2.25s audio in 8.29s stream (27%), 225 chunks,
+longest gap 1840ms, slowest chunk 0.4ms, loop lag 12ms
+```
+
+Below 80 % a warning names the side: a blocked loop, or audio that
+arrived late. Any callback that holds the loop longer than 150 ms is
+logged by name. The same figures are stored with each utterance and
+shown in the recognition log, with an "audio late" badge.
+
+Measures against stalls, whatever the numbers show:
+
+- SQLite no longer syncs to disk on every commit (`synchronous=NORMAL`
+  in WAL mode). On a VM disk — worst on a parity-protected array — one
+  fsync can hold the loop for hundreds of milliseconds.
+- Whisper detection, name correction and shadow log writes run off the
+  loop.
+- The silence abort no longer drops a turn while the stream is arriving
+  at under 70 % of real time — an irreversible decision on patchy audio.
+- `Describe` (Home Assistant's health check every ~30 s) is logged at
+  debug level only.
+- The startup log says the add-on's STT options are a seed only, and
+  names the services actually in use.
+
+### Integration 0.4.0: a connection sensor that means it
+
+The proxy connection sensor flapped on a five-minute grid, off for 36 %
+of one night while Murdock was working. One failed request decided it,
+and two things made requests fail:
+
+- **Stale keep-alive**: Murdock's web server closed idle connections
+  after 5 s, Home Assistant's HTTP client reuses them for 15 s — a
+  request in between hit a dead socket ("connection reset by peer").
+  Murdock now keeps them for 75 s, and the integration retries once on a
+  fresh connection.
+- **mDNS**: `homeassistant.local` is resolved over mDNS from inside the
+  Core container. Murdock now reports its add-on hostname
+  (`http://9a87bc67-murdock:8099`), and the integration switches to it
+  once it has answered there.
+
+The sensor goes off only after three failed polls in a row (polled every
+minute now), never while recognitions are arriving, and logs why.
+
+Unique ids and device identifiers are keyed by the config entry instead
+of the URL — migrated in place, entity ids unchanged — so a new address
+no longer means new entities. Satellite devices are linked with
+`via_device_id`; `via_device` stops working in Home Assistant 2027.8.
+
 ## 0.12.0
 
 **The recognition log keeps the audio.** Every logged utterance — blocked

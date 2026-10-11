@@ -65,6 +65,9 @@ def _chain_handler(services, outcomes, *, remote_down=False, log=None):
         return audio
 
     fake._prepared_upload = _prepared
+    fake._prefetch = {}
+    # The real request helper, so the chain is tested as it runs.
+    fake._call_service = lambda *a, **kw: MurdockHandler._call_service(fake, *a, **kw)
     return fake, log
 
 

@@ -103,6 +103,16 @@ def _services_out(ctx: AppContext) -> ServicesOut:
     )
 
 
+@router.get("/stats")
+async def service_stats(
+    days: float = 7.0, ctx: AppContext = Depends(get_context)
+):
+    """p50/p95 latency and error count per engine over the last days."""
+    return await asyncio.to_thread(
+        ctx.recognition.engine_stats, since_seconds=max(1.0, days) * 24 * 3600
+    )
+
+
 @router.get("", response_model=ServicesOut)
 async def list_services(ctx: AppContext = Depends(get_context)):
     return _services_out(ctx)

@@ -998,3 +998,5 @@ button.secondary.active {
 }
 .rec-audio audio { height: 2rem; max-width: 22rem; }
 #rec-audio-form { align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
+
+.svc-stats.warn { color: var(--warn, #fcd34d); }
