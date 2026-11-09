@@ -13,6 +13,9 @@ Linux-only modules on the path first::
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import aiohttp
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -182,3 +185,22 @@ async def test_an_unreachable_internal_address_is_left_alone(hass: HomeAssistant
     await coordinator._async_health_poll()
     await hass.async_block_till_done()
     assert entry.data["base_url"] == OLD_URL
+
+
+async def test_retained_recognition_is_ignored(hass: HomeAssistant, aioclient_mock):
+    _mock_proxy(aioclient_mock, OLD_URL)
+    coordinator = await _setup(hass, _entry())
+    payload = json.dumps(
+        {"satellite_id": "wz", "speaker": "Jonas", "is_known": True,
+         "role": "admin", "timestamp": 1}
+    )
+    coordinator._handle_mqtt_message(SimpleNamespace(
+        topic="murdock/event/recognition", payload=payload, retain=True,
+    ))
+    assert coordinator.state_for_satellite("wz") is None
+
+    coordinator._handle_mqtt_message(SimpleNamespace(
+        topic="murdock/event/recognition", payload=payload, retain=False,
+    ))
+    state = coordinator.state_for_satellite("wz")
+    assert state is not None and state.speaker == "Jonas"

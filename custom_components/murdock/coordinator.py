@@ -15,7 +15,7 @@ are consumed here:
   explicitly or the integration sees nothing at all.
 
 Both carry the identical payload, and duplicates (someone running both)
-are dropped by (satellite, timestamp).
+are dropped by (satellite, timestamp). Retained MQTT messages are ignored.
 """
 
 from __future__ import annotations
@@ -355,6 +355,9 @@ class MurdockCoordinator:
     @callback
     def _handle_mqtt_message(self, msg) -> None:
         """Recognition from Murdock's MQTT topic (token-free path)."""
+        if msg.retain:
+            _LOGGER.debug("Ignoring retained recognition on %s", msg.topic)
+            return
         try:
             data = json.loads(msg.payload)
         except (TypeError, ValueError):

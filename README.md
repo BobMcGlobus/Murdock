@@ -218,7 +218,7 @@ configured **in the Web UI** (Settings tab) — no `.env` file required.
 | `murdock/status` | Murdock → HA | `online` / `offline` (LWT, retained) |
 | `murdock/sensor/<name>/state` | Murdock → HA | recognition state (retained) |
 | `murdock/binary_sensor/speaker_recognized/state` | Murdock → HA | `ON` / `OFF` |
-| `murdock/event/recognition` | Murdock → HA | full JSON event |
+| `murdock/event/recognition` | Murdock → HA | full JSON event (not retained) |
 | `murdock/active_satellite` | HA → Murdock | `{"id": "...", "area": "..."}` (or bare id) |
 | `murdock/context/media/<entity_id>` | HA → Murdock | `{"playing": true, "area": "..."}` (retain!) |
 | `murdock/context/<room>/tv` | HA → Murdock | `{"playing": true}` (retain!, legacy single-TV) |

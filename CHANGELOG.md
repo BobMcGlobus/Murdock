@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### The recognition event is no longer retained
+
+`murdock/event/recognition` was published retained, so after every Home
+Assistant restart or MQTT reconnect the integration took the last
+recognition for a new one and reported that speaker to the conversation
+agent. The event is no longer retained; sensor states still are. Murdock
+removes a retained copy left by an older version when it connects, which
+sends one empty message to subscribers connected at that moment. The
+integration ignores retained events.
+
 ### The speaker check covers everything that is transcribed
 
 - Buffered engines (OpenAI-compatible, Voxtral, Home Assistant Cloud),
