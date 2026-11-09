@@ -93,6 +93,12 @@ port 8099 to the LAN. If you prefer direct access (browser bookmarks
 etc.), the optional `8099/tcp` port can be mapped on the addon's
 **Network** tab.
 
+Ingress needs no extra sign-in. The Murdock integration, scripts and
+direct access on port 8099 need the API token, shown in the Web UI under
+Settings → Home Assistant → API access. On direct access the Web UI asks
+for it once per browser. After upgrading from 0.13.0 or earlier, Home
+Assistant asks for the token on the existing integration entry.
+
 ## Troubleshooting
 
 - **"Upstream unreachable"** in the Settings tab: the `upstream_uri`

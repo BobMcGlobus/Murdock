@@ -25,6 +25,10 @@ class MurdockApiError(Exception):
     """Raised when the proxy is unreachable or answers with an error."""
 
 
+class MurdockAuthError(MurdockApiError):
+    """The proxy refused the token (missing or wrong)."""
+
+
 class MurdockApiClient:
     """Client against Murdock's REST API."""
 
@@ -53,10 +57,9 @@ class MurdockApiClient:
                     method, url, json=json, headers=headers, timeout=_TIMEOUT
                 ) as resp:
                     if resp.status >= 400:
+                        error = MurdockAuthError if resp.status == 401 else MurdockApiError
                         body = (await resp.text())[:200]
-                        raise MurdockApiError(
-                            f"{method} {url} → {resp.status}: {body}"
-                        )
+                        raise error(f"{method} {url} → {resp.status}: {body}")
                     return await resp.json()
             except MurdockApiError:
                 raise

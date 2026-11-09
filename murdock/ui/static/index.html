@@ -33,6 +33,28 @@
     </header>
 
     <main>
+        <!-- Sign-in: shown instead of the tabs when the API answers 401. -->
+        <div class="card" id="login-card" hidden>
+            <h2 data-i18n="auth.login_title">Sign in</h2>
+            <p class="meta" data-i18n="auth.login_description">
+                Murdock's web API is protected by a token. Enter it once and
+                this browser stays signed in.
+            </p>
+            <form id="login-form" class="row">
+                <input type="password" id="login-token" autocomplete="current-password"
+                       data-i18n-ph="auth.token" placeholder="API token" required>
+                <button type="submit" data-i18n="auth.login_btn">Sign in</button>
+            </form>
+            <p class="meta" data-i18n-html="auth.login_where">
+                The token is in the file <code>api_token</code> in Murdock's
+                data directory (<code>./data/api_token</code> with docker
+                compose), or in <code>API_TOKEN</code> if you set it. In the
+                Home Assistant add-on, open Murdock from the sidebar instead;
+                no token is needed there.
+            </p>
+            <div id="login-feedback" class="meta"></div>
+        </div>
+
         <!-- Speakers tab -->
         <section id="tab-overview" class="tab active">
             <div class="card" id="setup-card" hidden>
@@ -660,6 +682,29 @@
             </div>
             </div>
             <div class="settings-group" data-settings-group="homeassistant">
+            <div class="card" id="api-access-card">
+                <h2 data-i18n="auth.card_title">API access (Home Assistant integration)</h2>
+                <p class="meta" data-i18n="auth.card_description">
+                    The Home Assistant integration and other API clients need
+                    this token. Paste it into the integration's token field and
+                    keep it secret: it gives full access, including the backup
+                    with its stored credentials.
+                </p>
+                <div class="row">
+                    <input type="password" id="api-token-value" readonly autocomplete="off"
+                           aria-label="API token" data-i18n-aria="auth.token" spellcheck="false">
+                    <button type="button" id="api-token-reveal" class="secondary" data-i18n="auth.reveal">Show</button>
+                    <button type="button" id="api-token-copy" class="secondary" data-i18n="auth.copy">Copy</button>
+                </div>
+                <p class="meta" id="api-token-pinned" hidden data-i18n="auth.pinned">
+                    Set by the API_TOKEN environment variable.
+                </p>
+                <div class="row">
+                    <button type="button" id="api-token-rotate" class="danger" data-i18n="auth.rotate">Generate new token</button>
+                    <button type="button" id="api-logout" class="secondary" hidden data-i18n="auth.logout">Sign out of this browser</button>
+                </div>
+                <div id="api-token-feedback" class="meta"></div>
+            </div>
             <div class="card">
                 <h2 data-i18n="transcript_tpl.title">Speaker context to the conversation agent</h2>
                 <p class="meta" data-i18n="transcript_tpl.description">

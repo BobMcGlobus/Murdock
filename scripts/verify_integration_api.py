@@ -180,6 +180,21 @@ def options_flow_shape():
 check("OptionsFlow.config_entry property + async_show_menu", options_flow_shape)
 
 
+def reauth_and_token_field():
+    from homeassistant.config_entries import ConfigEntries, ConfigEntry
+    from homeassistant.helpers.selector import TextSelectorConfig, TextSelectorType
+    if not hasattr(ConfigEntry, "async_start_reauth"):
+        raise AttributeError("ConfigEntry lacks async_start_reauth")
+    for name in ("async_get_entry", "async_update_entry", "async_reload"):
+        if not hasattr(ConfigEntries, name):
+            raise AttributeError(f"ConfigEntries lacks {name}")
+    TextSelectorConfig(type=TextSelectorType.PASSWORD)
+    return None
+
+
+check("reauth flow + password token field", reauth_and_token_field)
+
+
 def sensor_classes():
     from homeassistant.components.sensor import SensorDeviceClass
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass

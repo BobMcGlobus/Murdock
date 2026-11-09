@@ -3,10 +3,10 @@
     "step": {
       "user": {
         "title": "Connect to Murdock",
-        "description": "Address of the Murdock proxy. The add-on serves it on port 8099 — publish that port under the add-on's Network options first.",
+        "description": "Address of the Murdock proxy. The add-on serves it on port 8099 — publish that port under the add-on's Network options first. The API token is shown in Murdock's Web UI under Settings → Home Assistant → API access.",
         "data": {
           "base_url": "Base URL",
-          "token": "Token (optional)"
+          "token": "API token"
         }
       },
       "satellite": {
@@ -26,13 +26,22 @@
           "mirror_vocabulary": "Mirror vocabulary to Murdock",
           "mqtt_topic_prefix": "Murdock MQTT topic prefix (blank = REST event bus only)"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-enter the API token",
+        "description": "Murdock at {url} refused the stored token. Enter the token from Murdock's Web UI (Settings → Home Assistant → API access).",
+        "data": {
+          "token": "API token"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Could not reach Murdock at this address."
+      "cannot_connect": "Could not reach Murdock at this address.",
+      "invalid_auth": "Murdock refused the token."
     },
     "abort": {
-      "already_configured": "This Murdock instance is already configured."
+      "already_configured": "This Murdock instance is already configured.",
+      "reauth_successful": "Re-authentication was successful."
     }
   },
   "options": {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -26,9 +27,11 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
     TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
 )
 
-from .api import MurdockApiClient, MurdockApiError
+from .api import MurdockApiClient, MurdockApiError, MurdockAuthError
 from .const import (
     CONF_BASE_URL,
     CONF_CONTEXT_MODE,
@@ -50,6 +53,8 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 _CONF_ADD_ANOTHER = "add_another"
+
+_TOKEN_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
 
 def _settings_schema(current: dict[str, Any]) -> vol.Schema:
@@ -126,6 +131,7 @@ class MurdockConfigFlow(ConfigFlow, domain=DOMAIN):
         self._token: str | None = None
         self._discovered: list[str] = []
         self._satellites: list[dict[str, str]] = []
+        self._reauth_entry: ConfigEntry | None = None
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -138,6 +144,8 @@ class MurdockConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 version = await client.get_version()
                 sats = await client.get_satellites()
+            except MurdockAuthError:
+                errors["base"] = "invalid_auth"
             except MurdockApiError:
                 errors["base"] = "cannot_connect"
             else:
@@ -158,10 +166,48 @@ class MurdockConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_BASE_URL, default="http://homeassistant.local:8099"
                     ): TextSelector(),
-                    vol.Optional(CONF_TOKEN): TextSelector(),
+                    # Optional for Murdock versions without auth.
+                    vol.Optional(CONF_TOKEN): _TOKEN_SELECTOR,
                 }
             ),
             errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Started by the coordinator when Murdock refuses the stored token."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        entry = self._reauth_entry
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            token = user_input[CONF_TOKEN].strip()
+            client = MurdockApiClient(self.hass, entry.data[CONF_BASE_URL], token)
+            try:
+                await client.get_satellites()
+            except MurdockAuthError:
+                errors["base"] = "invalid_auth"
+            except MurdockApiError:
+                errors["base"] = "cannot_connect"
+            else:
+                # A changed entry is reloaded by the update listener.
+                if not self.hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, CONF_TOKEN: token}
+                ):
+                    await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_TOKEN): _TOKEN_SELECTOR}),
+            errors=errors,
+            description_placeholders={"url": entry.data[CONF_BASE_URL]},
         )
 
     async def async_step_satellite(

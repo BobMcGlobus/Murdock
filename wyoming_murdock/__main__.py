@@ -29,6 +29,9 @@ async def _run_web_ui(app, host: str, port: int) -> None:
         # reuse a socket the server had just closed and get "connection
         # reset by peer" — the integration's flapping connection sensor.
         timeout_keep_alive=75,
+        # The auth check trusts the ingress proxy by client address, so
+        # X-Forwarded-For must not override it.
+        proxy_headers=False,
     )
     server = uvicorn.Server(config)
     await server.serve()

@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### The web API requires authentication
+
+The Web UI and REST API answered anyone who could reach port 8099, and a
+wildcard CORS header let any web page read the responses, including the
+backup with the Home Assistant token, the MQTT password and the
+speech-to-text API keys.
+
+Requests now need Home Assistant ingress (the add-on panel works as
+before), the API token as `Authorization: Bearer …`, or a browser
+session. On direct access the Web UI asks for the token once. Sessions
+are stored server side and end on sign-out or when the token is
+regenerated. The token is generated into `<data_dir>/api_token` on first
+start or set with `API_TOKEN`; the Web UI shows it under Settings → Home
+Assistant → API access. The CORS middleware is removed, and `/api/health`
+stays public.
+
+Update the integration to 0.5.0 together with the add-on. Home Assistant
+then asks for the token on existing entries; recognitions over MQTT keep
+working in the meantime. Integration 0.4.0 can only get a token
+by removing and re-adding the entry.
+
 ### The recognition event is no longer retained
 
 `murdock/event/recognition` was published retained, so after every Home

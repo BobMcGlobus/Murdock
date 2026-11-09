@@ -5,7 +5,8 @@
 //   t("msg.enrolled", {name, n})   → 'Enrolled "jonas" — 3 sample(s)'
 //
 // Static HTML elements carry data-i18n="key" (textContent),
-// data-i18n-ph="key" (placeholder), or data-i18n-html="key" (innerHTML).
+// data-i18n-ph="key" (placeholder), data-i18n-html="key" (innerHTML), or
+// data-i18n-aria="key" (aria-label).
 // Call translatePage() after changing locale.
 
 const I18N = (() => {
@@ -353,7 +354,24 @@ const I18N = (() => {
             "ha.template_title": "LLM prompt template",
             "ha.template_hint": "Copy this Jinja2 snippet into your Home Assistant conversation agent's system prompt so the LLM knows who is speaking. It adapts to the entities you configured above.",
             "ha.copy_template": "Copy to clipboard",
-            "ha.copied": "Copied!",
+
+            // -- Sign-in & API access --
+            "auth.login_title": "Sign in",
+            "auth.login_description": "Murdock's web API is protected by a token. Enter it once and this browser stays signed in.",
+            "auth.token": "API token",
+            "auth.login_btn": "Sign in",
+            "auth.login_where": "The token is in the file <code>api_token</code> in Murdock's data directory (<code>./data/api_token</code> with docker compose), or in <code>API_TOKEN</code> if you set it. In the Home Assistant add-on, open Murdock from the sidebar instead; no token is needed there.",
+            "auth.login_failed": "Invalid token.",
+            "auth.card_title": "API access (Home Assistant integration)",
+            "auth.card_description": "The Home Assistant integration and other API clients need this token. Paste it into the integration's token field and keep it secret: it gives full access, including the backup with its stored credentials.",
+            "auth.reveal": "Show",
+            "auth.hide": "Hide",
+            "auth.copy": "Copy",
+            "auth.pinned": "Set by the API_TOKEN environment variable.",
+            "auth.rotate": "Generate new token",
+            "auth.confirm_rotate": "Generate a new token? The Home Assistant integration and all other clients lose access until they get the new one.",
+            "auth.rotated": "New token generated. The Home Assistant integration will ask you to enter it.",
+            "auth.logout": "Sign out of this browser",
 
             // -- Backup & Restore --
             "backup.title": "Backup & Restore",
@@ -540,6 +558,7 @@ const I18N = (() => {
 
             // -- Generic --
             "generic.error": "Error: {err}",
+            "generic.copied": "Copied!",
             "generic.loading": "Loading…",
             "generic.save": "Save",
 
@@ -963,7 +982,24 @@ const I18N = (() => {
             "ha.template_title": "LLM-Prompt-Vorlage",
             "ha.template_hint": "Kopiere dieses Jinja2-Snippet in den System-Prompt deines HA-Konversationsagenten, damit das LLM weiß, wer spricht. Es passt sich an die oben konfigurierten Entities an.",
             "ha.copy_template": "In Zwischenablage kopieren",
-            "ha.copied": "Kopiert!",
+
+            // -- Sign-in & API access --
+            "auth.login_title": "Anmelden",
+            "auth.login_description": "Murdocks Web-API ist durch ein Token geschützt. Gib es einmal ein, dann bleibt dieser Browser angemeldet.",
+            "auth.token": "API-Token",
+            "auth.login_btn": "Anmelden",
+            "auth.login_where": "Das Token steht in der Datei <code>api_token</code> in Murdocks Datenverzeichnis (<code>./data/api_token</code> bei docker compose) oder in <code>API_TOKEN</code>, falls gesetzt. Im Home-Assistant-Add-on öffnest du Murdock stattdessen über die Seitenleiste; dort ist kein Token nötig.",
+            "auth.login_failed": "Ungültiges Token.",
+            "auth.card_title": "API-Zugang (Home-Assistant-Integration)",
+            "auth.card_description": "Die Home-Assistant-Integration und andere API-Clients brauchen dieses Token. Füge es in das Token-Feld der Integration ein und halte es geheim: Es gewährt vollen Zugriff, auch auf das Backup mit den gespeicherten Zugangsdaten.",
+            "auth.reveal": "Anzeigen",
+            "auth.hide": "Verbergen",
+            "auth.copy": "Kopieren",
+            "auth.pinned": "Über die Umgebungsvariable API_TOKEN gesetzt.",
+            "auth.rotate": "Neues Token erzeugen",
+            "auth.confirm_rotate": "Neues Token erzeugen? Die Home-Assistant-Integration und alle anderen Clients verlieren den Zugang, bis sie das neue Token erhalten.",
+            "auth.rotated": "Neues Token erzeugt. Die Home-Assistant-Integration bittet dich, es neu einzugeben.",
+            "auth.logout": "Diesen Browser abmelden",
 
             // -- Backup & Restore --
             "backup.title": "Backup & Wiederherstellung",
@@ -1150,6 +1186,7 @@ const I18N = (() => {
 
             // -- Generic --
             "generic.error": "Fehler: {err}",
+            "generic.copied": "Kopiert!",
             "generic.loading": "Laden…",
             "generic.save": "Speichern",
 
@@ -1283,8 +1320,9 @@ const I18N = (() => {
     }
 
     /**
-     * Scan the DOM for data-i18n / data-i18n-ph / data-i18n-html
-     * attributes and replace content with the current locale's strings.
+     * Scan the DOM for data-i18n / data-i18n-ph / data-i18n-html /
+     * data-i18n-aria attributes and replace content with the current
+     * locale's strings.
      */
     function translatePage() {
         document.querySelectorAll("[data-i18n]").forEach((el) => {
@@ -1295,6 +1333,9 @@ const I18N = (() => {
         });
         document.querySelectorAll("[data-i18n-html]").forEach((el) => {
             el.innerHTML = t(el.dataset.i18nHtml);
+        });
+        document.querySelectorAll("[data-i18n-aria]").forEach((el) => {
+            el.setAttribute("aria-label", t(el.dataset.i18nAria));
         });
     }
 

@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # Web UI
     web_host: str = Field(default="0.0.0.0")
     web_port: int = Field(default=8099)
+    # Empty: generated into <data_dir>/api_token on first start.
+    api_token: Optional[str] = Field(default=None)
 
     # Paths
     data_dir: Path = Field(default=Path("/app/data"))

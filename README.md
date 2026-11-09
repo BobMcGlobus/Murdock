@@ -126,6 +126,8 @@ cluster, and tag the sample later.
   them, visible in the UI.
 - **Backup/restore** — ZIP export of all speakers, samples and
   metadata; import with merge or replace mode.
+- **Protected API** — access via Home Assistant ingress, the API token
+  or a signed-in browser (see [Security](#security)).
 - **DE / EN UI** — full translation for both locales.
 
 ### Home Assistant integration
@@ -184,7 +186,8 @@ docker compose build
 # 2. Start (upstream STT config is in docker-compose.yml)
 docker compose up -d
 
-# 3. Open the Web UI
+# 3. Open the Web UI and sign in with the generated API token
+cat ./data/api_token
 open http://localhost:8099
 ```
 
@@ -331,8 +334,10 @@ What it adds over MQTT alone:
    Configuration → Network* → set `8099`, then restart the add-on.
    Ingress alone is not enough — it only serves the browser.
 3. Restart Home Assistant, then *Settings → Devices & Services → Add
-   integration → Murdock*. Enter `http://<ha-host>:8099`; the flow tests
-   the connection and offers the satellite IDs Murdock has already seen.
+   integration → Murdock*. Enter `http://<ha-host>:8099` and the API
+   token from Murdock's Web UI (Settings → Home Assistant → API
+   access); the flow tests the connection and offers the satellite IDs
+   Murdock has already seen.
 4. Map each satellite ID to its `assist_satellite` entity. This mapping
    is deliberately explicit — guessing it would mean right speaker,
    wrong room.
@@ -352,6 +357,7 @@ first start (docker-compose deployment).
 | `LISTEN_URI` | `tcp://0.0.0.0:10350` | Wyoming proxy bind address |
 | `UPSTREAM_URI` | `tcp://localhost:10300` | Upstream STT engine |
 | `WEB_PORT` | `8099` | Web UI port |
+| `API_TOKEN` | generated | Web API token; if unset, a random one is stored in `<data_dir>/api_token` |
 | `VERIFY_THRESHOLD` | `0.30` | Max cosine distance to accept a match |
 | `ADVERTISED_LANGUAGES` | — | Force languages in Wyoming Info (e.g. `de,en`) |
 | `LOG_LEVEL` | `info` | `debug` / `info` / `warning` / `error` |
@@ -359,6 +365,30 @@ first start (docker-compose deployment).
 All runtime knobs — verify threshold (global and per-satellite), unknown
 logging, require-match, auto-enroll, quality weights, HA connection,
 TV entity — live in the UI and survive restarts.
+
+## Security
+
+The Web UI and REST API give full access, including the backup with the
+Home Assistant token, MQTT password and speech-to-text API keys. A
+request is accepted if it comes from:
+
+- Home Assistant ingress (the add-on panel). This applies only when
+  running as an add-on and is recognised by the Supervisor's ingress
+  proxy address.
+- A client sending the API token as `Authorization: Bearer <token>`,
+  such as the integration or a script.
+- A browser that signed in with the token. It gets an `HttpOnly`,
+  `SameSite=Strict` session cookie. Sessions are stored server side and
+  end on sign-out or when the token is regenerated. Requests that change
+  something also need the `X-Murdock-UI` header, which only the Web UI
+  sends.
+
+The token is generated on first start into `<data_dir>/api_token`
+(`./data/api_token` with docker compose) or set with `API_TOKEN`. The Web
+UI shows it under Settings → Home Assistant → API access and can
+regenerate it. No CORS headers are sent. Only the Web UI page, its static
+files, `/api/health`, `/api/auth/login` and `/api/auth/status` are
+public.
 
 ## Project layout
 
