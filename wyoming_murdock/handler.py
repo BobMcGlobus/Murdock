@@ -326,6 +326,8 @@ class MurdockHandler(AsyncEventHandler):
 
         # Every enrolled speaker heard in this utterance (from extraction).
         self._speakers: list = []
+        # Extraction declined: the target said at most half the speech.
+        self._extraction_declined = False
 
     @property
     def upstream_uri(self) -> str:
@@ -566,6 +568,7 @@ class MurdockHandler(AsyncEventHandler):
         self._whisper = False
         self._whisper_score = None
         self._speakers = []
+        self._extraction_declined = False
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -1000,6 +1003,31 @@ class MurdockHandler(AsyncEventHandler):
         )
         await self._close_upstream(send_stop=False)
 
+    async def _drop_chime(self, audio_16k: bytes) -> bytes:
+        """Remove non-speech from the first ``skip_leading_seconds``.
+
+        The window keeps the satellite's chime out of the embedding. Speech
+        inside it stays, because it is transcribed and has to be verified.
+        Without a VAD the whole clip is verified.
+        """
+        skip_bytes = int(self.context.get_skip_leading_seconds() * 16000) * 2
+        if skip_bytes <= 0 or skip_bytes >= len(audio_16k) or self.context.vad is None:
+            return audio_16k
+        head = audio_16k[:skip_bytes]
+        try:
+            result = await asyncio.to_thread(self.context.vad.analyze_pcm, head)
+        except Exception:
+            _LOGGER.debug("[%s] VAD on the chime window failed", self._session_id, exc_info=True)
+            return audio_16k
+        speech = b"".join(
+            head[int(start * 16000) * 2:int(end * 16000) * 2]
+            for start, end in result.segments
+        )
+        verify_audio = speech + audio_16k[skip_bytes:]
+        if len(verify_audio) < int(self.context.settings.min_verify_seconds * 16000) * 2:
+            return audio_16k
+        return verify_audio
+
     async def _maybe_extract(self, verify_audio: bytes) -> bytes:
         """Run adaptive speaker extraction, returning the audio to verify.
 
@@ -1058,6 +1086,13 @@ class MurdockHandler(AsyncEventHandler):
                 result.target_speaker, result.dropped_seconds,
             )
             return result.audio
+        if result.declined_minority:
+            self._extraction_declined = True
+            _LOGGER.info(
+                "[%s] EXTRACTION declined: %s spoke %.0f%% of the speech; "
+                "verifying the whole clip",
+                sid, result.target_speaker, result.target_share * 100,
+            )
         return verify_audio
 
     async def _wait_for_upstream_transcript(self, timeout: float = 15.0) -> str:
@@ -1869,75 +1904,15 @@ class MurdockHandler(AsyncEventHandler):
             except Exception:
                 _LOGGER.debug("[%s] Liveness analysis failed", sid, exc_info=True)
 
-        # Trim leading chime for embedding only.
-        skip_seconds = self.context.get_skip_leading_seconds()
-        verify_audio = audio_16k
-        if skip_seconds > 0 and audio_16k:
-            skip_bytes = int(skip_seconds * 16000 * 2)
-            skip_bytes -= skip_bytes % 2
-            if skip_bytes < len(audio_16k):
-                remaining_sec = (len(audio_16k) - skip_bytes) / (16000 * 2)
-                if remaining_sec >= settings.min_verify_seconds:
-                    verify_audio = audio_16k[skip_bytes:]
-                    _LOGGER.debug(
-                        "[%s] Skipped leading %.2fs (%.2fs left for verify)",
-                        sid, skip_seconds, remaining_sec,
-                    )
+        verify_audio = await self._drop_chime(audio_16k)
 
-        # --- Fast path: early match already confirmed ---
         if self._early_match:
+            # The early probe saw only the start of the stream; verify the
+            # whole utterance.
             _LOGGER.info(
-                "[%s] EARLY MATCH confirmed: %s (d=%.4f) — skipping full verify",
+                "[%s] Early match %s (d=%.4f), verifying the full utterance",
                 sid, self._early_match, self._early_distance or 0.0,
             )
-            # HA events already fired in _run_early_probe. Just get transcript.
-            transcript = await self._get_transcript(verify_audio)
-            early_spk = (
-                self.context.speakers.get_speaker(self._early_match_id)
-                if self._early_match_id is not None else None
-            )
-            self._republish_hints(
-                speaker=self._early_match,
-                confidence=self.context.confidence_for(
-                    self._early_distance or 0.0
-                ),
-                is_known=True,
-                distance=self._early_distance,
-                threshold=self.context.get_verify_threshold(self._satellite_id),
-                nearest_speaker=self._early_match,
-                role=early_spk.role if early_spk else None,
-            )
-            await self._send_transcript_to_satellite(
-                self._augment_transcript(
-                    transcript, is_known=True, speaker=self._early_match,
-                    role=early_spk.role if early_spk else None,
-                    distance=self._early_distance, nearest=self._early_match,
-                ),
-                label=f"match:{self._early_match}",
-            )
-            self._responded = True
-            await self._close_upstream(send_stop=False)
-            self._log_total_latency("match(early)")
-            early_threshold = self.context.get_verify_threshold(self._satellite_id)
-            event_id = self._record_event(
-                outcome=OUTCOME_MATCH,
-                duration_sec=duration,
-                matched_speaker=self._early_match,
-                distance=self._early_distance,
-                threshold=early_threshold,
-                verify_ms=0.0,
-                transcript=transcript,
-                weight=self.context.compute_speaker_weight(
-                    self._early_distance, early_threshold
-                ),
-            )
-            self._spawn_shadow(event_id, verify_audio)
-            # Auto-enroll on early match too.
-            await self._maybe_auto_enroll(
-                self._early_match_id, self._early_match,
-                self._early_distance, verify_audio, duration,
-            )
-            return
 
         # Adaptive extraction: if the clip has multiple speech regions
         # (target + TV / second voice), isolate the dominant enrolled
@@ -2008,7 +1983,7 @@ class MurdockHandler(AsyncEventHandler):
                 ", via sat-profile" if result.used_satellite_profile else "",
             )
             spk = self.context.speakers.get_speaker(result.matched_speaker_id)
-            transcript = await self._get_transcript(verify_audio)
+            transcript = await self._get_transcript(audio_16k)
             nearest, nearest_d = self._nearest_of(result)
             # Publish BEFORE answering — and wait for it. HA starts the
             # intent stage (where the agent's prompt is built) within a
@@ -2054,7 +2029,7 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 margin=margin,
             )
-            self._spawn_shadow(event_id, verify_audio)
+            self._spawn_shadow(event_id, audio_16k)
             # Aging / auto-enroll: add fresh embedding if distance is
             # informative (not too close, not borderline).
             await self._maybe_auto_enroll(
@@ -2112,7 +2087,7 @@ class MurdockHandler(AsyncEventHandler):
 
         if not require_match:
             _LOGGER.info("[%s] require_match=false → forwarding anyway", sid)
-            transcript = await self._get_transcript(verify_audio)
+            transcript = await self._get_transcript(audio_16k)
             # The event above went out before the transcript existed, so
             # sidecar hints (if any) need a second, identical event.
             self._republish_hints(
@@ -2148,7 +2123,7 @@ class MurdockHandler(AsyncEventHandler):
                 weight=weight,
                 margin=margin,
             )
-            self._spawn_shadow(event_id, verify_audio)
+            self._spawn_shadow(event_id, audio_16k)
         else:
             await self._block_response(
                 outcome=blk_outcome,
@@ -2310,9 +2285,10 @@ class MurdockHandler(AsyncEventHandler):
         Only fires when auto_enroll is enabled AND the distance is
         informative (between ``auto_enroll_min_distance`` and threshold).
         Very close matches (d < min) mean the profile is already good;
-        adding them just wastes DB space.
+        adding them just wastes DB space. Skipped when extraction declined,
+        because the clip mixes voices.
         """
-        if not self.context.get_auto_enroll():
+        if not self.context.get_auto_enroll() or self._extraction_declined:
             return
         if speaker_id is None or distance is None:
             return

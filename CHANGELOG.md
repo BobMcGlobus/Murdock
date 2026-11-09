@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### The speaker check covers everything that is transcribed
+
+- Buffered engines (OpenAI-compatible, Voxtral, Home Assistant Cloud),
+  the fallback chain and shadows received the speaker check's copy of
+  the audio: the first second cut for the chime and, with extraction on,
+  without the regions extraction dropped. Words went missing from
+  transcripts. They now get the full audio.
+- The chime window (formerly "Skip leading seconds") now cuts only
+  non-speech.
+  Speech in that window was never checked, although the streaming
+  Wyoming path transcribed it.
+- An early match no longer skips the full check. The speaker is still
+  published early, but the whole utterance is verified before the
+  transcript is released. An early match therefore pays for the full
+  check (VAD, extraction and the verify embedding) when the audio stream
+  ends.
+- Extraction narrows the clip to the dominant enrolled speaker only if
+  that speaker said more than half of the detected speech. Before, one
+  short enrolled word next to an unknown voice's command was enough for
+  the command to pass under the enrolled user's name. Clips where
+  extraction declines are not used for auto-enroll.
+
 ## 0.13.0
 
 ### A slow main no longer costs the turn

@@ -102,8 +102,7 @@ etc.), the optional `8099/tcp` port can be mapped on the addon's
 - **Always "unknown"**: run **Debug VAD** in the Speakers tab on one of
   your enrollments. If the speech ratio is 0 % the upstream audio
   isn't reaching the embedder; check that the satellite actually
-  streams audio and the `skip_leading_seconds` setting isn't trimming
-  everything.
+  streams audio.
 - **HA entities not updating**: check the Home Assistant tab in the Web
   UI. The **Test** button verifies the addon can reach HA; if it fails,
   the supervisor token wasn't injected — restart the addon.

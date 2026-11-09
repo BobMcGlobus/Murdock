@@ -52,12 +52,11 @@ class Settings(BaseSettings):
     tv_threshold_boost: float = Field(default=0.05)
     max_verify_seconds: float = Field(default=5.0)
     min_verify_seconds: float = Field(default=1.0)
-    # Seconds at the start of each utterance that are discarded before
-    # running the speaker embedder. Voice satellites typically play a
-    # "now listening" chime which would otherwise pollute the embedding
-    # and push the distance toward "unknown". 1.0 s matches the default
-    # ESPHome/Wyoming-satellite notification tone. Audio forwarded to
-    # the STT upstream is NOT trimmed — the chime is harmless for ASR.
+    # Window at the start of each utterance in which non-speech is cut
+    # before the speaker embedder runs. Voice satellites play a "now
+    # listening" chime that would otherwise pollute the embedding. 1.0 s
+    # matches the default ESPHome/Wyoming-satellite tone. Speech inside the
+    # window is kept, and transcription always gets the full audio.
     skip_leading_seconds: float = Field(default=1.0)
     # When True, unknown voices get an empty transcript (hard gate). OFF
     # by default since 0.5: with no/few enrollments a hard gate makes the
