@@ -244,6 +244,28 @@ def test_sessions_survive_a_restart(tmp_path):
     assert session not in (tmp_path / "api_sessions.json").read_text()
 
 
+def test_sessions_end_when_the_pinned_token_changes(tmp_path):
+    client, auth = _client(tmp_path, env_token="first-token-0123456789")
+    client.post("/api/auth/login", json={"token": auth.token})
+    session = client.cookies[SESSION_COOKIE]
+    restarted, _ = _client(tmp_path, env_token="second-token-0123456789")
+    restarted.cookies.set(SESSION_COOKIE, session)
+    assert restarted.get("/api/backup").status_code == 401
+
+
+@pytest.mark.parametrize("content", [b"[]", b"{}", b"not json", b"\xff\xfe"])
+def test_malformed_sessions_file_is_ignored(tmp_path, content):
+    (tmp_path / "api_sessions.json").write_bytes(content)
+    client, _ = _client(tmp_path)
+    assert client.get("/api/health").status_code == 200
+
+
+def test_unreadable_token_file_is_replaced(tmp_path):
+    (tmp_path / "api_token").write_bytes(b"\xff\xfe\x00")
+    auth = ApiAuth(tmp_path, under_supervisor=False)
+    assert len(auth.token) >= 40
+
+
 def test_cookie_does_not_open_a_websocket(tmp_path):
     client, auth = _signed_in(tmp_path)
     scope = {

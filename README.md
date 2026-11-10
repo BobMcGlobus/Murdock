@@ -379,7 +379,7 @@ request is accepted if it comes from:
   such as the integration or a script.
 - A browser that signed in with the token. It gets an `HttpOnly`,
   `SameSite=Strict` session cookie. Sessions are stored server side and
-  end on sign-out or when the token is regenerated. Requests that change
+  end on sign-out or when the token changes. Requests that change
   something also need the `X-Murdock-UI` header, which only the Web UI
   sends.
 

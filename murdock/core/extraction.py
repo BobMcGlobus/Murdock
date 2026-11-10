@@ -75,6 +75,9 @@ class ExtractionResult:
     # Set when the target did not exceed _MIN_TARGET_SHARE.
     declined_minority: bool = False
     target_share: Optional[float] = None
+    # A scored region belonged to someone other than the target. Short,
+    # unscored regions don't count: they are often the target's own words.
+    other_voice: bool = False
 
 
 def extract_target_speaker(
@@ -121,6 +124,7 @@ def extract_target_speaker(
 
     # Score every region. Each entry: (start_b, end_b, dur, sid, name).
     regions: list[tuple[int, int, float, Optional[int], Optional[str]]] = []
+    unmatched_scored = False
     for start_s, end_s in segments:
         dur = max(0.0, end_s - start_s)
         start_b = int(start_s * bytes_per_sec)
@@ -149,6 +153,7 @@ def extract_target_speaker(
             regions.append((start_b, end_b, dur, int(sid), getattr(res, "matched_speaker", None)))
         else:
             regions.append((start_b, end_b, dur, None, None))
+            unmatched_scored = True
 
     matched = [r for r in regions if r[3] is not None]
     if not matched:
@@ -203,6 +208,9 @@ def extract_target_speaker(
             speakers=roster,
             declined_minority=True,
             target_share=target_share,
+            other_voice=unmatched_scored or any(
+                r[3] not in (None, target_sid) for r in regions
+            ),
         )
 
     kept_audio = b"".join(audio_16k[sb:eb] for sb, eb, *_ in kept)

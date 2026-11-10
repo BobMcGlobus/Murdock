@@ -114,6 +114,9 @@ class ApiAuth:
             token = self._token_path.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             token = ""
+        except ValueError:
+            _LOGGER.warning("%s is not valid text; generating a new token", self._token_path)
+            token = ""
         if token:
             return token
         token = secrets.token_urlsafe(32)
@@ -144,22 +147,32 @@ class ApiAuth:
         )
 
     # Sessions are kept as {sha256(session id): expiry}, so the file never
-    # holds a usable cookie value.
+    # holds a usable cookie value. They are stored with a hash of the token
+    # they were created under; a different token (API_TOKEN changed, token
+    # file replaced) drops them all.
 
     def _load_sessions(self) -> dict:
         try:
             stored = json.loads(self._sessions_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, ValueError):
             return {}
+        if not isinstance(stored, dict) or stored.get("token") != _digest(self._token):
+            return {}
+        sessions = stored.get("sessions")
+        if not isinstance(sessions, dict):
+            return {}
         now = time.time()
         return {
-            key: expiry for key, expiry in stored.items()
+            key: expiry for key, expiry in sessions.items()
             if isinstance(expiry, (int, float)) and expiry > now
         }
 
     def _save_sessions(self) -> None:
         self._sessions_path.parent.mkdir(parents=True, exist_ok=True)
-        _write_private(self._sessions_path, json.dumps(self._sessions))
+        _write_private(
+            self._sessions_path,
+            json.dumps({"token": _digest(self._token), "sessions": self._sessions}),
+        )
 
     def create_session(self) -> str:
         session_id = secrets.token_urlsafe(32)

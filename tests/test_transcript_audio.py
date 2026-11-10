@@ -287,13 +287,14 @@ def test_fallback_and_shadows_get_the_full_audio(tmp_path):
 def test_no_auto_enroll_when_extraction_declined(tmp_path):
     s = _setup(tmp_path, require_match=True, auto_enroll=True)
     # Jonas's two 0.5 s words are too short to score, so he falls below
-    # the majority; the whole clip still matches.
+    # the majority; the stranger's 0.7 s is scored. The whole clip still
+    # matches.
     pcm = _pcm(
         _tone(CHIME, 1.0),
         _tone(JONAS, 0.7), _gap(0.1),
         _tone(JONAS, 0.5), _gap(0.1),
         _tone(JONAS, 0.5), _gap(0.1),
-        _tone(STRANGER, 0.55),
+        _tone(STRANGER, 0.7),
     )
     _run(s.handler, pcm)
     assert _known(s.published) == ["Jonas"]

@@ -223,6 +223,7 @@ def test_minority_target_is_not_extracted():
     assert res.declined_minority is True
     assert res.target_speaker == "jonas"
     assert res.target_share == pytest.approx(0.7 / 3.0, abs=0.01)
+    assert res.other_voice is True
 
 
 def test_unscored_regions_count_against_the_target():
@@ -236,6 +237,8 @@ def test_unscored_regions_count_against_the_target():
     )
     assert emb.calls == 1
     assert res.declined_minority is True
+    # Nobody else was heard; the short regions may be the target's own.
+    assert res.other_voice is False
 
 
 def test_even_split_is_not_a_majority():

@@ -12,8 +12,8 @@ speech-to-text API keys.
 Requests now need Home Assistant ingress (the add-on panel works as
 before), the API token as `Authorization: Bearer …`, or a browser
 session. On direct access the Web UI asks for the token once. Sessions
-are stored server side and end on sign-out or when the token is
-regenerated. The token is generated into `<data_dir>/api_token` on first
+are stored server side and end on sign-out or when the token
+changes. The token is generated into `<data_dir>/api_token` on first
 start or set with `API_TOKEN`; the Web UI shows it under Settings → Home
 Assistant → API access. The CORS middleware is removed, and `/api/health`
 stays public.
@@ -33,7 +33,7 @@ removes a retained copy left by an older version when it connects, which
 sends one empty message to subscribers connected at that moment. The
 integration ignores retained events.
 
-### The speaker check covers everything that is transcribed
+### Fewer gaps between the speaker check and the transcript
 
 - Buffered engines (OpenAI-compatible, Voxtral, Home Assistant Cloud),
   the fallback chain and shadows received the speaker check's copy of
@@ -41,9 +41,8 @@ integration ignores retained events.
   without the regions extraction dropped. Words went missing from
   transcripts. They now get the full audio.
 - The chime window (formerly "Skip leading seconds") now cuts only
-  non-speech.
-  Speech in that window was never checked, although the streaming
-  Wyoming path transcribed it.
+  non-speech. Speech in that window was never checked, although the
+  streaming Wyoming path transcribed it.
 - An early match no longer skips the full check. The speaker is still
   published early, but the whole utterance is verified before the
   transcript is released. An early match therefore pays for the full
@@ -52,8 +51,10 @@ integration ignores retained events.
 - Extraction narrows the clip to the dominant enrolled speaker only if
   that speaker said more than half of the detected speech. Before, one
   short enrolled word next to an unknown voice's command was enough for
-  the command to pass under the enrolled user's name. Clips where
-  extraction declines are not used for auto-enroll.
+  the command to pass under the enrolled user's name. When the speaker
+  did say more than half, the rest is still transcribed without being
+  checked. Clips where extraction declines because it heard another voice
+  are not used for auto-enroll.
 
 ## 0.13.0
 

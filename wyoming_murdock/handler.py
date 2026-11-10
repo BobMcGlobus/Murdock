@@ -326,8 +326,8 @@ class MurdockHandler(AsyncEventHandler):
 
         # Every enrolled speaker heard in this utterance (from extraction).
         self._speakers: list = []
-        # Extraction declined: the target said at most half the speech.
-        self._extraction_declined = False
+        # Extraction declined and heard another voice: the clip is mixed.
+        self._mixed_clip = False
 
     @property
     def upstream_uri(self) -> str:
@@ -568,7 +568,7 @@ class MurdockHandler(AsyncEventHandler):
         self._whisper = False
         self._whisper_score = None
         self._speakers = []
-        self._extraction_declined = False
+        self._mixed_clip = False
         # Only create an upstream transcript future for Wyoming mode.
         # In Voxtral mode, transcription happens on-demand after AudioStop.
         if not self._is_voxtral:
@@ -766,7 +766,8 @@ class MurdockHandler(AsyncEventHandler):
                 audio_snapshot, self._audio_rate,
                 self._audio_width, self._audio_channels,
             )
-            # Trim leading chime the same way _finish_session does.
+            # A plain fixed cut: this probe only publishes early, and the
+            # full check in _finish_session decides.
             skip_seconds = self.context.get_skip_leading_seconds()
             if skip_seconds > 0:
                 skip_bytes = int(skip_seconds * 16000 * 2)
@@ -1008,21 +1009,23 @@ class MurdockHandler(AsyncEventHandler):
 
         The window keeps the satellite's chime out of the embedding. Speech
         inside it stays, because it is transcribed and has to be verified.
-        Without a VAD the whole clip is verified.
+        Without a VAD the window is cut entirely, as before.
         """
         skip_bytes = int(self.context.get_skip_leading_seconds() * 16000) * 2
-        if skip_bytes <= 0 or skip_bytes >= len(audio_16k) or self.context.vad is None:
+        if skip_bytes <= 0 or skip_bytes >= len(audio_16k):
             return audio_16k
         head = audio_16k[:skip_bytes]
-        try:
-            result = await asyncio.to_thread(self.context.vad.analyze_pcm, head)
-        except Exception:
-            _LOGGER.debug("[%s] VAD on the chime window failed", self._session_id, exc_info=True)
-            return audio_16k
-        speech = b"".join(
-            head[int(start * 16000) * 2:int(end * 16000) * 2]
-            for start, end in result.segments
-        )
+        speech = b""
+        if self.context.vad is not None:
+            try:
+                result = await asyncio.to_thread(self.context.vad.analyze_pcm, head)
+            except Exception:
+                _LOGGER.debug("[%s] VAD on the chime window failed", self._session_id, exc_info=True)
+                return audio_16k
+            speech = b"".join(
+                head[int(start * 16000) * 2:int(end * 16000) * 2]
+                for start, end in result.segments
+            )
         verify_audio = speech + audio_16k[skip_bytes:]
         if len(verify_audio) < int(self.context.settings.min_verify_seconds * 16000) * 2:
             return audio_16k
@@ -1087,10 +1090,10 @@ class MurdockHandler(AsyncEventHandler):
             )
             return result.audio
         if result.declined_minority:
-            self._extraction_declined = True
+            self._mixed_clip = result.other_voice
             _LOGGER.info(
-                "[%s] EXTRACTION declined: %s spoke %.0f%% of the speech; "
-                "verifying the whole clip",
+                "[%s] EXTRACTION declined: regions matched to %s are %.0f%% "
+                "of the speech; verifying the whole clip",
                 sid, result.target_speaker, result.target_share * 100,
             )
         return verify_audio
@@ -2285,10 +2288,10 @@ class MurdockHandler(AsyncEventHandler):
         Only fires when auto_enroll is enabled AND the distance is
         informative (between ``auto_enroll_min_distance`` and threshold).
         Very close matches (d < min) mean the profile is already good;
-        adding them just wastes DB space. Skipped when extraction declined,
-        because the clip mixes voices.
+        adding them just wastes DB space. Skipped when extraction declined
+        and heard another voice, because the clip is mixed.
         """
-        if not self.context.get_auto_enroll() or self._extraction_declined:
+        if not self.context.get_auto_enroll() or self._mixed_clip:
             return
         if speaker_id is None or distance is None:
             return
