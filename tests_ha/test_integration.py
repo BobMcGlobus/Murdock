@@ -13,6 +13,9 @@ Linux-only modules on the path first::
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import aiohttp
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -182,3 +185,106 @@ async def test_an_unreachable_internal_address_is_left_alone(hass: HomeAssistant
     await coordinator._async_health_poll()
     await hass.async_block_till_done()
     assert entry.data["base_url"] == OLD_URL
+
+
+async def test_retained_recognition_is_ignored(hass: HomeAssistant, aioclient_mock):
+    _mock_proxy(aioclient_mock, OLD_URL)
+    coordinator = await _setup(hass, _entry())
+    payload = json.dumps(
+        {"satellite_id": "wz", "speaker": "Jonas", "is_known": True,
+         "role": "admin", "timestamp": 1}
+    )
+    coordinator._handle_mqtt_message(SimpleNamespace(
+        topic="murdock/event/recognition", payload=payload, retain=True,
+    ))
+    assert coordinator.state_for_satellite("wz") is None
+
+    coordinator._handle_mqtt_message(SimpleNamespace(
+        topic="murdock/event/recognition", payload=payload, retain=False,
+    ))
+    state = coordinator.state_for_satellite("wz")
+    assert state is not None and state.speaker == "Jonas"
+
+
+# --- API token -------------------------------------------------------------
+
+
+def _refuse(aioclient_mock, base):
+    for path in ("version", "state", "vocabulary", "satellites"):
+        aioclient_mock.get(f"{base}/api/{path}", status=401, json={"detail": "authentication required"})
+
+
+def _reauth_flows(hass, entry):
+    return [
+        f for f in hass.config_entries.flow.async_progress()
+        if f["context"].get("source") == "reauth"
+        and f["context"].get("entry_id") == entry.entry_id
+    ]
+
+
+async def test_refused_token_starts_reauth_once(hass: HomeAssistant, aioclient_mock, caplog):
+    _refuse(aioclient_mock, OLD_URL)
+    entry = _entry()
+    coordinator = await _setup(hass, entry)
+    for _ in range(4):
+        await coordinator._async_health_poll()
+    await hass.async_block_till_done()
+    assert entry.state.value == "loaded"
+    assert len(_reauth_flows(hass, entry)) == 1
+    assert caplog.text.count("refused the API token") == 1
+
+
+async def test_refused_token_keeps_entry_available(hass: HomeAssistant, aioclient_mock, caplog):
+    _refuse(aioclient_mock, OLD_URL)
+    coordinator = await _setup(hass, _entry())
+    for _ in range(4):
+        await coordinator._async_health_poll()
+    assert coordinator.available is True
+    assert "unreachable" not in caplog.text
+
+
+async def test_reauth_stores_the_token_and_reloads_once(hass: HomeAssistant, aioclient_mock):
+    _refuse(aioclient_mock, OLD_URL)
+    entry = _entry()
+    await _setup(hass, entry)
+    [flow] = _reauth_flows(hass, entry)
+
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {"token": "wrong"}
+    )
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_auth"}
+
+    aioclient_mock.clear_requests()
+    _mock_proxy(aioclient_mock, OLD_URL)
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], {"token": "  the-right-token  "}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["token"] == "the-right-token"
+    sent = [h for (_m, _u, _d, h) in aioclient_mock.mock_calls if h]
+    assert sent and all(h.get("Authorization") == "Bearer the-right-token" for h in sent)
+    # Each setup fetches /api/state once; a second reload would show here.
+    assert [u.path for (_m, u, _d, _h) in aioclient_mock.mock_calls].count("/api/state") == 1
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.auth_failed is False and coordinator.available is True
+
+
+async def test_forbidden_is_not_an_auth_error(hass: HomeAssistant, aioclient_mock):
+    aioclient_mock.get(f"{OLD_URL}/api/version", status=403, text="blocked by proxy")
+    aioclient_mock.get(f"{OLD_URL}/api/state", status=403, text="blocked by proxy")
+    entry = _entry()
+    await _setup(hass, entry)
+    assert _reauth_flows(hass, entry) == []
+
+
+async def test_setup_form_reports_a_refused_token(hass: HomeAssistant, aioclient_mock):
+    _refuse(aioclient_mock, "http://murdock:8099")
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"base_url": "http://murdock:8099", "token": "nope"}
+    )
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_auth"}

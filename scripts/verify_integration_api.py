@@ -180,6 +180,21 @@ def options_flow_shape():
 check("OptionsFlow.config_entry property + async_show_menu", options_flow_shape)
 
 
+def reauth_and_token_field():
+    from homeassistant.config_entries import ConfigEntries, ConfigEntry
+    from homeassistant.helpers.selector import TextSelectorConfig, TextSelectorType
+    if not hasattr(ConfigEntry, "async_start_reauth"):
+        raise AttributeError("ConfigEntry lacks async_start_reauth")
+    for name in ("async_get_entry", "async_update_entry", "async_reload"):
+        if not hasattr(ConfigEntries, name):
+            raise AttributeError(f"ConfigEntries lacks {name}")
+    TextSelectorConfig(type=TextSelectorType.PASSWORD)
+    return None
+
+
+check("reauth flow + password token field", reauth_and_token_field)
+
+
 def sensor_classes():
     from homeassistant.components.sensor import SensorDeviceClass
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass
@@ -209,7 +224,7 @@ def mqtt_subscribe_api():
     if not inspect.iscoroutinefunction(mqtt.async_subscribe):
         raise TypeError("async_subscribe is not awaitable")
     from homeassistant.components.mqtt.models import ReceiveMessage
-    for f in ("topic", "payload"):
+    for f in ("topic", "payload", "retain"):
         if f not in ReceiveMessage.__dataclass_fields__:
             raise AttributeError(f"ReceiveMessage lacks {f}")
     return None
@@ -269,8 +284,15 @@ def payload_applies_from_both_paths():
         class Msg:
             topic = "murdock/event/recognition"
             payload = encoded
+            retain = False
+
+        class RetainedMsg(Msg):
+            retain = True
 
         c2 = FakeCoordinator()
+        c2._handle_mqtt_message(RetainedMsg())
+        if c2._states:
+            raise AssertionError("a retained (replayed) recognition was applied")
         c2._handle_mqtt_message(Msg())
         via_mqtt = c2._states[payload["satellite_id"]]
         # Duplicate suppression on a single coordinator
@@ -290,7 +312,7 @@ def payload_applies_from_both_paths():
     # 1 (event) + 1 (mqtt) + 1 (third coordinator, duplicate suppressed)
     if dispatches != 3:
         raise AssertionError(f"expected 3 dispatches, got {dispatches}")
-    return "event + mqtt identical, duplicate suppressed"
+    return "event + mqtt identical, duplicate suppressed, retained ignored"
 
 
 check("recognition applies from event bus and MQTT", payload_applies_from_both_paths)

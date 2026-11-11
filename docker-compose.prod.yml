@@ -37,6 +37,8 @@ services:
       - LISTEN_URI=tcp://0.0.0.0:10350
       - WEB_HOST=0.0.0.0
       - WEB_PORT=8099
+      # Web UI/API token. Generated into the data volume (api_token) if empty.
+      - API_TOKEN=${API_TOKEN:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # Comma-separated: "de,en". Leave empty for auto-detect from upstream.
       - ADVERTISED_LANGUAGES=${ADVERTISED_LANGUAGES:-}

@@ -1,5 +1,61 @@
 # Changelog
 
+## Unreleased
+
+### The web API requires authentication
+
+The Web UI and REST API answered anyone who could reach port 8099, and a
+wildcard CORS header let any web page read the responses, including the
+backup with the Home Assistant token, the MQTT password and the
+speech-to-text API keys.
+
+Requests now need Home Assistant ingress (the add-on panel works as
+before), the API token as `Authorization: Bearer …`, or a browser
+session. On direct access the Web UI asks for the token once. Sessions
+are stored server side and end on sign-out or when the token
+changes. The token is generated into `<data_dir>/api_token` on first
+start or set with `API_TOKEN`; the Web UI shows it under Settings → Home
+Assistant → API access. The CORS middleware is removed, and `/api/health`
+stays public.
+
+Update the integration to 0.5.0 together with the add-on. Home Assistant
+then asks for the token on existing entries; recognitions over MQTT keep
+working in the meantime. Integration 0.4.0 can only get a token
+by removing and re-adding the entry.
+
+### The recognition event is no longer retained
+
+`murdock/event/recognition` was published retained, so after every Home
+Assistant restart or MQTT reconnect the integration took the last
+recognition for a new one and reported that speaker to the conversation
+agent. The event is no longer retained; sensor states still are. Murdock
+removes a retained copy left by an older version when it connects, which
+sends one empty message to subscribers connected at that moment. The
+integration ignores retained events.
+
+### Fewer gaps between the speaker check and the transcript
+
+- Buffered engines (OpenAI-compatible, Voxtral, Home Assistant Cloud),
+  the fallback chain and shadows received the speaker check's copy of
+  the audio: the first second cut for the chime and, with extraction on,
+  without the regions extraction dropped. Words went missing from
+  transcripts. They now get the full audio.
+- The chime window (formerly "Skip leading seconds") now cuts only
+  non-speech. Speech in that window was never checked, although the
+  streaming Wyoming path transcribed it.
+- An early match no longer skips the full check. The speaker is still
+  published early, but the whole utterance is verified before the
+  transcript is released. An early match therefore pays for the full
+  check (VAD, extraction and the verify embedding) when the audio stream
+  ends.
+- Extraction narrows the clip to the dominant enrolled speaker only if
+  that speaker said more than half of the detected speech. Before, one
+  short enrolled word next to an unknown voice's command was enough for
+  the command to pass under the enrolled user's name. When the speaker
+  did say more than half, the rest is still transcribed without being
+  checked. Clips where extraction declines because it heard another voice
+  are not used for auto-enroll.
+
 ## 0.13.0
 
 ### A slow main no longer costs the turn

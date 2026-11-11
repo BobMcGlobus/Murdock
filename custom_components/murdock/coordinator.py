@@ -15,7 +15,7 @@ are consumed here:
   explicitly or the integration sees nothing at all.
 
 Both carry the identical payload, and duplicates (someone running both)
-are dropped by (satellite, timestamp).
+are dropped by (satellite, timestamp). Retained MQTT messages are ignored.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
-from .api import MurdockApiClient, MurdockApiError
+from .api import MurdockApiClient, MurdockApiError, MurdockAuthError
 from .const import (
     CONF_BASE_URL,
     CONF_FRESHNESS_WINDOW,
@@ -133,6 +133,8 @@ class MurdockCoordinator:
         self.addon_slug: str | None = None
         # Device registry id of the proxy device, parent of the satellites.
         self.proxy_device_id: str | None = None
+        # Prompt for reauth once, not on every poll.
+        self.auth_failed: bool = False
 
     @property
     def id_prefix(self) -> str:
@@ -233,6 +235,12 @@ class MurdockCoordinator:
             self.proxy_version = await self.api.get_version()
             rows = await self.api.get_state()
             self.available = True
+        except MurdockAuthError as exc:
+            # Murdock answered, so it is reachable; only the token is wrong.
+            self.available = True
+            self._async_auth_failed(exc)
+            async_dispatcher_send(self.hass, SIGNAL_SPEAKER_UPDATE, None)
+            return
         except MurdockApiError as exc:
             _LOGGER.warning("Murdock initial sync failed: %s", exc)
             self.available = False
@@ -264,6 +272,10 @@ class MurdockCoordinator:
         was_available = self.available
         try:
             info = await self.api.get_version_info()
+        except MurdockAuthError as exc:
+            self._failures = 0
+            self.available = True
+            self._async_auth_failed(exc)
         except MurdockApiError as exc:
             self._failures += 1
             if self._heard_recently():
@@ -286,6 +298,7 @@ class MurdockCoordinator:
             if self._failures and not self.available:
                 _LOGGER.info("Murdock reachable again at %s", self.api.base_url)
             self._failures = 0
+            self.auth_failed = False
             self.available = True
             self.proxy_version = str(info.get("version", "")) or self.proxy_version
             self.addon_slug = info.get("addon_slug") or self.addon_slug
@@ -293,6 +306,18 @@ class MurdockCoordinator:
             await self._async_prefer_internal_url(info)
         if was_available != self.available:
             async_dispatcher_send(self.hass, SIGNAL_SPEAKER_UPDATE, None)
+
+    @callback
+    def _async_auth_failed(self, exc: MurdockAuthError) -> None:
+        """Start reauth. The entry stays loaded: MQTT needs no token."""
+        if self.auth_failed:
+            return
+        self.auth_failed = True
+        _LOGGER.warning(
+            "Murdock at %s refused the API token (%s); re-authentication started",
+            self.api.base_url, exc,
+        )
+        self.entry.async_start_reauth(self.hass)
 
     def _heard_recently(self) -> bool:
         if self.last_event_at is None:
@@ -355,6 +380,9 @@ class MurdockCoordinator:
     @callback
     def _handle_mqtt_message(self, msg) -> None:
         """Recognition from Murdock's MQTT topic (token-free path)."""
+        if msg.retain:
+            _LOGGER.debug("Ignoring retained recognition on %s", msg.topic)
+            return
         try:
             data = json.loads(msg.payload)
         except (TypeError, ValueError):
