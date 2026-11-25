@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### An empty Wyoming answer comes back at once
+
+A Wyoming service used as fallback or shadow that answered with an empty
+transcript — its way of saying "nothing I recognise" — was waited out
+until its full timeout (8 s by default) and then logged as a timeout.
+A closed-vocabulary server such as speech-to-phrase does exactly that
+for every sentence outside its templates, so "speech-to-phrase first,
+Whisper or Cloud when it has nothing" cost eight seconds per miss. Any
+transcript, empty or not, now starts the short grace period for a
+longer one, and an empty answer returns after it (#1).
+
+### Home Assistant Cloud gets a locale it lists
+
+The Home Assistant STT entity backend grew a bare language code into
+`xx-XX`: `de` → `de-DE` worked, but `en` became `en-EN`, which no entity
+lists, and Home Assistant Cloud answered every request with 415. The
+same went for `ja`, `sv`, `da` and others. Murdock now reads the
+languages the entity accepts (once, then cached for an hour) and sends
+one of those: `en` → `en-US`, or `en-GB` where that is all there is. An
+entity that lists bare codes gets the bare code. If the list cannot be
+read, a table of the usual regions stands in for the old guess (#2).
+
 ## 0.13.0
 
 ### A slow main no longer costs the turn

@@ -86,6 +86,72 @@ def _normalize_language(tag: Optional[str]) -> Optional[str]:
     return code or None
 
 
+#: Region to assume for a bare language code. Growing ``xx`` into
+#: ``xx-XX`` is right for de, fr, es, it, nl, pl … and wrong for these:
+#: there is no en-EN or ja-JA, and Home Assistant answers a locale its
+#: entity does not list with a bare 415. Only a guess — the entity's own
+#: list, when it can be had, decides (see :func:`_pick_locale`).
+_DEFAULT_REGION = {
+    "en": "US", "pt": "BR", "zh": "CN", "ja": "JP", "ko": "KR",
+    "sv": "SE", "da": "DK", "nb": "NO", "cs": "CZ", "el": "GR",
+    "uk": "UA", "he": "IL", "hi": "IN", "ar": "SA", "vi": "VN",
+    "ca": "ES", "sl": "SI", "et": "EE", "ga": "IE", "ms": "MY",
+    "fa": "IR", "sr": "RS", "ka": "GE", "kk": "KZ",
+}
+
+
+def _clean_tag(value) -> str:
+    return str(value or "").strip().replace("_", "-")
+
+
+def _guess_locale(lang: Optional[str]) -> str:
+    """A full locale for ``lang`` without asking anyone: de → de-DE,
+    en → en-US. A tag that already has a region is left alone."""
+    tag = _clean_tag(lang)
+    if not tag:
+        return "en-US"
+    if "-" in tag:
+        return tag
+    code = tag.lower()
+    return f"{code}-{_DEFAULT_REGION.get(code, code.upper())}"
+
+
+def _pick_locale(lang: Optional[str], supported) -> str:
+    """The locale to send, chosen from the ones the entity accepts.
+
+    An exact match wins (an entity that lists bare codes gets the bare
+    code), then the guessed locale, then the first listed locale of the
+    same language — en-GB for ``en`` when an entity offers no en-US.
+    With nothing to choose from, the guess.
+    """
+    guess = _guess_locale(lang)
+    # (normalised, as listed) — the match is loose, the answer is sent
+    # exactly as the entity spelled it.
+    offered = [(_clean_tag(x).lower(), str(x)) for x in supported or []]
+    offered = [(norm, raw) for norm, raw in offered if norm]
+    if not offered:
+        return guess
+    by_norm = dict(reversed(offered))
+    for candidate in (_clean_tag(lang).lower(), guess.lower()):
+        if candidate and candidate in by_norm:
+            return by_norm[candidate]
+    primary = guess.split("-")[0].lower()
+    for norm, raw in offered:
+        if norm.split("-")[0] == primary:
+            return raw
+    return guess
+
+
+#: The languages each Home Assistant STT entity accepts, by
+#: (base URL, entity id): ``(expires_at, languages)``. Backends are built
+#: per request, so the cache lives here. A failed lookup is remembered
+#: briefly as an empty list, so an unreachable capabilities call is not
+#: retried on every utterance.
+_HA_LANGUAGES: dict = {}
+_HA_LANGUAGES_TTL = 3600.0
+_HA_LANGUAGES_RETRY = 60.0
+
+
 def _pcm_to_wav(pcm: bytes, rate: int = 16000, width: int = 2, channels: int = 1) -> bytes:
     """Wrap raw PCM in a WAV container for upload."""
     num_samples = len(pcm) // width
@@ -378,12 +444,16 @@ async def transcribe_via_wyoming(
                 try:
                     # Before anything has arrived, wait as long as the
                     # caller allows; afterwards only briefly, for a
-                    # longer version of what we already have.
+                    # longer version of what we already have. "Arrived"
+                    # includes an empty Transcript: a closed-vocabulary
+                    # server such as speech-to-phrase answers '' for
+                    # anything outside its sentences, and waiting for a
+                    # non-empty one then sat out the whole timeout.
                     event = await (
                         asyncio.wait_for(
                             client.read_event(), timeout=_WYOMING_FINAL_GRACE
                         )
-                        if best
+                        if answered
                         else client.read_event()
                     )
                 except asyncio.TimeoutError:
@@ -474,12 +544,13 @@ class HomeAssistantSTTBackend:
         return custom if custom else f"ha:{self.entity_id}"
 
     def _headers(self, lang: Optional[str], rate: int, width: int,
-                 channels: int) -> dict:
+                 channels: int, *, exact: bool = False) -> dict:
         # Home Assistant wants a full locale here and is strict about the
         # field set — every one of them must be present or it answers 400.
-        language = lang or "en-US"
-        if "-" not in language and "_" not in language:
-            language = f"{language}-{language.upper()}"
+        # transcribe() hands over a locale already matched against the
+        # entity's list (exact); anything else is grown into one by
+        # guesswork.
+        language = lang if exact and lang else _guess_locale(lang)
         return {
             "Authorization": f"Bearer {self.token}",
             "X-Speech-Content": (
@@ -498,7 +569,7 @@ class HomeAssistantSTTBackend:
         channels: int = 1,
         language: Optional[str] = None,
     ) -> str:
-        lang = language or self.language
+        lang = await self._locale(language or self.language)
         self.last_timing = {
             "engine": self.label,
             "sent_bytes": len(pcm_audio),
@@ -512,7 +583,7 @@ class HomeAssistantSTTBackend:
                 request = client.build_request(
                     "POST",
                     f"/api/stt/{self.entity_id}",
-                    headers=self._headers(lang, rate, width, channels),
+                    headers=self._headers(lang, rate, width, channels, exact=True),
                     content=pcm_audio,
                 )
                 resp = await client.send(request, stream=True)
@@ -562,6 +633,40 @@ class HomeAssistantSTTBackend:
                 total_ms=round((time.monotonic() - t0) * 1000, 1), failed="error"
             )
             raise STTBackendError(f"{self.label}: {exc}") from exc
+
+    async def _locale(self, lang: Optional[str]) -> str:
+        """``lang`` as a locale this entity lists.
+
+        Home Assistant Cloud lists only regional tags (en-US, en-GB …) and
+        answers anything else with 415, so a bare ``en`` must become one
+        of those — not the en-EN a mechanical guess makes of it. The list
+        is fetched once and cached; without it, the guess is sent.
+        """
+        key = (self.base_url, self.entity_id)
+        now = time.monotonic()
+        hit = _HA_LANGUAGES.get(key)
+        if hit is not None and hit[0] > now:
+            languages = hit[1]
+        else:
+            try:
+                caps = await asyncio.wait_for(self.capabilities(), timeout=3.0)
+                languages = [str(x) for x in (caps.get("languages") or [])]
+                _HA_LANGUAGES[key] = (now + _HA_LANGUAGES_TTL, languages)
+            except Exception as exc:
+                _LOGGER.info(
+                    "%s: could not read the supported languages (%s) — "
+                    "guessing the locale", self.label, exc,
+                )
+                languages = []
+                _HA_LANGUAGES[key] = (now + _HA_LANGUAGES_RETRY, languages)
+        locale = _pick_locale(lang, languages)
+        if languages and locale not in languages:
+            _LOGGER.warning(
+                "%s lists no locale for %r (it offers %s) — sending %s, "
+                "which Home Assistant will likely refuse",
+                self.label, lang, ", ".join(languages[:8]), locale,
+            )
+        return locale
 
     async def capabilities(self) -> dict:
         """What this entity accepts, straight from Home Assistant.

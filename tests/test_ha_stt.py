@@ -48,6 +48,109 @@ def test_a_bare_language_is_grown_into_a_locale():
     assert lang("de") == "de-DE"
     assert lang("de-DE") == "de-DE"     # a full tag is left alone
     assert lang(None) == "en-US"        # never sent empty
+    # xx-XX is wrong for some: there is no en-EN, and Cloud answers 415.
+    assert lang("en") == "en-US"
+    assert lang("ja") == "ja-JP"
+    assert lang("sv") == "sv-SE"
+
+
+def test_the_locale_is_chosen_from_what_the_entity_lists():
+    from murdock.core.stt_backend import _pick_locale
+
+    cloud = ["en-US", "en-GB", "de-DE", "de-CH"]
+    assert _pick_locale("en", cloud) == "en-US"
+    assert _pick_locale("en-GB", cloud) == "en-GB"     # asked for, so kept
+    assert _pick_locale("en_gb", cloud) == "en-GB"     # spelling is loose
+    assert _pick_locale("de", cloud) == "de-DE"
+    # No en-US on offer: another English beats a guaranteed 415.
+    assert _pick_locale("en", ["en-GB", "en-AU"]) == "en-GB"
+    # An entity that lists bare codes gets the bare code.
+    assert _pick_locale("de", ["en", "de"]) == "de"
+    # Sent exactly as the entity spells it.
+    assert _pick_locale("en", ["en_US"]) == "en_US"
+    # Nothing to choose from, or nothing that fits: the guess.
+    assert _pick_locale("en", []) == "en-US"
+    assert _pick_locale("fr", ["en-US"]) == "fr-FR"
+
+
+class _FakeHA:
+    """Home Assistant's /api/stt: GET lists capabilities, POST transcribes."""
+
+    def __init__(self, languages, get_fails=False):
+        self.languages = languages
+        self.get_fails = get_fails
+        self.gets = 0
+        self.sent_languages = []
+
+    def client_class(self):
+        ha = self
+
+        class _Resp:
+            def __init__(self, data):
+                self.status_code = 200
+                self.text = ""
+                self._data = data
+
+            async def aread(self):
+                pass
+
+            async def aclose(self):
+                pass
+
+            def json(self):
+                return self._data
+
+        class _Client:
+            def __init__(self, **kw):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def get(self, url, headers=None):
+                ha.gets += 1
+                if ha.get_fails:
+                    raise OSError("refused")
+                return _Resp({"languages": ha.languages})
+
+            def build_request(self, method, url, headers=None, content=None):
+                header = headers["X-Speech-Content"]
+                fields = dict(p.strip().split("=", 1) for p in header.split(";"))
+                ha.sent_languages.append(fields["language"])
+                return object()
+
+            async def send(self, request, stream=False):
+                return _Resp({"text": "Licht an", "result": "success"})
+
+        return _Client
+
+
+def test_cloud_gets_a_locale_it_lists_for_a_bare_code(monkeypatch):
+    """Issue #2: pipeline language `en`, Cloud lists en-US/en-GB — Murdock
+    sent en-EN and every request came back 415."""
+    import murdock.core.stt_backend as mod
+
+    ha = _FakeHA(["en-US", "en-GB"])
+    monkeypatch.setattr(mod, "_HA_LANGUAGES", {})
+    monkeypatch.setattr(mod.httpx, "AsyncClient", ha.client_class())
+    backend = _backend()
+    assert asyncio.run(backend.transcribe(b"\x00" * 3200, language="en")) == "Licht an"
+    assert asyncio.run(backend.transcribe(b"\x00" * 3200, language="en")) == "Licht an"
+    assert ha.sent_languages == ["en-US", "en-US"]
+    assert ha.gets == 1     # the list is fetched once, not per utterance
+
+
+def test_without_the_list_the_guess_is_sent(monkeypatch):
+    import murdock.core.stt_backend as mod
+
+    ha = _FakeHA([], get_fails=True)
+    monkeypatch.setattr(mod, "_HA_LANGUAGES", {})
+    monkeypatch.setattr(mod.httpx, "AsyncClient", ha.client_class())
+    assert asyncio.run(_backend().transcribe(b"\x00" * 3200, language="de")) == "Licht an"
+    assert ha.sent_languages == ["de-DE"]
 
 
 def test_it_is_not_configured_without_all_three_parts():

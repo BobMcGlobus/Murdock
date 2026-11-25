@@ -99,6 +99,23 @@ def test_an_empty_final_does_not_erase_a_good_one(monkeypatch):
         "Schalte das Licht"
 
 
+def test_an_empty_answer_returns_without_waiting_out_the_timeout(monkeypatch):
+    """speech-to-phrase answers '' for anything outside its sentences and
+    then keeps the socket open. That is an answer: it must come back after
+    the short grace, not after the caller's timeout (5 s here)."""
+    import time
+
+    t0 = time.monotonic()
+    assert _run(monkeypatch, [_t("")]) == ""
+    assert time.monotonic() - t0 < 2.0
+
+
+def test_an_empty_first_answer_can_still_be_improved(monkeypatch):
+    """A streaming server may open with an empty transcript; a longer one
+    inside the grace still wins."""
+    assert _run(monkeypatch, [_t(""), _t("Licht an")]) == "Licht an"
+
+
 def test_nothing_at_all_is_still_an_error(monkeypatch):
     """Silence from the server is a failure, not an empty transcript —
     that is what lets the caller fall back."""
