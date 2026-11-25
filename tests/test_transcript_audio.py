@@ -179,12 +179,13 @@ def _setup(tmp_path, *, require_match=False, extraction=True, main_fails=False,
     )
 
 
-def _run(handler, pcm: bytes, *, early_match: bool = False) -> None:
+def _run(handler, pcm: bytes, *, early_match: bool = False,
+         early_id: int = 1) -> None:
     async def go():
         handler._reset_session_state()
         assert handler._is_voxtral
         if early_match:
-            handler._early_match, handler._early_match_id = "Jonas", 1
+            handler._early_match, handler._early_match_id = "Jonas", early_id
             handler._early_distance = 0.05
         handler._audio_buffer = bytearray(pcm)
         handler._stream_start = time.monotonic() - len(pcm) / (2 * _RATE)
@@ -273,6 +274,38 @@ def test_early_match_is_reverified(tmp_path):
     _run(s.handler, pcm, early_match=True)
     assert s.sent == [""]
     assert s.engine.audio == []
+
+
+def test_a_confirmed_early_match_is_not_announced_twice(tmp_path):
+    """The probe already published Jonas while he was talking; a second
+    identical event would fire event-triggered automations twice."""
+    s = _setup(tmp_path, require_match=True)
+    _run(s.handler, _pcm(_tone(CHIME, 1.0), _tone(JONAS, 2.5)), early_match=True)
+    assert s.sent == ["Licht an"]
+    assert s.published == []
+
+
+def test_a_whispered_early_match_is_announced_again(tmp_path):
+    """The early event could not know about the whisper; the final one
+    must carry it, or the whisper sensor and the agent never hear of it."""
+    s = _setup(tmp_path, require_match=True)
+    ctx = s.handler.context
+    ctx.detect_whisper = lambda audio: SimpleNamespace(
+        score=0.9, rms=0.01, is_whisper=True, voiced_ratio=0.2,
+    )
+    ctx.classify_voice_style = lambda *a, **kw: "whispered"
+    _run(s.handler, _pcm(_tone(CHIME, 1.0), _tone(JONAS, 2.5)), early_match=True)
+    assert s.sent == ["Licht an"]
+    [event] = s.published
+    assert event["speaker"] == "Jonas" and event["whisper"] is True
+
+
+def test_an_early_match_overruled_by_the_full_check_is_corrected(tmp_path):
+    """Early on it looked like someone else: the final event must say Jonas."""
+    s = _setup(tmp_path, require_match=True)
+    _run(s.handler, _pcm(_tone(CHIME, 1.0), _tone(JONAS, 2.5)),
+         early_match=True, early_id=2)
+    assert _known(s.published) == ["Jonas"]
 
 
 def test_fallback_and_shadows_get_the_full_audio(tmp_path):

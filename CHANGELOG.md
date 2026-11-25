@@ -47,7 +47,12 @@ integration ignores retained events.
   published early, but the whole utterance is verified before the
   transcript is released. An early match therefore pays for the full
   check (VAD, extraction and the verify embedding) when the audio stream
-  ends.
+  ends. When the full check agrees, it sends no second recognition event,
+  so event-triggered automations still fire once per utterance, unless
+  the final event has something the early one could not know: sidecar
+  hints, a whisper, a voice style other than normal, or another enrolled
+  voice in the clip. When it disagrees, the final event corrects the early
+  one.
 - Extraction narrows the clip to the dominant enrolled speaker only if
   that speaker said more than half of the detected speech. Before, one
   short enrolled word next to an unknown voice's command was enough for

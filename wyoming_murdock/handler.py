@@ -567,6 +567,7 @@ class MurdockHandler(AsyncEventHandler):
         self._canonicalizations = []
         self._whisper = False
         self._whisper_score = None
+        self._voice_style = None
         self._speakers = []
         self._mixed_clip = False
         # Only create an upstream transcript future for Wyoming mode.
@@ -1003,6 +1004,30 @@ class MurdockHandler(AsyncEventHandler):
             sid, len(audio) / (16000 * 2), result.speech_seconds, floor,
         )
         await self._close_upstream(send_stop=False)
+
+    def _needs_final_event(self, result) -> bool:
+        """Whether a match must be announced again after the full check.
+
+        The early probe announced the speaker while the user was still
+        talking. When the full check agrees, a second identical event
+        would fire every event-triggered automation twice, so it only goes
+        out when it says something the early one could not: sidecar hints,
+        a whisper, a voice style other than normal, or more than one
+        enrolled voice in the clip. A different speaker always does.
+        """
+        from murdock.core.voice_style import STYLE_NORMAL
+
+        if (
+            self._early_match_id is None
+            or self._early_match_id != result.matched_speaker_id
+        ):
+            return True
+        return bool(
+            self._transcript_hints
+            or self._whisper
+            or self._voice_style not in (None, STYLE_NORMAL)
+            or len(self._speakers or []) > 1
+        )
 
     async def _drop_chime(self, audio_16k: bytes) -> bytes:
         """Remove non-speech from the first ``skip_leading_seconds``.
@@ -1992,24 +2017,30 @@ class MurdockHandler(AsyncEventHandler):
             # intent stage (where the agent's prompt is built) within a
             # millisecond of receiving the transcript, so a speaker
             # published afterwards can only reach the *next* turn.
-            await self.context.publish_recognition_now(
-                speaker=result.matched_speaker,
-                confidence=self.context.confidence_for(result.distance),
-                satellite_id=self._satellite_id,
-                is_known=True,
-                distance=result.distance,
-                threshold=result.threshold,
-                nearest_speaker=nearest,
-                nearest_distance=nearest_d,
-                margin=margin,
-                weight=weight,
-                role=spk.role if spk else None,
-                ambiguities=self._transcript_hints or None,
-                whisper=self._whisper,
-                whisper_score=self._whisper_score,
-            voice_style=self._voice_style,
-                speakers=self._speakers or None,
-            )
+            if self._needs_final_event(result):
+                await self.context.publish_recognition_now(
+                    speaker=result.matched_speaker,
+                    confidence=self.context.confidence_for(result.distance),
+                    satellite_id=self._satellite_id,
+                    is_known=True,
+                    distance=result.distance,
+                    threshold=result.threshold,
+                    nearest_speaker=nearest,
+                    nearest_distance=nearest_d,
+                    margin=margin,
+                    weight=weight,
+                    role=spk.role if spk else None,
+                    ambiguities=self._transcript_hints or None,
+                    whisper=self._whisper,
+                    whisper_score=self._whisper_score,
+                    voice_style=self._voice_style,
+                    speakers=self._speakers or None,
+                )
+            else:
+                _LOGGER.debug(
+                    "[%s] Full check agrees with the early match %s — "
+                    "no second event", sid, result.matched_speaker,
+                )
             await self._send_transcript_to_satellite(
                 self._augment_transcript(
                     transcript, is_known=True, speaker=result.matched_speaker,
