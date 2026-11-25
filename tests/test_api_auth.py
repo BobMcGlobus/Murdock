@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import stat
 import zipfile
 from types import SimpleNamespace
@@ -121,7 +122,9 @@ def test_token_is_generated_once_with_private_mode(tmp_path):
     path = tmp_path / "api_token"
     assert path.read_text().strip() == first.token
     assert len(first.token) >= 40
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name == "posix":
+        # Windows has no POSIX mode bits; os.open ignores 0o600 there.
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert ApiAuth(tmp_path, under_supervisor=False).token == first.token
 
 
