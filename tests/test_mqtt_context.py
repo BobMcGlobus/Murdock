@@ -9,9 +9,11 @@ imported lazily, so the client constructs fine offline).
 
 from __future__ import annotations
 
+import asyncio
 import time
 from types import SimpleNamespace
 
+import aiomqtt
 import pytest
 
 from murdock.core.mqtt_integration import (
@@ -21,11 +23,11 @@ from murdock.core.mqtt_integration import (
 )
 
 
-def _msg(topic: str, payload):
-    """Fake aiomqtt message: only .topic and .payload are read."""
+def _msg(topic: str, payload, retain: bool = False):
+    """Fake aiomqtt message."""
     if isinstance(payload, str):
         payload = payload.encode("utf-8")
-    return SimpleNamespace(topic=topic, payload=payload)
+    return SimpleNamespace(topic=topic, payload=payload, retain=retain)
 
 
 def _client():
@@ -223,30 +225,136 @@ def test_discovery_config_count_and_topics():
         assert cfg["state_topic"].startswith("murdock/")
 
 
-def test_whisper_state_is_published():
-    """The flag and the score must reach their own topics."""
-    import asyncio
-
-    c = _client()
+def _capture_publishes(c):
+    """Record ``topic -> (payload, retain)`` instead of publishing."""
     published = {}
 
     async def _capture(topic, payload, retain=True):
-        published[topic] = payload
+        published[topic] = (payload, retain)
 
     c._publish_state = _capture
     c._connected = True
     c._client = object()
+    return published
+
+
+def test_whisper_state_is_published():
+    """The flag and the score must reach their own topics."""
+    c = _client()
+    published = _capture_publishes(c)
     asyncio.run(c.publish_recognition(
         speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer",
         is_known=True, whisper=True, whisper_score=0.87,
     ))
-    assert published["murdock/binary_sensor/whisper/state"] == "ON"
-    assert published["murdock/sensor/whisper_score/state"] == "0.870"
+    assert published["murdock/binary_sensor/whisper/state"][0] == "ON"
+    assert published["murdock/sensor/whisper_score/state"][0] == "0.870"
 
     published.clear()
     asyncio.run(c.publish_recognition(
         speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer",
         is_known=True, whisper=False, whisper_score=0.41,
     ))
-    assert published["murdock/binary_sensor/whisper/state"] == "OFF"
-    assert published["murdock/sensor/whisper_score/state"] == "0.410"
+    assert published["murdock/binary_sensor/whisper/state"][0] == "OFF"
+    assert published["murdock/sensor/whisper_score/state"][0] == "0.410"
+
+
+# --- Recognition event is not retained -----------------------------------
+
+
+def test_recognition_event_is_not_retained():
+    c = _client()
+    published = _capture_publishes(c)
+    asyncio.run(c.publish_recognition(
+        speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer",
+        is_known=True, role="admin",
+    ))
+    payload, retain = published["murdock/event/recognition"]
+    assert retain is False
+    assert '"speaker": "Jonas"' in payload
+
+
+def test_state_topics_stay_retained():
+    c = _client()
+    published = _capture_publishes(c)
+    asyncio.run(c.publish_recognition(
+        speaker="Jonas", confidence=0.9, satellite_id="wohnzimmer", is_known=True,
+    ))
+    states = {t: r for t, (_p, r) in published.items() if t.endswith("/state")}
+    assert states and all(states.values())
+
+
+class _FakeBroker:
+    """Fake aiomqtt.Client that records calls."""
+
+    def __init__(self, inbound, stop_event):
+        self.inbound = inbound
+        self.stop_event = stop_event
+        self.published = []
+        self.subscribed = []
+        self.unsubscribed = []
+
+    async def publish(self, topic, payload=None, qos=0, retain=False):
+        self.published.append((topic, payload, retain))
+
+    async def subscribe(self, topic):
+        self.subscribed.append(topic)
+
+    async def unsubscribe(self, topic):
+        self.unsubscribed.append(topic)
+
+    @property
+    def messages(self):
+        async def _gen():
+            for message in self.inbound:
+                yield message
+            self.stop_event.set()  # end the connection loop
+        return _gen()
+
+
+def _run_connection(monkeypatch, inbound):
+    c = _client()
+    broker = _FakeBroker(inbound, c._stop_event)
+
+    class _Client:
+        def __init__(self, **_kw):
+            pass
+
+        async def __aenter__(self):
+            return broker
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(aiomqtt, "Client", _Client)
+    asyncio.run(asyncio.wait_for(c._connection_loop(), timeout=5))
+    return c, broker
+
+
+EVENT = "murdock/event/recognition"
+
+
+def test_stale_retained_event_is_cleared(monkeypatch):
+    c, broker = _run_connection(monkeypatch, [
+        _msg(EVENT, '{"speaker": "Jonas", "is_known": true}', retain=True),
+    ])
+    assert EVENT in broker.subscribed
+    assert (EVENT, b"", True) in broker.published
+    assert broker.unsubscribed == [EVENT]
+    assert c.context_snapshot() == {}
+
+
+def test_no_clear_without_a_retained_event(monkeypatch):
+    _, broker = _run_connection(monkeypatch, [
+        _msg(EVENT, '{"speaker": "Jonas"}'),
+        _msg(EVENT, '{"speaker": "Anna"}'),
+    ])
+    assert not [p for p in broker.published if p[0] == EVENT]
+    assert broker.unsubscribed == [EVENT]
+
+
+def test_context_is_handled_during_the_event_check(monkeypatch):
+    c, _ = _run_connection(monkeypatch, [
+        _msg("murdock/context/wohnzimmer/tv", '{"playing": true}', retain=True),
+        _msg(EVENT, '{"speaker": "Jonas"}', retain=True),
+    ])
+    assert c.is_tv_playing(room="wohnzimmer") is True

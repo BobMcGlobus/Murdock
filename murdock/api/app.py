@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from murdock import __version__
 from murdock.core.context import AppContext
 
+from .auth import ApiAuth, AuthMiddleware
+from .routes_auth import router as auth_router
 from .routes_backup import router as backup_router
 from .routes_integration import router as integration_router
 from .routes_stt_services import router as stt_services_router
@@ -27,7 +29,7 @@ _LOGGER = logging.getLogger("murdock.api")
 _STATIC_DIR = Path(__file__).parent.parent / "ui" / "static"
 
 
-def create_app(context: AppContext) -> FastAPI:
+def create_app(context: AppContext, auth: Optional[ApiAuth] = None) -> FastAPI:
     """Build the FastAPI application bound to an :class:`AppContext`."""
     app = FastAPI(
         title="Murdock",
@@ -35,14 +37,12 @@ def create_app(context: AppContext) -> FastAPI:
         version=__version__,
     )
     app.state.context = context
+    app.state.auth = auth or ApiAuth.from_settings(context.settings)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # No CORS: the UI is same-origin and the integration calls server to server.
+    app.add_middleware(AuthMiddleware, auth=app.state.auth)
 
+    app.include_router(auth_router)
     app.include_router(status_router)
     app.include_router(speakers_router)
     app.include_router(unknown_router)

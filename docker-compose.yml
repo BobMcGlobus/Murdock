@@ -29,6 +29,8 @@ services:
       - MISTRAL_MODEL=${MISTRAL_MODEL:-voxtral-mini-latest}
       - WEB_HOST=0.0.0.0
       - WEB_PORT=8099
+      # Web UI/API token. Generated into ./data/api_token if unset.
+      # - API_TOKEN=
       - LOG_LEVEL=info
       # MQTT (recommended HA integration). Uncomment + set your broker to
       # get auto-discovery in HA without a token. These seed the DB on

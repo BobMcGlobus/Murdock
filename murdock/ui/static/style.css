@@ -1000,3 +1000,21 @@ button.secondary.active {
 #rec-audio-form { align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
 
 .svc-stats.warn { color: var(--warn, #fcd34d); }
+
+/* Signed out: only the sign-in card is shown. */
+body.auth-required main > section,
+body.auth-required header nav {
+    display: none !important;
+}
+#login-form input,
+#api-token-value {
+    flex: 1;
+    min-width: 16rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+#api-access-card .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}

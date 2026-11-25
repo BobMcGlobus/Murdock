@@ -25,6 +25,9 @@ Design goals (see project plan):
   * **Min region length** — short regions score unreliably (and fall
     below the embedder's minimum frame count), so they are not used to
     claim a region for a speaker.
+  * **Majority** — the transcript always covers the whole clip, so the
+    clip is only narrowed to a speaker who said more than half of the
+    detected speech. Otherwise it is judged as a whole.
 
 ``extraction_threshold`` is a cosine *distance* ceiling and should be
 **stricter** (smaller) than the verify threshold: we only want to keep
@@ -45,6 +48,8 @@ _WIDTH = 2  # 16-bit PCM
 # The embedder needs ~0.5 s to produce a stable embedding; never hand the
 # verify gate less than this after extraction.
 _MIN_KEPT_SECONDS = 0.5
+# Share of the detected speech the target must exceed to be extracted.
+_MIN_TARGET_SHARE = 0.5
 
 
 @dataclass
@@ -67,6 +72,12 @@ class ExtractionResult:
     # "who else was in the room" — the information was already computed to
     # pick the dominant speaker and used to be thrown away.
     speakers: list = field(default_factory=list)
+    # Set when the target did not exceed _MIN_TARGET_SHARE.
+    declined_minority: bool = False
+    target_share: Optional[float] = None
+    # A scored region belonged to someone other than the target. Short,
+    # unscored regions don't count: they are often the target's own words.
+    other_voice: bool = False
 
 
 def extract_target_speaker(
@@ -113,6 +124,7 @@ def extract_target_speaker(
 
     # Score every region. Each entry: (start_b, end_b, dur, sid, name).
     regions: list[tuple[int, int, float, Optional[int], Optional[str]]] = []
+    unmatched_scored = False
     for start_s, end_s in segments:
         dur = max(0.0, end_s - start_s)
         start_b = int(start_s * bytes_per_sec)
@@ -141,6 +153,7 @@ def extract_target_speaker(
             regions.append((start_b, end_b, dur, int(sid), getattr(res, "matched_speaker", None)))
         else:
             regions.append((start_b, end_b, dur, None, None))
+            unmatched_scored = True
 
     matched = [r for r in regions if r[3] is not None]
     if not matched:
@@ -180,8 +193,27 @@ def extract_target_speaker(
             speakers=roster,
         )
 
+    kept_seconds = sum(dur for _sb, _eb, dur, _sid, _n in kept)
+    speech_seconds = sum(dur for _sb, _eb, dur, _sid, _n in regions)
+    dropped_seconds = speech_seconds - kept_seconds
+    target_share = kept_seconds / speech_seconds
+
+    if target_share <= _MIN_TARGET_SHARE:
+        return ExtractionResult(
+            applied=False,
+            audio=audio_16k,
+            n_regions=len(segments),
+            n_kept=len(kept),
+            target_speaker=target_name,
+            speakers=roster,
+            declined_minority=True,
+            target_share=target_share,
+            other_voice=unmatched_scored or any(
+                r[3] not in (None, target_sid) for r in regions
+            ),
+        )
+
     kept_audio = b"".join(audio_16k[sb:eb] for sb, eb, *_ in kept)
-    dropped_seconds = sum(dur for _sb, _eb, dur, sid, _n in regions if sid != target_sid)
 
     # Guard: never hand back less than the embedder can use.
     if len(kept_audio) < int(_MIN_KEPT_SECONDS * bytes_per_sec):

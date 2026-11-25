@@ -15,7 +15,7 @@ Topic layout (prefix defaults to ``murdock``)::
     murdock/status                              online | offline (LWT)
     murdock/sensor/<name>/state                 published recognition state
     murdock/binary_sensor/<name>/state          published recognition state
-    murdock/event/recognition                   full JSON event
+    murdock/event/recognition                   full JSON event (not retained)
     murdock/context/<room>/tv                    HA → {"playing": true}   (retained)
     murdock/context/<room>/presence              HA → {"present": true}   (retained)
     murdock/context/global/tv                    fallback when no room match
@@ -236,13 +236,23 @@ class MQTTClient:
                     # …and the active-satellite signal (which device is
                     # currently running a pipeline).
                     await client.subscribe(f"{self.topic_prefix}/active_satellite")
+                    # Subscribe to our own event topic until its first message,
+                    # to clear a retained event left by an older version.
+                    event_topic = self.event_topic
+                    await client.subscribe(event_topic)
+                    event_checked = False
 
                     # Inbound pump: blocks until the connection drops or
                     # the task is cancelled on stop().
                     active_topic = f"{self.topic_prefix}/active_satellite"
                     async for message in client.messages:
-                        if str(message.topic) == active_topic:
+                        topic = str(message.topic)
+                        if topic == active_topic:
                             self._handle_active_satellite(message)
+                        elif topic == event_topic:
+                            if not event_checked:
+                                event_checked = True
+                                await self._clear_stale_event(client, message)
                         else:
                             self._handle_context_message(message)
 
@@ -266,6 +276,23 @@ class MQTTClient:
 
         self._connected = False
         self._client = None
+
+    @property
+    def event_topic(self) -> str:
+        return f"{self.topic_prefix}/event/recognition"
+
+    async def _clear_stale_event(self, client, message) -> None:
+        """Clear a retained event left by an older version, then unsubscribe."""
+        import aiomqtt
+
+        topic = str(message.topic)
+        try:
+            if message.retain and message.payload:
+                await client.publish(topic, b"", qos=1, retain=True)
+                _LOGGER.info("Cleared a stale retained recognition event from %s", topic)
+            await client.unsubscribe(topic)
+        except aiomqtt.MqttError as exc:
+            _LOGGER.debug("Stale event check on %s failed: %s", topic, exc)
 
     # ------------------------------------------------------------------
     # Inbound context handling
@@ -617,12 +644,14 @@ class MQTTClient:
     # State publishing
     # ------------------------------------------------------------------
 
-    async def _publish_state(self, topic: str, value: str) -> None:
-        """Publish a single state value. Swallows errors."""
+    async def _publish_state(
+        self, topic: str, value: str, retain: bool = True
+    ) -> None:
+        """Publish a single value. Swallows errors."""
         if not self._connected or self._client is None:
             return
         try:
-            await self._client.publish(topic, value, qos=0, retain=True)
+            await self._client.publish(topic, value, qos=0, retain=retain)
         except Exception as exc:
             _LOGGER.debug("MQTT publish failed for %s: %s", topic, exc)
 
@@ -718,7 +747,7 @@ class MQTTClient:
         )
 
         await self._publish_state(
-            f"{prefix}/event/recognition", json.dumps(event_payload)
+            self.event_topic, json.dumps(event_payload), retain=False
         )
 
     def publish_async(self, coro) -> None:

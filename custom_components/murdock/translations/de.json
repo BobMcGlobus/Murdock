@@ -3,10 +3,10 @@
     "step": {
       "user": {
         "title": "Mit Murdock verbinden",
-        "description": "Adresse des Murdock-Proxys. Das Add-on stellt ihn auf Port 8099 bereit — gib den Port zuvor in den Netzwerk-Optionen des Add-ons frei.",
+        "description": "Adresse des Murdock-Proxys. Das Add-on stellt ihn auf Port 8099 bereit — gib den Port zuvor in den Netzwerk-Optionen des Add-ons frei. Das API-Token steht in Murdocks Weboberfläche unter Einstellungen → Home Assistant → API-Zugang.",
         "data": {
           "base_url": "Basis-URL",
-          "token": "Token (optional)"
+          "token": "API-Token"
         }
       },
       "satellite": {
@@ -26,13 +26,22 @@
           "mirror_vocabulary": "Vokabular an Murdock spiegeln",
           "mqtt_topic_prefix": "Murdock-MQTT-Topic-Prefix (leer = nur REST-Event-Bus)"
         }
+      },
+      "reauth_confirm": {
+        "title": "API-Token erneut eingeben",
+        "description": "Murdock unter {url} hat das gespeicherte Token abgelehnt. Gib das Token aus Murdocks Weboberfläche ein (Einstellungen → Home Assistant → API-Zugang).",
+        "data": {
+          "token": "API-Token"
+        }
       }
     },
     "error": {
-      "cannot_connect": "Murdock ist unter dieser Adresse nicht erreichbar."
+      "cannot_connect": "Murdock ist unter dieser Adresse nicht erreichbar.",
+      "invalid_auth": "Murdock hat das Token abgelehnt."
     },
     "abort": {
-      "already_configured": "Diese Murdock-Instanz ist bereits eingerichtet."
+      "already_configured": "Diese Murdock-Instanz ist bereits eingerichtet.",
+      "reauth_successful": "Die erneute Authentifizierung war erfolgreich."
     }
   },
   "options": {

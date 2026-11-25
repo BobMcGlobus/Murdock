@@ -29,8 +29,13 @@ function apiUrl(path) {
     return path;
 }
 
+// Required for state-changing requests authenticated by the session cookie.
+const UI_HEADERS = { "X-Murdock-UI": "1" };
+
 async function api(path, options = {}) {
-    const res = await fetch(apiUrl(path), options);
+    const headers = { ...UI_HEADERS, ...(options.headers || {}) };
+    const res = await fetch(apiUrl(path), { ...options, headers });
+    if (res.status === 401 && !path.startsWith("/api/auth/")) showLogin();
     if (!res.ok) {
         let detail = res.statusText;
         try {
@@ -1038,6 +1043,7 @@ function renderLangHint(s) {
 }
 
 async function loadSettings() {
+    loadApiAccess();
     try {
         const s = await api("/api/settings");
         const form = $("#settings-form");
@@ -2489,27 +2495,94 @@ document.querySelectorAll("#ha-settings-form input[name^='ha_']").forEach((el) =
     el.addEventListener("input", updateHaTemplatePreview);
 });
 
-$("#ha-copy-template").addEventListener("click", async () => {
-    const text = buildHaTemplate();
+async function copyText(text, feedback) {
     try {
         await navigator.clipboard.writeText(text);
-        const fb = $("#ha-copy-feedback");
-        fb.textContent = t("ha.copied");
-        fb.className = "feedback ok";
-        setTimeout(() => { fb.textContent = ""; fb.className = ""; }, 2000);
     } catch {
-        // Fallback for non-HTTPS contexts.
+        // The clipboard API is unavailable outside HTTPS.
         const ta = document.createElement("textarea");
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
         document.execCommand("copy");
         document.body.removeChild(ta);
-        const fb = $("#ha-copy-feedback");
-        fb.textContent = t("ha.copied");
-        fb.className = "feedback ok";
-        setTimeout(() => { fb.textContent = ""; fb.className = ""; }, 2000);
     }
+    feedback.textContent = t("generic.copied");
+    feedback.className = "feedback ok";
+    setTimeout(() => { feedback.textContent = ""; feedback.className = ""; }, 2000);
+}
+
+$("#ha-copy-template").addEventListener("click", () => {
+    copyText(buildHaTemplate(), $("#ha-copy-feedback"));
+});
+
+// --- Sign-in & API access --------------------------------------------------
+
+function showLogin() {
+    if (document.body.classList.contains("auth-required")) return;
+    document.body.classList.add("auth-required");
+    $("#login-card").hidden = false;
+    $("#login-token").focus();
+}
+
+$("#login-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const fb = $("#login-feedback");
+    fb.innerHTML = "";
+    try {
+        await api("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: $("#login-token").value.trim() }),
+        });
+        window.location.reload();
+    } catch {
+        fb.innerHTML = `<span class="feedback err">${escapeHtml(t("auth.login_failed"))}</span>`;
+    }
+});
+
+async function loadApiAccess() {
+    try {
+        const [tok, status] = await Promise.all([
+            api("/api/auth/token"),
+            api("/api/auth/status"),
+        ]);
+        $("#api-token-value").value = tok.token;
+        $("#api-token-pinned").hidden = !tok.pinned;
+        $("#api-token-rotate").hidden = !!tok.pinned;
+        $("#api-logout").hidden = status.via !== "session";
+    } catch (err) {
+        $("#api-token-feedback").innerHTML =
+            `<span class="feedback err">${escapeHtml(t("generic.error", { err: err.message }))}</span>`;
+    }
+}
+
+$("#api-token-reveal").addEventListener("click", () => {
+    const input = $("#api-token-value");
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    $("#api-token-reveal").textContent = t(show ? "auth.hide" : "auth.reveal");
+});
+
+$("#api-token-copy").addEventListener("click", () => {
+    copyText($("#api-token-value").value, $("#api-token-feedback"));
+});
+
+$("#api-token-rotate").addEventListener("click", async () => {
+    if (!confirm(t("auth.confirm_rotate"))) return;
+    const fb = $("#api-token-feedback");
+    try {
+        const tok = await api("/api/auth/token/rotate", { method: "POST" });
+        $("#api-token-value").value = tok.token;
+        fb.innerHTML = `<span class="feedback ok">${escapeHtml(t("auth.rotated"))}</span>`;
+    } catch (err) {
+        fb.innerHTML = `<span class="feedback err">${escapeHtml(t("generic.error", { err: err.message }))}</span>`;
+    }
+});
+
+$("#api-logout").addEventListener("click", async () => {
+    await api("/api/auth/logout", { method: "POST" }).catch(() => {});
+    window.location.reload();
 });
 
 // --- Backup & Restore -----------------------------------------------------
