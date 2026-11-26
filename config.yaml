@@ -12,7 +12,7 @@
 # optional language overrides. Everything else is editable live.
 
 name: Murdock (Beta)
-version: "0.15.0b2"
+version: "0.15.0b3"
 slug: murdock
 stage: experimental
 description: >-
