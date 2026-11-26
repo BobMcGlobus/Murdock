@@ -147,6 +147,32 @@ def test_info_without_the_app_is_a_503(tmp_path):
         assert client.get("/info").status_code == 503
 
 
+def test_a_recent_info_stands_in_while_the_app_is_away(tmp_path, monkeypatch):
+    """Reinstalling or restarting the app must not drop Home Assistant's
+    entry; an old answer must not keep satellites sending forever."""
+    import wyoming_murdock.wake_proxy as mod
+
+    state = {"up": True}
+
+    async def info(url):
+        if not state["up"]:
+            raise OSError("refused")
+        return {"name": "Voice Support", "version": "0.2.1", "api_version": 1,
+                "wake_words": [{"id": "okay_nabu"}]}
+
+    proxy = WakeProxy("http://voice:10900", data_dir=tmp_path, fetch_info=info)
+    with TestClient(proxy.build_app()) as client:
+        assert client.get("/info").status_code == 200
+        state["up"] = False
+        assert client.get("/info").json()["wake_words"] == [{"id": "okay_nabu"}]
+    # It survives a restart of Murdock, too.
+    again = WakeProxy("http://voice:10900", data_dir=tmp_path, fetch_info=info)
+    with TestClient(again.build_app()) as client:
+        assert client.get("/info").status_code == 200
+        monkeypatch.setattr(mod, "_INFO_STALE_SECONDS", 0)
+        assert client.get("/info").status_code == 503
+
+
 def test_an_accepted_run_is_relayed_unchanged(tmp_path):
     app = _FakeApp("accepted")
     proxy, check = _proxy(tmp_path, app)

@@ -53,6 +53,12 @@ _CLIP_TAIL_MS = 1500
 _KEEP_RUNS = 300
 _INFO_TIMEOUT = 5.0
 _CONNECT_TIMEOUT = 1.0
+#: How long the app's last /info answer stands in while it is down. Long
+#: enough to reinstall or restart the app without Home Assistant dropping
+#: the entry; short, because a stale answer keeps satellites sending wake
+#: word audio (and detecting at their lower threshold) with nobody checking.
+_INFO_STALE_SECONDS = 30 * 60
+_INFO_REFRESH_SECONDS = 300
 
 
 class Upstream:
@@ -229,6 +235,56 @@ class WakeProxy:
         self.records: list[dict] = []          # newest last, for tests and the API
         self._background: set[asyncio.Task] = set()
         self._active = 0
+        self._info: Optional[dict] = None
+        self._info_at: Optional[float] = None   # wall clock, survives restarts
+        self._load_info()
+
+    @property
+    def _info_path(self) -> Optional[Path]:
+        return self.runs_dir / "info.json" if self.runs_dir else None
+
+    def _load_info(self) -> None:
+        path = self._info_path
+        if path is None or not path.exists():
+            return
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            self._info, self._info_at = stored["info"], float(stored["at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+    async def current_info(self) -> dict:
+        """The app's /info, or its last answer while it is briefly away."""
+        try:
+            data = await self._fetch_info(self.upstream_url)
+        except Exception as exc:
+            age = time.time() - self._info_at if self._info_at else None
+            if self._info is not None and age is not None and age < _INFO_STALE_SECONDS:
+                _LOGGER.warning(
+                    "Voice Support app at %s unreachable (%s) — answering with "
+                    "its info from %.0f s ago", self.upstream_url, exc, age,
+                )
+                return self._info
+            raise
+        self._info, self._info_at = data, time.time()
+        path = self._info_path
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps({"info": data, "at": self._info_at}),
+                                encoding="utf-8")
+            except OSError:
+                pass
+        return data
+
+    async def keep_info_fresh(self) -> None:
+        """Ask the app now and then, so a short outage has a recent answer."""
+        while True:
+            try:
+                await self.current_info()
+            except Exception as exc:
+                _LOGGER.debug("Voice Support app info refresh failed: %s", exc)
+            await asyncio.sleep(_INFO_REFRESH_SECONDS)
 
     @property
     def run_url(self) -> str:
@@ -252,7 +308,7 @@ class WakeProxy:
         @app.get("/info")
         async def info():
             try:
-                data = await self._fetch_info(self.upstream_url)
+                data = await self.current_info()
             except Exception as exc:
                 _LOGGER.warning("Voice Support app at %s unreachable: %s",
                                 self.upstream_url, exc)
@@ -548,7 +604,11 @@ async def run_wake_proxy(proxy: WakeProxy, host: str, port: int) -> None:
     )
     server = uvicorn.Server(config)
     _LOGGER.info("Wake word proxy on %s:%d → %s", host, port, proxy.upstream_url)
-    await server.serve()
+    refresher = asyncio.create_task(proxy.keep_info_fresh())
+    try:
+        await server.serve()
+    finally:
+        refresher.cancel()
 
 
 __all__ = [
