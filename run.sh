@@ -19,7 +19,10 @@ if [ ! -f "$OPTIONS" ]; then
     exit 1
 fi
 
-cfg() { jq -r ".${1} // \"\"" "$OPTIONS"; }
+# An option's value as text, "" when unset. Not `.x // ""`: jq's
+# alternative operator treats false like null, so mqtt_enabled: false
+# came out as "" and the default (true) won.
+cfg() { jq -r --arg k "$1" '.[$k] | if . == null then "" else tostring end' "$OPTIONS"; }
 
 STT_BACKEND="$(cfg stt_backend)"
 UPSTREAM_URI="$(cfg upstream_uri)"
