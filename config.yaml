@@ -11,10 +11,12 @@
 # exposes the bootstrap knobs — URL of the STT upstream, log level, and
 # optional language overrides. Everything else is editable live.
 
-name: Murdock
-version: "0.14.0"
+name: Murdock (Beta)
+version: "0.15.0b1"
 slug: murdock
+stage: experimental
 description: >-
+  BETA — wake word proxy test build, runs next to the stable add-on.
   Speaker-recognition proxy for Home Assistant (Wyoming). Identifies
   known speakers from voice-pipeline audio and exposes the result to
   your automations.
@@ -40,7 +42,8 @@ panel_admin: true
 ports:
   # Wyoming protocol for satellites to connect to. Must be exposed on
   # the LAN so satellites (ESPHome, wyoming-satellite) can reach it.
-  "10350/tcp": 10350
+  # Beta: no host port, so it can run next to the stable add-on.
+  "10350/tcp": null
   # Web UI direct access — optional; ingress works without exposing it.
   "8099/tcp": null
   # Wake word proxy (experimental). Home Assistant reaches it on the
@@ -73,8 +76,9 @@ options:
   openai_model: "gpt-4o-transcribe"
   log_level: "info"
   advertised_languages: "de,en"
-  mqtt_enabled: true
-  wake_proxy_upstream: ""
+  # Beta: the stable add-on publishes the speakers; two would collide.
+  mqtt_enabled: false
+  wake_proxy_upstream: "http://core-voice-support:10900"
 schema:
   # The STT options below only seed the first speech-to-text service on
   # the first start of 0.11 or later (or a fresh install). From then on,
