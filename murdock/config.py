@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     # Empty: generated into <data_dir>/api_token on first start.
     api_token: Optional[str] = Field(default=None)
 
+    # Wake word proxy (experimental): where Home Assistant's Voice Support
+    # app listens, e.g. http://core-voice-support:10900. Set, Murdock serves
+    # the app's protocol on wake_proxy_port and relays every run to it,
+    # keeping a copy of the wake word. Empty: off.
+    wake_proxy_upstream: Optional[str] = Field(default=None)
+    wake_proxy_port: int = Field(default=10900)
+
     # Paths
     data_dir: Path = Field(default=Path("/app/data"))
     model_dir: Path = Field(default=Path("/app/models"))

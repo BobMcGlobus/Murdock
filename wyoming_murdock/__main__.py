@@ -116,6 +116,20 @@ async def main() -> None:
         _run_web_ui(app, settings.web_host, settings.web_port)
     )
     wyoming_task = asyncio.create_task(server.run(handler_factory))
+    wake_task = None
+    if settings.wake_proxy_upstream:
+        from .wake_proxy import WakeProxy, run_wake_proxy, speaker_check_for
+
+        context.wake_proxy = WakeProxy(
+            settings.wake_proxy_upstream,
+            data_dir=settings.data_dir,
+            speaker_check=speaker_check_for(context),
+        )
+        # Not in the set awaited below: a proxy that cannot bind (port
+        # taken) is logged and leaves the rest of Murdock running.
+        wake_task = asyncio.create_task(
+            run_wake_proxy(context.wake_proxy, settings.web_host, settings.wake_proxy_port)
+        )
     # Kick off the language prime AFTER the listener is up so that slow
     # or unreachable upstreams never delay the Wyoming bind — HA can
     # connect immediately and Describe requests will refresh on demand.
@@ -145,7 +159,11 @@ async def main() -> None:
         cleanup_task.cancel()
         web_task.cancel()
         wyoming_task.cancel()
-        for task in (cleanup_task, web_task, wyoming_task):
+        if wake_task is not None:
+            wake_task.cancel()
+        for task in (cleanup_task, web_task, wyoming_task, wake_task):
+            if task is None:
+                continue
             try:
                 await task
             except (asyncio.CancelledError, Exception):

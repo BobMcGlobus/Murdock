@@ -31,6 +31,7 @@ OPENAI_MODEL="$(cfg openai_model)"
 LOG_LEVEL="$(cfg log_level)"
 ADVERTISED="$(cfg advertised_languages)"
 MQTT_ENABLED="$(cfg mqtt_enabled)"
+WAKE_PROXY_UPSTREAM="$(cfg wake_proxy_upstream)"
 
 # Validate: upstream mode needs a URI, voxtral mode needs an API key.
 if [ "${STT_BACKEND:-upstream}" = "upstream" ] && [ -z "$UPSTREAM_URI" ]; then
@@ -68,6 +69,13 @@ fi
 # compose deployment, so users aren't surprised moving between them.
 if [ -n "$ADVERTISED" ]; then
     export ADVERTISED_LANGUAGES="$ADVERTISED"
+fi
+
+# Experimental: relay Home Assistant's Voice Support runs (wake word
+# verification) through Murdock. Empty leaves it off.
+if [ -n "$WAKE_PROXY_UPSTREAM" ]; then
+    export WAKE_PROXY_UPSTREAM
+    log "Wake proxy:   port 10900 → $WAKE_PROXY_UPSTREAM"
 fi
 
 # --- Home Assistant hand-off ----------------------------------------------

@@ -43,9 +43,13 @@ ports:
   "10350/tcp": 10350
   # Web UI direct access — optional; ingress works without exposing it.
   "8099/tcp": null
+  # Wake word proxy (experimental). Home Assistant reaches it on the
+  # internal network; it needs no port on the host.
+  "10900/tcp": null
 ports_description:
   "10350/tcp": "Wyoming protocol (satellites connect here)"
   "8099/tcp": "Web UI (use ingress instead if possible)"
+  "10900/tcp": "Wake word proxy for Voice Support (experimental)"
 # Allow the addon to reach HA's WebSocket/API so it can push recognition
 # state changes. Using the addon's injected SUPERVISOR_TOKEN is better
 # than asking the user to paste a long-lived token — but we keep both
@@ -70,6 +74,7 @@ options:
   log_level: "info"
   advertised_languages: "de,en"
   mqtt_enabled: true
+  wake_proxy_upstream: ""
 schema:
   # The STT options below only seed the first speech-to-text service on
   # the first start of 0.11 or later (or a fresh install). From then on,
@@ -108,3 +113,9 @@ schema:
   # the mqtt service above — no host/credentials needed here. Broker
   # host/credentials can still be overridden from the Web UI.
   mqtt_enabled: bool?
+  # Experimental, Home Assistant 2026.12+ with Labs "Next-generation
+  # voice": where the Voice Support app listens, normally
+  # http://core-voice-support:10900. Murdock then relays every voice run
+  # to it on port 10900 and keeps a copy of the wake word. Point the Voice
+  # support integration at this add-on to use it. Empty: off.
+  wake_proxy_upstream: str?

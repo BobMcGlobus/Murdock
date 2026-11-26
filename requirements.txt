@@ -9,5 +9,7 @@ python-multipart>=0.0.9
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
 httpx>=0.27.0
+# Client side of the wake word proxy (uvicorn[standard] brings it too).
+websockets>=13.0
 soundfile>=0.12.1
 aiomqtt>=2.0.0
