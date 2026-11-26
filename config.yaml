@@ -1,14 +1,14 @@
-﻿# Home Assistant Add-on: Murdock
+# Home Assistant Add-on: Murdock
 #
 # Speaker-recognition proxy that sits between your Wyoming satellites
-# and your STT engine (faster-whisper, Parakeet, â€¦). The proxy transcribes
+# and your STT engine (faster-whisper, Parakeet, …). The proxy transcribes
 # normally via the upstream but additionally identifies WHO is speaking
 # and publishes the result to Home Assistant so your automations can
 # personalise responses.
 #
 # Most runtime settings are configured via the addon's Web UI (ingress)
 # and persisted in the addon's /data volume. This config file only
-# exposes the bootstrap knobs â€” URL of the STT upstream, log level, and
+# exposes the bootstrap knobs — URL of the STT upstream, log level, and
 # optional language overrides. Everything else is editable live.
 
 name: Murdock (Beta)
@@ -16,7 +16,7 @@ version: "0.15.0b2"
 slug: murdock
 stage: experimental
 description: >-
-  BETA â€” wake word proxy test build, runs next to the stable add-on.
+  BETA — wake word proxy test build, runs next to the stable add-on.
   Speaker-recognition proxy for Home Assistant (Wyoming). Identifies
   known speakers from voice-pipeline audio and exposes the result to
   your automations.
@@ -30,7 +30,7 @@ arch:
 startup: services
 boot: auto
 host_network: false
-# Persistent data â€” DB, unknown sample audio, ONNX models.
+# Persistent data — DB, unknown sample audio, ONNX models.
 # The models are downloaded on first start and re-used across updates.
 map:
   - addon_config:rw
@@ -44,7 +44,7 @@ ports:
   # the LAN so satellites (ESPHome, wyoming-satellite) can reach it.
   # Beta: no host port, so it can run next to the stable add-on.
   "10350/tcp": null
-  # Web UI direct access â€” optional; ingress works without exposing it.
+  # Web UI direct access — optional; ingress works without exposing it.
   "8099/tcp": null
   # Wake word proxy (experimental). Home Assistant reaches it on the
   # internal network; it needs no port on the host.
@@ -55,13 +55,13 @@ ports_description:
   "10900/tcp": "Wake word proxy for Voice Support (experimental)"
 # Allow the addon to reach HA's WebSocket/API so it can push recognition
 # state changes. Using the addon's injected SUPERVISOR_TOKEN is better
-# than asking the user to paste a long-lived token â€” but we keep both
+# than asking the user to paste a long-lived token — but we keep both
 # options so existing users aren't disrupted.
 homeassistant_api: true
 hassio_api: false
 # Auto-wire the Mosquitto broker. With "mqtt:want" the Supervisor injects
 # the broker host/port/credentials via the services API when a broker is
-# installed â€” Murdock then gets working HA MQTT discovery with zero config.
+# installed — Murdock then gets working HA MQTT discovery with zero config.
 # "want" (not "need") keeps the addon installable on systems without a
 # broker; MQTT simply stays disabled there.
 services:
@@ -82,16 +82,16 @@ options:
 schema:
   # The STT options below only seed the first speech-to-text service on
   # the first start of 0.11 or later (or a fresh install). From then on,
-  # services are managed in the web UI under Settings â†’ Transcription,
+  # services are managed in the web UI under Settings → Transcription,
   # and changing these options has no effect.
   #
   # STT backend: "upstream" proxies to a Wyoming STT container, "voxtral"
   # sends audio to the Mistral Cloud API, "openai" to any OpenAI-compatible
-  # /v1/audio/transcriptions endpoint (OpenAI, Groq, local speaches, â€¦).
+  # /v1/audio/transcriptions endpoint (OpenAI, Groq, local speaches, …).
   stt_backend: list(upstream|voxtral|openai)
   # URL of the existing Wyoming STT server (faster-whisper, wyoming-whisper,
-  # Parakeet bridge, â€¦). Only used when stt_backend is "upstream".
-  # Accepts host:port too â€” the proxy prepends tcp:// if missing.
+  # Parakeet bridge, …). Only used when stt_backend is "upstream".
+  # Accepts host:port too — the proxy prepends tcp:// if missing.
   upstream_uri: str?
   # Mistral API key for Voxtral transcription. Only needed when
   # stt_backend is "voxtral". Get yours at https://console.mistral.ai
@@ -114,7 +114,7 @@ schema:
   advertised_languages: str?
   # Publish recognition results over MQTT with HA auto-discovery. When a
   # Mosquitto broker is installed the connection is auto-configured via
-  # the mqtt service above â€” no host/credentials needed here. Broker
+  # the mqtt service above — no host/credentials needed here. Broker
   # host/credentials can still be overridden from the Web UI.
   mqtt_enabled: bool?
   # Experimental, Home Assistant 2026.12+ with Labs "Next-generation
