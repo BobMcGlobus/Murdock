@@ -35,6 +35,7 @@ LOG_LEVEL="$(cfg log_level)"
 ADVERTISED="$(cfg advertised_languages)"
 MQTT_ENABLED="$(cfg mqtt_enabled)"
 WAKE_PROXY_UPSTREAM="$(cfg wake_proxy_upstream)"
+WAKE_PROXY_UPSTREAM_DE="$(cfg wake_proxy_upstream_de)"
 
 # Validate: upstream mode needs a URI, voxtral mode needs an API key.
 if [ "${STT_BACKEND:-upstream}" = "upstream" ] && [ -z "$UPSTREAM_URI" ]; then
@@ -79,6 +80,10 @@ fi
 if [ -n "$WAKE_PROXY_UPSTREAM" ]; then
     export WAKE_PROXY_UPSTREAM
     log "Wake proxy:   port 10900 → $WAKE_PROXY_UPSTREAM"
+    if [ -n "$WAKE_PROXY_UPSTREAM_DE" ]; then
+        export WAKE_PROXY_UPSTREAM_DE
+        log "Wake proxy:   German verifier $WAKE_PROXY_UPSTREAM_DE"
+    fi
 fi
 
 # --- Home Assistant hand-off ----------------------------------------------

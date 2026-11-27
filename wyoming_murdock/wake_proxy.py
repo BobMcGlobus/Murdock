@@ -1,4 +1,4 @@
-"""Murdock between Home Assistant and its Voice Support app.
+"""Murdock between Home Assistant and its wake word verifiers.
 
 Home Assistant 2026.12 (Labs: "Next-generation voice") sends every voice
 run to the Voice Support app: the wake word audio a satellite buffered
@@ -8,33 +8,32 @@ reaches a speech-to-text provider — the pipeline cuts it off first — so
 this is the only place Murdock can hear it.
 
 Murdock speaks the app's protocol (``GET /info`` and a websocket at
-``/run``) and relays both directions. On top of that:
+``/run``) and sends every run to up to two verifiers at once:
 
-* **Wake word voiceprints.** Each enrolled person gets a voiceprint of the
-  wake word itself — the same short phrase every time, so it separates
-  people far better than the voiceprints built from varied commands. They
-  are learnt from accepted wake words whose command the ordinary speaker
-  check attributes to that person, and from an enrolment window opened
-  through the web API ("the next wake words are Sarah's").
-* **Rescue** (mode ``rescue``): the app's verifier is English-only, and a
-  German "Okay Nabu" often comes back as "namu" or "now" — refused. When
-  the wake word's voice matches someone's wake word voiceprint closely
-  enough, Murdock answers Home Assistant with an acceptance instead. The
-  app stops endpointing after a refusal, and Home Assistant ends the
-  command the moment its run goes quiet, so Murdock opens a second run at
-  the app without a wake word — the app then only endpoints — feeds it the
-  audio from the wake word on, and passes its boundaries back shifted onto
-  Home Assistant's clock.
-* **Observe** (mode ``observe``, the default): nothing is changed; the log
-  says what a rescue would have done.
+* **en** — the official app. Its Kaldi model is English, so a German
+  "Okay Nabu" is often refused as "namu" or "now".
+* **de** — the same app built with a German model ("Voice Support
+  (Deutsch)", ``voice_support_de/``), which checks the phrase the way a
+  German says it, against German rivals such as "okay, na du".
 
-Every run's metadata, the app's verdict and the audio around the wake word
-are kept in ``<data_dir>/wake_runs``.
+One of them is the **authority**: its verdict and its command boundaries go
+to Home Assistant, unchanged. The other only answers into the log, so the
+two can be compared on every real wake word before the German one is
+trusted. A wake word the German verifier does not know (Hey Jarvis) always
+goes by the English one.
 
-Point Home Assistant's Voice support integration at Murdock (on a
-Supervisor install: remove the entry, add the integration again and
-untick "use the app", then enter Murdock's host and port 10900) and set
-``WAKE_PROXY_UPSTREAM`` to where the real app listens.
+Alongside, as an extra indicator rather than a decision:
+
+* **Wake word voiceprints** — the voice of the wake word itself, per
+  enrolled person, learnt from accepted wake words whose command the
+  ordinary speaker check attributes to them, or from an enrolment window.
+* **Labels** — a window during which every wake word is marked as meant
+  ("wake") or as a deliberate false alarm ("false"), and labelling of past
+  runs by time. Labelled clips can be **replayed** against either verifier
+  to calibrate its thresholds.
+
+Every run's metadata, both verdicts and the audio around the wake word are
+kept in ``<data_dir>/wake_runs``.
 """
 
 from __future__ import annotations
@@ -58,6 +57,7 @@ _LOGGER = logging.getLogger("murdock.wake_proxy")
 
 _RATE = 16000
 _BYTES_PER_MS = 32  # 16 kHz, 16-bit, mono — fixed by the protocol
+_CHUNK_BYTES = 100 * _BYTES_PER_MS
 #: What the app holds at most; a run longer than this is not buffered further.
 _MAX_RUN_MS = 30_000
 #: Audio kept after the wake word in the stored clip, for listening back.
@@ -72,30 +72,34 @@ _CONNECT_TIMEOUT = 1.0
 #: word audio (and detecting at their lower threshold) with nobody checking.
 _INFO_STALE_SECONDS = 30 * 60
 _INFO_REFRESH_SECONDS = 300
-#: Home Assistant waits 2 s for a verdict, the satellite about as long. A
-#: rescue has to be decided well inside that, counted from the run's start.
-_RESCUE_DEADLINE_SECONDS = 1.4
 #: Wake word voiceprint samples kept per person, newest win.
 _MAX_PRINTS = 40
 #: Speech shorter than this after trimming is not trusted on its own; the
 #: whole clip is embedded instead (CAM++ needs 0.5 s at the very least).
 _MIN_VOICED_SECONDS = 0.6
+#: A replayed clip that has not been judged by then counts as no verdict.
+_REPLAY_VERDICT_SECONDS = 3.0
 
-MODE_OBSERVE = "observe"
-MODE_RESCUE = "rescue"
-MODES = (MODE_OBSERVE, MODE_RESCUE)
+EN, DE = "en", "de"
+SOURCES = (EN, DE)
+LABEL_WAKE, LABEL_FALSE = "wake", "false"
+LABELS = (LABEL_WAKE, LABEL_FALSE)
 
 DEFAULT_SETTINGS = {
-    "mode": MODE_OBSERVE,
-    # Cosine distance to a person's wake word centroid. Text-dependent
-    # prints sit much closer than the command ones; calibrate from the
-    # leave-one-out figures the status endpoint reports.
-    "threshold": 0.30,
+    # Whose verdict and boundaries reach Home Assistant.
+    "authority": EN,
+    # Wake word voiceprints, an indicator only: cosine distance to a
+    # person's centroid, samples needed, and the gap to the next person.
+    "threshold": 0.40,
     "min_samples": 5,
-    # Distance gap to the next person, so two similar voices never let
-    # the closer one through by a hair.
     "min_margin": 0.05,
 }
+
+
+def _normalize(name: Optional[str]) -> str:
+    """"Okay Nabu", "okay-nabu" and "okay_nabu" are one wake word."""
+    lowered = (name or "").lower().replace("-", "_").replace(" ", "_")
+    return "".join(c for c in lowered if c.isalnum() or c == "_")
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +108,7 @@ DEFAULT_SETTINGS = {
 
 
 class Upstream:
-    """The app's side of one run. A thin seam so tests need no socket."""
+    """A verifier's side of one run. A thin seam so tests need no socket."""
 
     async def send(self, message: str | bytes) -> None:  # pragma: no cover
         raise NotImplementedError
@@ -146,9 +150,25 @@ async def _connect_websocket(url: str) -> Upstream:
     return _WebsocketUpstream(connection)
 
 
+def _ws_url(base: str) -> str:
+    if base.startswith("https://"):
+        base = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        base = "ws://" + base[len("http://"):]
+    return f"{base}/run"
+
+
 # ---------------------------------------------------------------------------
 # What a run looked like
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class Verdict:
+    verdict: Optional[str] = None          # "accepted" | "rejected"
+    reason: Optional[str] = None
+    ms: Optional[float] = None             # from run-start
+    boundary_ms: Optional[int] = None
 
 
 @dataclass
@@ -165,15 +185,13 @@ class RunRecord:
     silence_seconds: Optional[float] = None
     audio: bytearray = field(default_factory=bytearray)
     audio_bytes_seen: int = 0
-    verdict: Optional[str] = None          # the app's: "accepted" | "rejected"
-    reason: Optional[str] = None
-    verdict_ms: Optional[float] = None     # from run-start
-    accepted_boundary_ms: Optional[int] = None
+    verdicts: dict[str, Verdict] = field(default_factory=dict)
+    authority: str = EN
     vad_start_ms: Optional[int] = None
     vad_end_ms: Optional[int] = None
     error: Optional[str] = None
     upstream_failed: bool = False
-    rescued: bool = False
+    label: Optional[str] = None
 
     def on_ha_text(self, text: str) -> Optional[dict]:
         try:
@@ -194,24 +212,35 @@ class RunRecord:
         if room > 0:
             self.audio += chunk[:room]
 
-    def on_app_event(self, event: dict, offset_ms: int = 0) -> None:
+    def on_app_event(self, source: str, event: dict) -> None:
         kind = event.get("type")
         output = event.get("wake_word_output") or {}
+        verdict = self.verdicts.setdefault(source, Verdict())
         if kind == "wake-word-end":
-            self.verdict = "accepted"
-            self.verdict_ms = (time.monotonic() - self.started) * 1000
+            verdict.verdict = "accepted"
+            verdict.ms = (time.monotonic() - self.started) * 1000
             boundary = output.get("wake_word_audio_ms")
-            self.accepted_boundary_ms = int(boundary) if isinstance(boundary, int) else None
+            verdict.boundary_ms = int(boundary) if isinstance(boundary, int) else None
         elif kind == "wake-word-rejected":
-            self.verdict = "rejected"
-            self.reason = output.get("reason")
-            self.verdict_ms = (time.monotonic() - self.started) * 1000
-        elif kind == "stt-vad-start" and isinstance(event.get("timestamp"), int):
-            self.vad_start_ms = event["timestamp"] + offset_ms
-        elif kind == "stt-vad-end" and isinstance(event.get("timestamp"), int):
-            self.vad_end_ms = event["timestamp"] + offset_ms
-        elif kind == "error":
-            self.error = f"{event.get('code')}: {event.get('message')}"
+            verdict.verdict = "rejected"
+            verdict.reason = output.get("reason")
+            verdict.ms = (time.monotonic() - self.started) * 1000
+        elif source == self.authority:
+            if kind == "stt-vad-start" and isinstance(event.get("timestamp"), int):
+                self.vad_start_ms = event["timestamp"]
+            elif kind == "stt-vad-end" and isinstance(event.get("timestamp"), int):
+                self.vad_end_ms = event["timestamp"]
+            elif kind == "error":
+                self.error = f"{event.get('code')}: {event.get('message')}"
+
+    def verdict_of(self, source: str) -> Optional[str]:
+        v = self.verdicts.get(source)
+        return v.verdict if v else None
+
+    @property
+    def verdict(self) -> Optional[str]:
+        """The verdict Home Assistant acted on."""
+        return self.verdict_of(self.authority)
 
     @property
     def has_wake_word(self) -> bool:
@@ -228,7 +257,9 @@ class RunRecord:
 
     def command(self) -> bytes:
         """The command after the wake word, up to where the run said it ended."""
-        start = (self.accepted_boundary_ms or self.wake_word_audio_ms or 0) * _BYTES_PER_MS
+        authority = self.verdicts.get(self.authority)
+        boundary = (authority.boundary_ms if authority else None) or self.wake_word_audio_ms or 0
+        start = boundary * _BYTES_PER_MS
         end = len(self.audio)
         if self.vad_end_ms:
             end = min(end, self.vad_end_ms * _BYTES_PER_MS)
@@ -257,23 +288,6 @@ class SpeakerView:
     error: Optional[str] = None
 
 
-def would_decide(app_verdict: Optional[str], view: Optional[SpeakerView]) -> str:
-    """What the voice says about the app's verdict.
-
-    An enrolled voice keeps a wake word the app refused (the German "Okay
-    Nabu" that Kaldi hears as "namu"); a voice nobody enrolled would lose
-    one the app accepted (the television). Without a reading, the app
-    stands.
-    """
-    if view is None or view.error or view.distance is None:
-        return "app stands"
-    if app_verdict == "rejected" and view.is_match:
-        return f"would rescue ({view.speaker})"
-    if app_verdict == "accepted" and not view.is_match:
-        return "would veto (no wake voiceprint matches)"
-    return "agrees"
-
-
 # ---------------------------------------------------------------------------
 # Wake word voiceprints
 # ---------------------------------------------------------------------------
@@ -287,12 +301,8 @@ def _cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
 
 
 class WakePrints:
-    """Per-person voiceprints of the wake word, kept as a small JSON file.
-
-    Text-dependent: every sample is the same phrase, so the centroid is
-    tight and a short clip is enough. The file holds the mode and the
-    thresholds too, so the experiment is configured in one place.
-    """
+    """Per-person voiceprints of the wake word, and the proxy's settings,
+    kept as one small JSON file."""
 
     def __init__(self, path: Optional[Path]) -> None:
         self.path = path
@@ -302,7 +312,6 @@ class WakePrints:
         self.enrolling: Optional[tuple[int, str, float]] = None
         self._load()
 
-    # -- persistence ----------------------------------------------------
     def _load(self) -> None:
         if self.path is None or not self.path.exists():
             return
@@ -326,18 +335,16 @@ class WakePrints:
         except OSError as exc:
             _LOGGER.warning("Could not save wake voiceprints: %s", exc)
 
-    # -- settings --------------------------------------------------------
     def update_settings(self, **changes) -> dict:
         for key, value in changes.items():
             if value is None or key not in DEFAULT_SETTINGS:
                 continue
-            if key == "mode" and value not in MODES:
-                raise ValueError(f"mode must be one of {', '.join(MODES)}")
+            if key == "authority" and value not in SOURCES:
+                raise ValueError(f"authority must be one of {', '.join(SOURCES)}")
             self.settings[key] = value
         self.save()
         return dict(self.settings)
 
-    # -- samples ---------------------------------------------------------
     def add(self, speaker_id: int, name: str, embedding: np.ndarray, *,
             source: str, clip: Optional[str] = None) -> int:
         entry = self.speakers.setdefault(str(speaker_id), {"name": name, "samples": []})
@@ -362,10 +369,9 @@ class WakePrints:
         out = []
         for sid, entry in self.speakers.items():
             samples = [np.asarray(s["emb"], dtype=np.float32) for s in entry.get("samples", [])]
-            if not samples:
-                continue
-            centroid = np.mean(samples, axis=0)
-            out.append((int(sid), entry.get("name", sid), centroid, len(samples)))
+            if samples:
+                out.append((int(sid), entry.get("name", sid), np.mean(samples, axis=0),
+                            len(samples)))
         return out
 
     def match(self, embedding: np.ndarray) -> SpeakerView:
@@ -390,35 +396,27 @@ class WakePrints:
         )
 
     def stats(self) -> list[dict]:
-        """Per person: samples, and how far each sample sits from the
-        centroid of the others — the figure to calibrate the threshold on."""
+        """Per person: samples, and how far each sits from the centroid of
+        the others — the figure a threshold is chosen on."""
         rows = []
-        others_all = self._centroids()
-        for sid, name, _centroid, n in others_all:
+        centroids = self._centroids()
+        for sid, name, _centroid, n in centroids:
             samples = [np.asarray(s["emb"], dtype=np.float32)
                        for s in self.speakers[str(sid)]["samples"]]
             loo = []
             if n >= 2:
                 total = np.sum(samples, axis=0)
-                for s in samples:
-                    loo.append(_cosine_distance(s, (total - s) / (n - 1)))
-            # Distance of this person's samples to everybody else's centroid.
-            cross = []
-            for osid, _oname, ocentroid, _on in others_all:
-                if osid != sid:
-                    cross.extend(_cosine_distance(s, ocentroid) for s in samples)
-            sources: dict[str, int] = {}
-            for s in self.speakers[str(sid)]["samples"]:
-                sources[s.get("source", "?")] = sources.get(s.get("source", "?"), 0) + 1
+                loo = [_cosine_distance(s, (total - s) / (n - 1)) for s in samples]
+            cross = [_cosine_distance(s, oc) for osid, _o, oc, _on in centroids
+                     if osid != sid for s in samples]
             rows.append({
-                "speaker_id": sid, "name": name, "samples": n, "sources": sources,
+                "speaker_id": sid, "name": name, "samples": n,
                 "loo_mean": round(float(np.mean(loo)), 4) if loo else None,
                 "loo_max": round(float(np.max(loo)), 4) if loo else None,
                 "to_others_min": round(float(np.min(cross)), 4) if cross else None,
             })
         return rows
 
-    # -- enrolment window ----------------------------------------------------
     def open_window(self, speaker_id: int, name: str, seconds: float) -> None:
         self.enrolling = (speaker_id, name, time.time() + seconds)
 
@@ -467,7 +465,6 @@ class ContextSpeakerTools(SpeakerTools):
         voiced = b"".join(
             audio[int(s * _RATE) * 2:int(e * _RATE) * 2] for s, e in result.segments
         )
-        # A clipped "Okay Nabu" is too little to trust on its own.
         if len(voiced) < int(_MIN_VOICED_SECONDS * _RATE) * 2:
             return audio
         return voiced
@@ -521,41 +518,50 @@ def speaker_tools_for(context) -> SpeakerTools:
 class _Run:
     """Live state of one relayed run."""
 
-    def __init__(self, record: RunRecord, upstream: Upstream) -> None:
+    def __init__(self, record: RunRecord, targets: dict[str, Upstream]) -> None:
         self.record = record
-        self.target: Optional[Upstream] = upstream
+        self.targets: dict[str, Optional[Upstream]] = dict(targets)
         self.outbox: asyncio.Queue = asyncio.Queue()
-        self.consumed = 0                       # HA audio bytes the pump has handled
         self.wake_task: Optional[asyncio.Task] = None
         self.wake_embedding: Optional[np.ndarray] = None
         self.wake_view: Optional[SpeakerView] = None
-        self.second: Optional[Upstream] = None
 
 
 class WakeProxy:
-    """The ``/info`` + ``/run`` relay, with wake word voiceprints."""
+    """The ``/info`` + ``/run`` relay to one or two verifiers."""
 
     def __init__(
         self,
         upstream_url: str,
         *,
+        secondary_url: Optional[str] = None,
         data_dir: Optional[Path] = None,
         tools: Optional[SpeakerTools] = None,
         connect: Callable[[str], Awaitable[Upstream]] = _connect_websocket,
         fetch_info: Optional[Callable[[str], Awaitable[dict]]] = None,
     ) -> None:
-        self.upstream_url = upstream_url.rstrip("/")
+        self.urls: dict[str, str] = {EN: upstream_url.rstrip("/")}
+        if secondary_url:
+            self.urls[DE] = secondary_url.rstrip("/")
         self.runs_dir = Path(data_dir) / "wake_runs" if data_dir else None
         self.tools = tools
         self._connect = connect
         self._fetch_info = fetch_info or self._fetch_info_http
         self.prints = WakePrints(self.runs_dir / "prints.json" if self.runs_dir else None)
-        self.records: list[dict] = []          # newest last, for tests and the API
+        self.records: list[dict] = []          # newest last, since start
         self._background: set[asyncio.Task] = set()
         self._active = 0
         self._info: Optional[dict] = None
         self._info_at: Optional[float] = None   # wall clock, survives restarts
+        #: Wake word ids each verifier says it can verify.
+        self.verifies: dict[str, set[str]] = {}
+        #: (label, until — wall clock) while a labelling window is open.
+        self.labelling: Optional[tuple[str, float]] = None
         self._load_info()
+
+    @property
+    def upstream_url(self) -> str:
+        return self.urls[EN]
 
     # -- /info -------------------------------------------------------------
     @property
@@ -569,23 +575,33 @@ class WakeProxy:
         try:
             stored = json.loads(path.read_text(encoding="utf-8"))
             self._info, self._info_at = stored["info"], float(stored["at"])
+            self._note_wake_words(EN, self._info)
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
-    async def current_info(self) -> dict:
-        """The app's /info, or its last answer while it is briefly away."""
+    def _note_wake_words(self, source: str, info: dict) -> None:
         try:
-            data = await self._fetch_info(self.upstream_url)
+            self.verifies[source] = {
+                _normalize(w.get("id")) for w in info.get("wake_words") or []
+            }
+        except AttributeError:
+            pass
+
+    async def current_info(self) -> dict:
+        """The official app's /info, or its last answer while it is away."""
+        try:
+            data = await self._fetch_info(self.urls[EN])
         except Exception as exc:
             age = time.time() - self._info_at if self._info_at else None
             if self._info is not None and age is not None and age < _INFO_STALE_SECONDS:
                 _LOGGER.warning(
                     "Voice Support app at %s unreachable (%s) — answering with "
-                    "its info from %.0f s ago", self.upstream_url, exc, age,
+                    "its info from %.0f s ago", self.urls[EN], exc, age,
                 )
                 return self._info
             raise
         self._info, self._info_at = data, time.time()
+        self._note_wake_words(EN, data)
         path = self._info_path
         if path is not None:
             try:
@@ -596,23 +612,23 @@ class WakeProxy:
                 pass
         return data
 
+    async def refresh_secondary_info(self) -> None:
+        if DE not in self.urls:
+            return
+        try:
+            self._note_wake_words(DE, await self._fetch_info(self.urls[DE]))
+        except Exception as exc:
+            _LOGGER.debug("German verifier info refresh failed: %s", exc)
+
     async def keep_info_fresh(self) -> None:
-        """Ask the app now and then, so a short outage has a recent answer."""
+        """Ask the verifiers now and then, so a short outage has a recent answer."""
         while True:
             try:
                 await self.current_info()
             except Exception as exc:
                 _LOGGER.debug("Voice Support app info refresh failed: %s", exc)
+            await self.refresh_secondary_info()
             await asyncio.sleep(_INFO_REFRESH_SECONDS)
-
-    @property
-    def run_url(self) -> str:
-        base = self.upstream_url
-        if base.startswith("https://"):
-            base = "wss://" + base[len("https://"):]
-        elif base.startswith("http://"):
-            base = "ws://" + base[len("http://"):]
-        return f"{base}/run"
 
     async def _fetch_info_http(self, url: str) -> dict:
         async with httpx.AsyncClient(timeout=_INFO_TIMEOUT) as client:
@@ -630,9 +646,7 @@ class WakeProxy:
                 data = await self.current_info()
             except Exception as exc:
                 _LOGGER.warning("Voice Support app at %s unreachable: %s",
-                                self.upstream_url, exc)
-                # Home Assistant retries the entry and runs without the app
-                # in the meantime — the same as if the app itself were down.
+                                self.urls[EN], exc)
                 return JSONResponse({"error": "upstream unreachable"}, status_code=503)
             if isinstance(data, dict) and data.get("name"):
                 data = {**data, "name": f"Murdock → {data['name']}"}
@@ -640,7 +654,7 @@ class WakeProxy:
 
         @app.get("/health")
         async def health():
-            return {"ok": True, "upstream": self.upstream_url}
+            return {"ok": True, "upstreams": self.urls}
 
         @app.websocket("/run")
         async def run(websocket: WebSocket):
@@ -649,6 +663,16 @@ class WakeProxy:
         return app
 
     # -- one run -----------------------------------------------------------
+    def _authority_for(self, record: RunRecord, run: _Run) -> str:
+        """The verifier Home Assistant hears for this run."""
+        if (
+            self.prints.settings.get("authority") == DE
+            and run.targets.get(DE) is not None
+            and _normalize(record.wake_word_phrase) in self.verifies.get(DE, set())
+        ):
+            return DE
+        return EN
+
     async def relay(self, websocket: WebSocket) -> None:
         self._active += 1
         try:
@@ -659,21 +683,28 @@ class WakeProxy:
     async def _relay(self, websocket: WebSocket) -> None:
         await websocket.accept()
         record = RunRecord()
-        try:
-            upstream = await self._connect(self.run_url)
-        except Exception as exc:
-            _LOGGER.warning("Voice Support app not reachable for a run: %s", exc)
+        targets: dict[str, Upstream] = {}
+        for source, url in self.urls.items():
+            try:
+                targets[source] = await self._connect(_ws_url(url))
+            except Exception as exc:
+                level = logging.WARNING if source == EN else logging.INFO
+                _LOGGER.log(level, "[wake] %s verifier not reachable for a run: %s",
+                            source, exc)
+        if EN not in targets:
             record.upstream_failed = True
+            for up in targets.values():
+                await self._close(up)
             # Closing tells Home Assistant there is no app for this run; it
             # falls back to the satellite's detection and its own segmenter.
             await websocket.close()
             self._finish(record, None)
             return
 
-        run = _Run(record, upstream)
+        run = _Run(record, targets)
+        authority_known = asyncio.Event()
 
         async def from_ha() -> None:
-            """Read Home Assistant; the pump forwards, in order."""
             try:
                 while True:
                     message = await websocket.receive()
@@ -681,66 +712,76 @@ class WakeProxy:
                         return
                     text, data = message.get("text"), message.get("bytes")
                     if text is not None:
-                        record.on_ha_text(text)
-                        run.outbox.put_nowait(("text", text))
+                        parsed = record.on_ha_text(text)
+                        if parsed and parsed.get("type") == "run-start":
+                            record.authority = self._authority_for(record, run)
+                            authority_known.set()
+                        run.outbox.put_nowait(text)
                     elif data is not None:
                         record.on_audio(data)
-                        run.outbox.put_nowait(("audio", data))
+                        run.outbox.put_nowait(data)
                         self._maybe_start_wake_check(run)
             finally:
                 run.outbox.put_nowait(None)
 
         async def pump() -> None:
-            """The one sender to the app, so a switch cannot reorder audio."""
+            """The one sender to the verifiers: every message to each, in order."""
             while True:
                 item = await run.outbox.get()
                 if item is None:
                     return
-                kind = item[0]
-                if kind == "audio":
-                    run.consumed += len(item[1])
-                    await self._send(run, item[1])
-                elif kind == "text":
-                    await self._send(run, item[1])
-                elif kind == "switch":
-                    second, boundary = item[1], item[2]
-                    run.target = second
-                    # Shaped like Home Assistant's own run without a wake
-                    # word (a button press): the app only endpoints it.
-                    await self._send(run, json.dumps({
-                        "type": "run-start",
-                        "satellite_id": record.satellite_id,
-                        "wake_word_phrase": None,
-                        "wake_word_audio_ms": 0,
-                        "silence_seconds": record.silence_seconds,
-                    }))
-                    backlog = bytes(record.audio[boundary:run.consumed])
-                    if backlog:
-                        await self._send(run, backlog)
+                for source in list(run.targets):
+                    target = run.targets[source]
+                    if target is None:
+                        continue
+                    try:
+                        await target.send(item)
+                    except Exception:
+                        # That verifier has let the run go; keep draining HA.
+                        run.targets[source] = None
 
-        async def to_ha() -> None:
-            await self._pass_events(run, websocket, upstream, offset_ms=0, first=True)
+        async def answers(source: str) -> None:
+            await authority_known.wait()
+            upstream = targets[source]
+            async for message in upstream:
+                if not isinstance(message, str):
+                    continue
+                try:
+                    event = json.loads(message)
+                except ValueError:
+                    continue
+                record.on_app_event(source, event)
+                if source == record.authority:
+                    await websocket.send_text(message)
 
-        tasks = [asyncio.create_task(from_ha()), asyncio.create_task(pump()),
-                 asyncio.create_task(to_ha())]
-        reader, pumper, answerer = tasks
+        reader = asyncio.create_task(from_ha())
+        pumper = asyncio.create_task(pump())
+        listeners = {source: asyncio.create_task(answers(source)) for source in targets}
+        known = asyncio.create_task(authority_known.wait())
+        tasks = [reader, pumper, known, *listeners.values()]
         try:
-            done, _ = await asyncio.wait({reader, answerer},
-                                         return_when=asyncio.FIRST_COMPLETED)
-            if answerer in done and not reader.done():
-                # The app is finished with this run (it closes after a
-                # rejection, or after the last event). Home Assistant
-                # closes the socket itself once it is done.
-                try:
-                    await asyncio.wait_for(asyncio.shield(reader), timeout=5.0)
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("[wake] HA kept the run open after the app ended it")
-            elif reader in done and not answerer.done():
-                # Home Assistant hung up; give the app a moment for last words.
-                try:
-                    await asyncio.wait_for(asyncio.shield(answerer), timeout=0.5)
-                except asyncio.TimeoutError:
-                    pass
+            await asyncio.wait({reader, known}, return_when=asyncio.FIRST_COMPLETED)
+            authority = listeners.get(record.authority)
+            # The run lasts as long as Home Assistant streams and the
+            # authority answers; the other verifier never ends it.
+            while True:
+                if reader.done():
+                    # Home Assistant hung up; a moment for the authority's last words.
+                    if authority is not None and not authority.done():
+                        await asyncio.wait({authority}, timeout=0.5)
+                    break
+                if authority is None or authority.done():
+                    # The authority let the run go (after a refusal, or its
+                    # last event); Home Assistant closes the socket itself.
+                    await asyncio.wait({reader}, timeout=5.0)
+                    if not reader.done():
+                        _LOGGER.debug("[wake] HA kept the run open after the app ended it")
+                    break
+                await asyncio.wait({reader, authority}, return_when=asyncio.FIRST_COMPLETED)
+            # The other verifier's verdict is wanted for the log, not waited on long.
+            other = [t for s, t in listeners.items() if s != record.authority and not t.done()]
+            if other:
+                await asyncio.wait(other, timeout=0.5)
         except Exception:
             _LOGGER.debug("Wake proxy run failed", exc_info=True)
         finally:
@@ -752,30 +793,22 @@ class WakeProxy:
                     await task
                 except (asyncio.CancelledError, Exception):
                     pass
-            # The run is over for Home Assistant; nothing below may hold it.
             self._finish(record, run)
-            for up in (upstream, run.second):
-                if up is None:
-                    continue
-                try:
-                    await asyncio.wait_for(up.close(), timeout=1.0)
-                except (asyncio.TimeoutError, Exception):
-                    pass
+            for up in targets.values():
+                await self._close(up)
             try:
                 await websocket.close()
             except Exception:
                 pass
 
-    async def _send(self, run: _Run, payload: str | bytes) -> None:
-        target = run.target
-        if target is None:
+    @staticmethod
+    async def _close(up: Optional[Upstream]) -> None:
+        if up is None:
             return
         try:
-            await target.send(payload)
-        except Exception:
-            # The app has let the run go; keep draining Home Assistant.
-            if run.target is target:
-                run.target = None
+            await asyncio.wait_for(up.close(), timeout=1.0)
+        except (asyncio.TimeoutError, Exception):
+            pass
 
     def _maybe_start_wake_check(self, run: _Run) -> None:
         record = run.record
@@ -792,74 +825,8 @@ class WakeProxy:
         except Exception as exc:
             run.wake_view = SpeakerView(error=str(exc) or type(exc).__name__)
 
-    async def _pass_events(self, run: _Run, websocket: WebSocket, upstream: Upstream,
-                           *, offset_ms: int, first: bool) -> None:
-        """The app's events to Home Assistant; a refusal may be rescued."""
-        record = run.record
-        async for message in upstream:
-            if not isinstance(message, str):
-                continue
-            try:
-                event = json.loads(message)
-            except ValueError:
-                continue
-            if first:
-                record.on_app_event(event)
-                if event.get("type") == "wake-word-rejected":
-                    second = await self._try_rescue(run)
-                    if second is not None:
-                        await websocket.send_text(json.dumps({
-                            "type": "wake-word-end",
-                            "wake_word_output": {
-                                "wake_word_phrase": record.wake_word_phrase,
-                                "wake_word_audio_ms": record.wake_word_audio_ms,
-                            },
-                        }))
-                        # From here the second run endpoints the command.
-                        await self._pass_events(
-                            run, websocket, second,
-                            offset_ms=record.wake_word_audio_ms or 0, first=False,
-                        )
-                        return
-            else:
-                if event.get("type") in ("wake-word-end", "wake-word-rejected"):
-                    continue  # nothing to verify in the second run
-                record.on_app_event(event, offset_ms=offset_ms)
-                if event.get("type") in ("stt-vad-start", "stt-vad-end") and \
-                        isinstance(event.get("timestamp"), int):
-                    event = {**event, "timestamp": event["timestamp"] + offset_ms}
-                message = json.dumps(event)
-            await websocket.send_text(message)
-
-    async def _try_rescue(self, run: _Run) -> Optional[Upstream]:
-        """A second run for an enrolled voice the app refused, or None."""
-        if self.prints.settings.get("mode") != MODE_RESCUE or run.wake_task is None:
-            return None
-        remaining = _RESCUE_DEADLINE_SECONDS - (time.monotonic() - run.record.started)
-        if remaining <= 0:
-            return None
-        try:
-            await asyncio.wait_for(asyncio.shield(run.wake_task), timeout=remaining)
-        except asyncio.TimeoutError:
-            _LOGGER.info("[wake] no voice verdict in time — the refusal stands")
-            return None
-        view = run.wake_view
-        if view is None or not view.is_match:
-            return None
-        try:
-            second = await asyncio.wait_for(self._connect(self.run_url), timeout=0.5)
-        except Exception as exc:
-            _LOGGER.warning("[wake] cannot open a run for endpointing (%s) — "
-                            "the refusal stands", exc)
-            return None
-        run.second = second
-        run.record.rescued = True
-        run.outbox.put_nowait(("switch", second, run.record.pre_roll_bytes))
-        return second
-
     # -- after the run -----------------------------------------------------
     def _finish(self, record: RunRecord, run: Optional[_Run]) -> None:
-        """Analyse, learn and store off the relay path; the run is over."""
         task = asyncio.create_task(self._analyse(record, run))
         self._background.add(task)
         task.add_done_callback(self._background.discard)
@@ -873,11 +840,21 @@ class WakeProxy:
             else:
                 await asyncio.sleep(0.01)
 
+    def _window_label(self) -> Optional[str]:
+        if self.labelling and self.labelling[1] > time.time():
+            return self.labelling[0]
+        self.labelling = None
+        return None
+
     async def _analyse(self, record: RunRecord, run: Optional[_Run]) -> None:
         wake_view: Optional[SpeakerView] = None
         embedding: Optional[np.ndarray] = None
         command_view: Optional[SpeakerView] = None
         learnt: Optional[str] = None
+        if record.has_wake_word:
+            record.label = self._window_label()
+            if self.prints.window_speaker() is not None and record.label is None:
+                record.label = LABEL_WAKE   # an enrolment is meant wake words
         clip_name = self._store_clip(record)
 
         if record.has_wake_word and self.tools is not None:
@@ -898,37 +875,34 @@ class WakeProxy:
             if embedding is not None:
                 learnt, command_view = await self._learn(record, embedding, clip_name)
 
-        decision = would_decide(record.verdict, wake_view) if record.has_wake_word else None
-        if record.rescued:
-            decision = f"rescued ({wake_view.speaker if wake_view else '?'})"
+        en, de = record.verdicts.get(EN, Verdict()), record.verdicts.get(DE, Verdict())
         row = {
             "at": record.started_at,
             "satellite_id": record.satellite_id,
             "wake_word": record.wake_word_phrase,
             "wake_word_audio_ms": record.wake_word_audio_ms,
             "silence_seconds": record.silence_seconds,
+            "authority": record.authority,
             "verdict": record.verdict,
-            "reason": record.reason,
-            "verdict_ms": round(record.verdict_ms, 1) if record.verdict_ms else None,
-            "accepted_boundary_ms": record.accepted_boundary_ms,
+            "en": en.verdict, "en_reason": en.reason,
+            "en_ms": round(en.ms, 1) if en.ms is not None else None,
+            "de": de.verdict, "de_reason": de.reason,
+            "de_ms": round(de.ms, 1) if de.ms is not None else None,
             "vad_start_ms": record.vad_start_ms,
             "vad_end_ms": record.vad_end_ms,
             "audio_ms": round(record.audio_bytes_seen / _BYTES_PER_MS),
             "error": record.error,
             "upstream_failed": record.upstream_failed,
-            "rescued": record.rescued,
+            "label": record.label,
             "wake_speaker": wake_view.speaker if wake_view else None,
             "wake_nearest": wake_view.nearest if wake_view else None,
             "wake_distance": round(wake_view.distance, 4)
             if wake_view and wake_view.distance is not None else None,
-            "wake_margin": round(wake_view.margin, 4)
-            if wake_view and wake_view.margin is not None else None,
             "wake_error": wake_view.error if wake_view else None,
             "command_speaker": command_view.speaker if command_view else None,
             "command_distance": round(command_view.distance, 4)
             if command_view and command_view.distance is not None else None,
             "learnt": learnt,
-            "would": decision,
             "clip": clip_name,
         }
         self.records.append(row)
@@ -936,22 +910,20 @@ class WakeProxy:
         self._append_jsonl(row)
         if record.has_wake_word:
             _LOGGER.info(
-                "[wake] %s: %s — app %s%s%s · wake voice %s · %s%s",
+                "[wake] %s: %s — en %s · de %s → %s (%s) · voice %s%s%s",
                 record.satellite_id or "?", record.wake_word_phrase,
-                record.verdict or "no verdict",
-                f" ({record.reason})" if record.reason else "",
-                f" in {record.verdict_ms:.0f} ms" if record.verdict_ms else "",
-                _describe_view(wake_view), decision,
+                _describe_verdict(en), _describe_verdict(de) if DE in self.urls else "–",
+                record.verdict or "no verdict", record.authority,
+                _describe_view(wake_view),
+                f" · label {record.label}" if record.label else "",
                 f" · learnt for {learnt}" if learnt else "",
             )
         elif record.upstream_failed:
             _LOGGER.info("[wake] %s: run without the app (unreachable)",
                          record.satellite_id or "?")
         else:
-            _LOGGER.debug(
-                "[wake] %s: run without a wake word, %d ms, command end %s",
-                record.satellite_id or "?", row["audio_ms"], record.vad_end_ms,
-            )
+            _LOGGER.debug("[wake] %s: run without a wake word, %d ms, command end %s",
+                          record.satellite_id or "?", row["audio_ms"], record.vad_end_ms)
 
     async def _learn(self, record: RunRecord, embedding: np.ndarray,
                      clip_name: Optional[str]) -> tuple[Optional[str], Optional[SpeakerView]]:
@@ -961,11 +933,10 @@ class WakeProxy:
             sid, name = window
             n = self.prints.add(sid, name, embedding, source="enroll", clip=clip_name)
             return f"{name} (enrolment, {n})", None
-        if record.verdict != "accepted" and not record.rescued:
+        if record.verdict != "accepted" or record.label == LABEL_FALSE:
             return None, None
-        command = record.command()
         try:
-            view = await self.tools.verify_command(command)
+            view = await self.tools.verify_command(record.command())
         except Exception as exc:
             return None, SpeakerView(error=str(exc) or type(exc).__name__)
         # Only an unambiguous command teaches: a wrong print is worse than none.
@@ -976,6 +947,7 @@ class WakeProxy:
             return f"{view.speaker} (auto, {n})", view
         return None, view
 
+    # -- storage -------------------------------------------------------------
     def _store_clip(self, record: RunRecord) -> Optional[str]:
         if self.runs_dir is None or not record.has_wake_word or not record.audio:
             return None
@@ -997,26 +969,190 @@ class WakeProxy:
             _LOGGER.debug("Could not store wake clip: %s", exc)
             return None
 
+    @property
+    def _jsonl(self) -> Optional[Path]:
+        return self.runs_dir / "runs.jsonl" if self.runs_dir else None
+
     def _append_jsonl(self, row: dict) -> None:
-        if self.runs_dir is None:
+        path = self._jsonl
+        if path is None:
             return
         try:
-            self.runs_dir.mkdir(parents=True, exist_ok=True)
-            with open(self.runs_dir / "runs.jsonl", "a", encoding="utf-8") as fh:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         except OSError as exc:
             _LOGGER.debug("Could not append wake run: %s", exc)
 
+    def history(self) -> list[dict]:
+        """Every recorded run, oldest first (memory holds only since start)."""
+        path = self._jsonl
+        if path is None or not path.exists():
+            return list(self.records)
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            # Rows from before the second verifier had one verdict: the app's.
+            if "en" not in row and "verdict" in row:
+                row["en"], row["en_reason"] = row.get("verdict"), row.get("reason")
+            rows.append(row)
+        return rows
+
+    def label_range(self, label: Optional[str], start: str, end: str) -> int:
+        """Label (or, with None, unlabel) the recorded wake words in [start, end]."""
+        if label is not None and label not in LABELS:
+            raise ValueError(f"label must be one of {', '.join(LABELS)}")
+        path = self._jsonl
+        rows = self.history()
+        changed = 0
+        for row in rows:
+            if row.get("wake_word") and start <= (row.get("at") or "") <= end:
+                row["label"] = label
+                changed += 1
+        if path is not None and changed:
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                           encoding="utf-8")
+            tmp.replace(path)
+        by_at = {(r.get("at"), r.get("clip")): r.get("label") for r in rows}
+        for row in self.records:
+            if (row.get("at"), row.get("clip")) in by_at:
+                row["label"] = by_at[(row.get("at"), row.get("clip"))]
+        return changed
+
+    def open_label_window(self, label: str, seconds: float) -> None:
+        if label not in LABELS:
+            raise ValueError(f"label must be one of {', '.join(LABELS)}")
+        self.labelling = (label, time.time() + seconds)
+
+    def close_label_window(self) -> None:
+        self.labelling = None
+
+    # -- calibration -----------------------------------------------------------
+    def comparison(self) -> dict:
+        """How each verifier did on the labelled wake words, and how often
+        the two agreed on the rest."""
+        rows = [r for r in self.history() if r.get("wake_word")]
+        out: dict[str, Any] = {}
+        for label in LABELS:
+            labelled = [r for r in rows if r.get("label") == label]
+            out[label] = {
+                "runs": len(labelled),
+                **{f"{s}_accepted": sum(1 for r in labelled if r.get(s) == "accepted")
+                   for s in SOURCES},
+                **{f"{s}_judged": sum(1 for r in labelled if r.get(s)) for s in SOURCES},
+            }
+        both = [r for r in rows if r.get("en") and r.get("de")]
+        out["unlabelled_agreement"] = {
+            "runs": len(both),
+            "agree": sum(1 for r in both if r["en"] == r["de"]),
+            "de_only_accepted": sum(1 for r in both
+                                    if r["de"] == "accepted" and r["en"] != "accepted"),
+            "en_only_accepted": sum(1 for r in both
+                                    if r["en"] == "accepted" and r["de"] != "accepted"),
+        }
+        return out
+
+    async def replay(self, source: str, *, label: Optional[str] = None,
+                     limit: int = 100) -> dict:
+        """Send stored clips through a verifier again: after changing its
+        thresholds, this says what it now makes of the same wake words."""
+        if source not in self.urls:
+            raise ValueError(f"no {source} verifier configured")
+        if self.runs_dir is None:
+            raise ValueError("no data directory")
+        rows = [r for r in self.history()
+                if r.get("clip") and r.get("wake_word")
+                and (label is None or r.get("label") == label)][-limit:]
+        results = []
+        for row in rows:
+            path = self.runs_dir / row["clip"]
+            if not path.exists():
+                continue
+            with wave.open(str(path), "rb") as w:
+                audio = w.readframes(w.getnframes())
+            verdict, reason = await self._replay_one(source, row, audio)
+            results.append({"at": row.get("at"), "clip": row["clip"],
+                            "label": row.get("label"), "verdict": verdict,
+                            "reason": reason, "recorded": row.get(source)})
+        summary: dict[str, dict] = {}
+        for result in results:
+            key = result["label"] or "unlabelled"
+            entry = summary.setdefault(key, {"runs": 0, "accepted": 0, "rejected": 0,
+                                             "no_verdict": 0})
+            entry["runs"] += 1
+            entry[result["verdict"] or "no_verdict"] += 1
+        return {"source": source, "summary": summary, "results": results}
+
+    async def _replay_one(self, source: str, row: dict,
+                          audio: bytes) -> tuple[Optional[str], Optional[str]]:
+        try:
+            upstream = await self._connect(_ws_url(self.urls[source]))
+        except Exception as exc:
+            return None, f"unreachable: {exc}"
+        try:
+            await upstream.send(json.dumps({
+                "type": "run-start",
+                "satellite_id": row.get("satellite_id"),
+                "wake_word_phrase": row.get("wake_word"),
+                "wake_word_audio_ms": row.get("wake_word_audio_ms") or 1500,
+                "silence_seconds": None,
+            }))
+            for i in range(0, len(audio), _CHUNK_BYTES):
+                await upstream.send(audio[i:i + _CHUNK_BYTES])
+
+            async def verdict() -> tuple[Optional[str], Optional[str]]:
+                async for message in upstream:
+                    if not isinstance(message, str):
+                        continue
+                    event = json.loads(message)
+                    output = event.get("wake_word_output") or {}
+                    if event.get("type") == "wake-word-end":
+                        return "accepted", None
+                    if event.get("type") == "wake-word-rejected":
+                        return "rejected", output.get("reason")
+                return None, "closed without a verdict"
+
+            try:
+                return await asyncio.wait_for(verdict(), timeout=_REPLAY_VERDICT_SECONDS)
+            except asyncio.TimeoutError:
+                return None, "no verdict in time"
+        finally:
+            try:
+                await upstream.send(json.dumps({"type": "audio-end"}))
+            except Exception:
+                pass
+            await self._close(upstream)
+
     def status(self, recent: int = 20) -> dict[str, Any]:
         window = self.prints.window_speaker()
+        label = self._window_label()
         return {
-            "upstream": self.upstream_url,
+            "upstreams": dict(self.urls),
+            "verifies": {k: sorted(v) for k, v in self.verifies.items()},
             "settings": dict(self.prints.settings),
             "enrolling": {"speaker": window[1], "seconds_left": round(
                 self.prints.enrolling[2] - time.time())} if window else None,
+            "labelling": {"label": label, "seconds_left": round(
+                self.labelling[1] - time.time())} if label else None,
             "voiceprints": self.prints.stats(),
-            "recent": self.records[-recent:],
+            "comparison": self.comparison(),
+            "recent": self.records[-recent:] if recent else [],
         }
+
+
+def _describe_verdict(v: Verdict) -> str:
+    if v.verdict is None:
+        return "no verdict"
+    text = v.verdict
+    if v.reason:
+        text += f" ({v.reason})"
+    if v.ms is not None:
+        text += f" {v.ms:.0f} ms"
+    return text
 
 
 def _describe_view(view: Optional[SpeakerView]) -> str:
@@ -1024,11 +1160,9 @@ def _describe_view(view: Optional[SpeakerView]) -> str:
         return "not checked"
     if view.error:
         return f"– ({view.error})"
-    margin = f", margin {view.margin:.3f}" if view.margin is not None else ""
     if view.is_match:
-        return f"{view.speaker} d={view.distance:.3f} (th {view.threshold:.3f}{margin})"
-    return (f"no match, nearest {view.nearest} d={view.distance:.3f} "
-            f"(th {view.threshold:.3f}{margin})")
+        return f"{view.speaker} d={view.distance:.3f}"
+    return f"no match, nearest {view.nearest} d={view.distance:.3f}"
 
 
 async def run_wake_proxy(proxy: WakeProxy, host: str, port: int) -> None:
@@ -1042,8 +1176,9 @@ async def run_wake_proxy(proxy: WakeProxy, host: str, port: int) -> None:
         access_log=False, ws_max_size=16 * 1024 * 1024, proxy_headers=False,
     )
     server = uvicorn.Server(config)
-    _LOGGER.info("Wake word proxy on %s:%d → %s (mode %s)", host, port,
-                 proxy.upstream_url, proxy.prints.settings.get("mode"))
+    _LOGGER.info("Wake word proxy on %s:%d → %s (authority %s)", host, port,
+                 ", ".join(f"{k} {v}" for k, v in proxy.urls.items()),
+                 proxy.prints.settings.get("authority"))
     refresher = asyncio.create_task(proxy.keep_info_fresh())
     try:
         await server.serve()
@@ -1052,7 +1187,9 @@ async def run_wake_proxy(proxy: WakeProxy, host: str, port: int) -> None:
 
 
 __all__ = [
-    "MODES",
+    "DE",
+    "EN",
+    "LABELS",
     "RunRecord",
     "SpeakerTools",
     "SpeakerView",
@@ -1061,5 +1198,4 @@ __all__ = [
     "WakeProxy",
     "run_wake_proxy",
     "speaker_tools_for",
-    "would_decide",
 ]

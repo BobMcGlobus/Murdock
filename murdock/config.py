@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # keeping a copy of the wake word. Empty: off.
     wake_proxy_upstream: Optional[str] = Field(default=None)
     wake_proxy_port: int = Field(default=10900)
+    # Optional second verifier asked on every run (the German build of the
+    # app, voice_support_de/); compared in the log, authority if set so.
+    wake_proxy_upstream_de: Optional[str] = Field(default=None)
 
     # Paths
     data_dir: Path = Field(default=Path("/app/data"))

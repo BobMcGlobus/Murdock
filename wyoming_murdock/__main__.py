@@ -122,6 +122,7 @@ async def main() -> None:
 
         context.wake_proxy = WakeProxy(
             settings.wake_proxy_upstream,
+            secondary_url=settings.wake_proxy_upstream_de,
             data_dir=settings.data_dir,
             tools=speaker_tools_for(context),
         )
