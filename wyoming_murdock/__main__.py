@@ -118,12 +118,12 @@ async def main() -> None:
     wyoming_task = asyncio.create_task(server.run(handler_factory))
     wake_task = None
     if settings.wake_proxy_upstream:
-        from .wake_proxy import WakeProxy, run_wake_proxy, speaker_check_for
+        from .wake_proxy import WakeProxy, run_wake_proxy, speaker_tools_for
 
         context.wake_proxy = WakeProxy(
             settings.wake_proxy_upstream,
             data_dir=settings.data_dir,
-            speaker_check=speaker_check_for(context),
+            tools=speaker_tools_for(context),
         )
         # Not in the set awaited below: a proxy that cannot bind (port
         # taken) is logged and leaves the rest of Murdock running.

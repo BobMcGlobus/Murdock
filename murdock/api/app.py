@@ -23,6 +23,7 @@ from .routes_settings import router as settings_router
 from .routes_status import router as status_router
 from .routes_speakers import router as speakers_router
 from .routes_unknown import router as unknown_router
+from .routes_wake import router as wake_router
 
 _LOGGER = logging.getLogger("murdock.api")
 
@@ -51,6 +52,7 @@ def create_app(context: AppContext, auth: Optional[ApiAuth] = None) -> FastAPI:
     app.include_router(backup_router)
     app.include_router(integration_router)
     app.include_router(stt_services_router)
+    app.include_router(wake_router)
 
     @app.get("/api/health")
     async def health() -> dict:
