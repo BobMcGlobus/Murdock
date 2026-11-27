@@ -1,0 +1,10 @@
+Voice Support (Deutsch) builds the Voice Support app by the Open Home
+Foundation (https://github.com/OHF-Voice/app-voice-support), licensed under
+the Apache License, Version 2.0. The app's source is downloaded unchanged at
+build time; this directory adds a German wake word configuration
+(wake.de.yaml, derived from the app's wake.yaml), a start script and the
+build recipe.
+
+The German acoustic model (de_DE-zamia) and the Kaldi/OpenFST tools come
+from rhasspy-speech (https://huggingface.co/datasets/rhasspy/rhasspy-speech)
+under their own licenses.

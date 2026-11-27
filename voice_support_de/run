@@ -1,0 +1,39 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Voice Support (Deutsch): German wake word verification on :10900, for
+# Murdock's wake word proxy.
+# ==============================================================================
+cd /usr/src/voice || exit 1
+
+# The thresholds come from the add-on options, so calibrating needs a
+# restart, not a rebuild: they are not part of what the graphs are built on.
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+import yaml
+
+options = json.loads(Path("/data/options.json").read_text(encoding="utf-8"))
+path = Path("/usr/src/voice/wake.yaml")
+config = yaml.safe_load(path.read_text(encoding="utf-8"))
+defaults = config.setdefault("defaults", {})
+for key in ("theta_prefix", "theta_last", "theta_competitor"):
+    if options.get(key) is not None:
+        defaults[key] = float(options[key])
+path.write_text(
+    yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
+)
+print(
+    "Thresholds: "
+    + ", ".join(f"{k}={defaults.get(k)}" for k in ("theta_prefix", "theta_last", "theta_competitor"))
+)
+PY
+
+# Kaldi alone (Parakeet is English), no mDNS (Murdock knows where this is),
+# and the Kaldi alignment for where speech-to-text starts.
+args=(--host 0.0.0.0 --port 10900 --no-ctc --no-mdns --split kaldi)
+if bashio::config.true 'debug'; then
+    args+=(--debug)
+fi
+exec python3 -m voice "${args[@]}"

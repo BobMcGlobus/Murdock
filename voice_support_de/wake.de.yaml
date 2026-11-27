@@ -1,0 +1,142 @@
+---
+# German wake word verification for "Okay Nabu".
+#
+# The Voice Support app's own Kaldi verifier (https://github.com/OHF-Voice/
+# app-voice-support, Apache-2.0) with German acoustics: the de_DE-zamia model
+# from rhasspy-speech, "Okay Nabu" the way a German says it, and the German
+# phrases that sound like it. The method is unchanged -- four constrained
+# decodes of the 1.4 s before the detection, refused on `prefix`, `last` or
+# `confusable` -- see the app's wake.yaml for what each knob does.
+#
+# Pronunciations are in the zamia phone set (X-SAMPA, stress as a leading
+# apostrophe on the vowel): model/phones/nonsilence_phones.txt. Words below
+# that the lexicon has are taken from it; the rest are spelled out.
+#
+# The thresholds here are the app's English defaults. They are overwritten at
+# every start from the add-on options, so calibrating needs no rebuild: only
+# phrases, confusables and pronunciations are baked into the graphs.
+
+tools_dir: local/wake-kaldi-tools
+train_dir: var/wake-train
+max_window_seconds: 1.4
+resident_decoders: true
+
+decoder:
+  beam: 10.0
+  max_active: 700
+  lattice_beam: 1.0
+  groups:
+    - [kw, bg]
+    - [prefix, kwc]
+
+models:
+  de_DE-zamia:
+    directory: local/wake-kaldi-models/de_DE-zamia
+    language: de_DE
+
+defaults:
+  theta_prefix: 0.85
+  theta_last: 0.35
+  theta_competitor: 0.10
+
+wake_words:
+  okay_nabu:
+    model: de_DE-zamia
+    description: Okay Nabu (deutsch ausgesprochen)
+    names:
+      - ok_nabu
+      - okay nabu
+    phrases:
+      - okay nabu
+
+    pronunciations:
+      # The lexicon's "okay" is the English diphthong; Germans mostly say
+      # "okee". Both, with and without the glottal stop.
+      okay:
+        - "? O k 'e I"
+        - "? o k 'e:"
+        - "? O k 'e:"
+        - "o k 'e:"
+      # Long a as in "Kanu", short a, and the final vowel reduced.
+      nabu:
+        - "n 'a: b u:"
+        - "n 'a b u:"
+        - "n 'a: b u"
+        - "n a b 'u:"
+      # Near misses that are not German words, so not in the lexicon.
+      nadu: "n 'a: d u:"
+      nagu: "n 'a: g u:"
+      namu: "n 'a: m u:"
+      napu: "n 'a: p u:"
+      nabo: "n 'a: b o:"
+      mabu: "m 'a: b u:"
+      dabu: "d 'a: b u:"
+
+    # What must NOT be taken for the wake word: what is said in a German
+    # household or on German television that starts like "okay na...", plus
+    # the near misses of "nabu". A starting list -- calibrate on recorded
+    # wake words and false wakes, and drop any rival that is the closest
+    # match of more real wake words than false ones (it only costs recall).
+    confusables:
+      - okay na du
+      - okay nadu
+      - okay na gut
+      - okay na ja
+      - okay naja
+      - okay nanu
+      - okay na und
+      - okay na dann
+      - okay na klar
+      - okay na los
+      - okay nadel
+      - okay nabel
+      - okay nabe
+      - okay nagel
+      - okay nase
+      - okay narbe
+      - okay nana
+      - okay nadine
+      - okay nadja
+      - okay natur
+      - okay nahe
+      - okay nach
+      - okay nachher
+      - okay nachbar
+      - okay nacht
+      - okay napoleon
+      - okay nebel
+      - okay nobel
+      - okay nudel
+      - okay nummer
+      - okay nicht
+      - okay nie
+      - okay nett
+      - okay nur
+      - okay noch
+      - okay nochmal
+      - okay nun
+      - okay neu
+      - okay nein
+      - okay name
+      - okay now
+      - okay kanu
+      - okay tabu
+      - okay zebu
+      - okay kabel
+      - okay gabel
+      - okay baby
+      - okay mama
+      - okay papa
+      - okay oma
+      - okay opa
+      - okay danke
+      - okay dann
+      - okay gut
+      - okay also
+      - okay hallo
+      - okay nagu
+      - okay namu
+      - okay napu
+      - okay nabo
+      - okay mabu
+      - okay dabu

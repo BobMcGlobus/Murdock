@@ -1,0 +1,36 @@
+# Voice Support (Deutsch) — BETA, companion of Murdock's wake word proxy.
+#
+# The Voice Support app (https://github.com/OHF-Voice/app-voice-support,
+# Apache-2.0) built with a German acoustic model, so "Okay Nabu" is checked
+# the way a German says it. Murdock asks it next to the official app; it is
+# not announced to Home Assistant and not meant to be connected directly.
+name: Voice Support (Deutsch)
+version: "0.2.1-de1"
+slug: voice_support_de
+description: >-
+  BETA — German wake word check for "Okay Nabu" (the Voice Support app with
+  a German Kaldi model). Used by Murdock's wake word proxy.
+url: "https://github.com/BobMcGlobus/Murdock"
+stage: experimental
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+ports:
+  "10900/tcp": null
+ports_description:
+  "10900/tcp": "Wake word verification (internal, for Murdock)"
+# As upstream: each decode writes a 45 kB window file; keep it in memory.
+tmpfs: true
+options:
+  theta_prefix: 0.85
+  theta_last: 0.35
+  theta_competitor: 0.10
+  debug: false
+schema:
+  theta_prefix: float
+  theta_last: float
+  theta_competitor: float
+  debug: bool
