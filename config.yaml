@@ -12,7 +12,7 @@
 # optional language overrides. Everything else is editable live.
 
 name: Murdock (Beta)
-version: "0.15.0b4"
+version: "0.15.0b5"
 slug: murdock
 stage: experimental
 description: >-
@@ -79,6 +79,7 @@ options:
   # Beta: the stable add-on publishes the speakers; two would collide.
   mqtt_enabled: false
   wake_proxy_upstream: "http://core-voice-support:10900"
+  wake_proxy_upstream_de: "http://c60cc3c3-voice-support-de:10900"
 schema:
   # The STT options below only seed the first speech-to-text service on
   # the first start of 0.11 or later (or a fresh install). From then on,
@@ -123,3 +124,7 @@ schema:
   # to it on port 10900 and keeps a copy of the wake word. Point the Voice
   # support integration at this add-on to use it. Empty: off.
   wake_proxy_upstream: str?
+  # Optional second verifier, asked on every run next to the first: the
+  # German build of the app (add-on "Voice Support (Deutsch)"). Compared in
+  # the log; decides when the wake proxy's authority is set to "de".
+  wake_proxy_upstream_de: str?
